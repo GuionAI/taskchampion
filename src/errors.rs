@@ -38,7 +38,7 @@ other_error!(io::Error);
 other_error!(serde_json::Error);
 other_error!(tokio::sync::oneshot::error::RecvError);
 
-#[cfg(feature = "storage-sqlite")]
+#[cfg(any(feature = "storage-sqlite", feature = "storage-powersync"))]
 other_error!(rusqlite::Error);
 #[cfg(feature = "storage-sqlite")]
 other_error!(crate::storage::sqlite::SqliteError);
