@@ -4,7 +4,7 @@ use crate::storage::send_wrapper::{WrappedStorage, WrappedStorageTxn};
 use crate::storage::{TaskMap, VersionId, DEFAULT_BASE_VERSION};
 use anyhow::Context;
 use async_trait::async_trait;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::path::Path;
 use uuid::Uuid;
@@ -16,8 +16,47 @@ use super::extension::init_powersync_extension;
 
 const TS_FMT: &str = "%Y-%m-%d %H:%M:%S%.3f";
 
+/// Query tc_tags and tc_annotations for the given task UUID and inject them
+/// into the TaskMap as `tag_<name>` and `annotation_<epoch>` keys.
+fn merge_tags_annotations(
+    t: &rusqlite::Transaction<'_>,
+    task_id: &str,
+    task_map: &mut TaskMap,
+) -> Result<()> {
+    let mut tag_stmt = t
+        .prepare("SELECT name FROM tc_tags WHERE task_id = ?")
+        .context("Prepare tag query")?;
+    let tag_rows = tag_stmt
+        .query_map([task_id], |row| row.get::<_, String>(0))
+        .context("Query tags")?;
+    for name in tag_rows {
+        let name = name?;
+        task_map.insert(format!("tag_{name}"), String::new());
+    }
+
+    let mut ann_stmt = t
+        .prepare("SELECT entry_at, description FROM tc_annotations WHERE task_id = ?")
+        .context("Prepare annotation query")?;
+    let ann_rows = ann_stmt
+        .query_map([task_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .context("Query annotations")?;
+    for row in ann_rows {
+        let (entry_at_iso, description) = row?;
+        let dt = DateTime::parse_from_rfc3339(&entry_at_iso).map_err(|e| {
+            Error::Database(format!(
+                "Invalid annotation timestamp for task {task_id}: {entry_at_iso:?}: {e}"
+            ))
+        })?;
+        task_map.insert(format!("annotation_{}", dt.timestamp()), description);
+    }
+
+    Ok(())
+}
+
 pub(super) struct PowerSyncStorageInner {
-    conn: Connection,
+    pub(super) conn: Connection,
     user_id: Uuid,
 }
 
@@ -108,6 +147,20 @@ impl PowerSyncStorageInner {
                 user_id TEXT,
                 created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
             );
+            CREATE TABLE IF NOT EXISTS tc_tags (
+                id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL,
+                user_id TEXT,
+                name TEXT NOT NULL,
+                UNIQUE (task_id, name)
+            );
+            CREATE TABLE IF NOT EXISTS tc_annotations (
+                id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL,
+                user_id TEXT,
+                entry_at TEXT NOT NULL,
+                description TEXT NOT NULL
+            );
         ",
         )
         .context("Creating PowerSync test tables")?;
@@ -190,9 +243,14 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
         let raw_opt = t
             .query_row(&sql, [&uuid.to_string()], read_raw_task_row)
             .optional()?;
-        raw_opt
-            .map(|raw| raw_to_task(raw).map(|(_, task_map)| task_map))
-            .transpose()
+        match raw_opt {
+            None => Ok(None),
+            Some(raw) => {
+                let (_, mut task_map) = raw_to_task(raw)?;
+                merge_tags_annotations(t, &uuid.to_string(), &mut task_map)?;
+                Ok(Some(task_map))
+            }
+        }
     }
 
     async fn get_pending_tasks(&mut self) -> Result<Vec<(Uuid, TaskMap)>> {
@@ -204,7 +262,12 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
              LEFT JOIN projects p ON t.project_id = p.id
              WHERE ws.uuid IS NOT NULL"
         );
-        query_task_rows(t, &sql, [])
+        let mut tasks = query_task_rows(t, &sql, [])?;
+        for (uuid, task_map) in &mut tasks {
+            let uuid_str = uuid.to_string();
+            merge_tags_annotations(t, &uuid_str, task_map)?;
+        }
+        Ok(tasks)
     }
 
     async fn create_task(&mut self, uuid: Uuid) -> Result<bool> {
@@ -249,6 +312,43 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
             .remove("project")
             .map(|name| self.resolve_project_id(&name))
             .transpose()?;
+
+        // Extract tags (tag_<name> → "") before serializing data blob.
+        // Collect keys first to break the immutable borrow, then remove via mutable borrow.
+        let tag_names: Vec<String> = task_data
+            .keys()
+            .filter(|k| k.starts_with("tag_"))
+            .cloned()
+            .collect::<Vec<_>>()
+            .into_iter()
+            .filter_map(|k| {
+                task_data.remove(&k);
+                k.strip_prefix("tag_").map(String::from)
+            })
+            .collect();
+
+        // Extract annotations (annotation_<epoch> → description) before serializing data blob.
+        // Always remove annotation keys from task_data (even on error), then validate the epoch.
+        // An unparseable suffix is a data-integrity error — propagate rather than leave a
+        // stale key in the blob.
+        let annotation_keys: Vec<String> = task_data
+            .keys()
+            .filter(|k| k.starts_with("annotation_"))
+            .cloned()
+            .collect();
+        let annotations: Vec<(i64, String)> = annotation_keys
+            .into_iter()
+            .map(|k| {
+                let desc = task_data.remove(&k).expect("key collected from same map");
+                let epoch_str = k.strip_prefix("annotation_").unwrap();
+                let epoch: i64 = epoch_str.parse().map_err(|_| {
+                    Error::Database(format!(
+                        "Invalid annotation key {k:?}: epoch suffix is not an integer"
+                    ))
+                })?;
+                Ok((epoch, desc))
+            })
+            .collect::<Result<Vec<_>>>()?;
 
         let data_str = serde_json::to_string(&task_data)
             .map_err(|e| Error::Database(format!("Failed to serialize task data: {e}")))?;
@@ -319,6 +419,49 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
             )
             .context("Set task INSERT query")?;
         }
+
+        // Sync tags: delete all existing rows for this task, then insert current set.
+        let user_id_str = self.user_id.to_string();
+        t.execute("DELETE FROM tc_tags WHERE task_id = ?", [&uuid_str])
+            .context("Delete existing tags")?;
+        for tag_name in &tag_names {
+            t.execute(
+                "INSERT INTO tc_tags (id, task_id, user_id, name) VALUES (?, ?, ?, ?)",
+                params![
+                    &Uuid::now_v7().to_string(),
+                    &uuid_str,
+                    &user_id_str,
+                    tag_name,
+                ],
+            )
+            .context("Insert tag")?;
+        }
+
+        // Sync annotations: delete all existing rows for this task, then insert current set.
+        t.execute(
+            "DELETE FROM tc_annotations WHERE task_id = ?",
+            [&uuid_str],
+        )
+        .context("Delete existing annotations")?;
+        for (epoch, description) in &annotations {
+            let entry_at = DateTime::from_timestamp(*epoch, 0)
+                .map(|dt| dt.to_rfc3339())
+                .ok_or_else(|| {
+                    Error::Database(format!("Invalid annotation timestamp: {epoch}"))
+                })?;
+            t.execute(
+                "INSERT INTO tc_annotations (id, task_id, user_id, entry_at, description) VALUES (?, ?, ?, ?, ?)",
+                params![
+                    &Uuid::now_v7().to_string(),
+                    &uuid_str,
+                    &user_id_str,
+                    &entry_at,
+                    description,
+                ],
+            )
+            .context("Insert annotation")?;
+        }
+
         Ok(())
     }
 
@@ -335,6 +478,10 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
             )
             .context("Delete task existence check")?;
         if exists {
+            t.execute("DELETE FROM tc_tags WHERE task_id = ?", [&uuid_str])
+                .context("Delete task tags")?;
+            t.execute("DELETE FROM tc_annotations WHERE task_id = ?", [&uuid_str])
+                .context("Delete task annotations")?;
             t.execute("DELETE FROM tc_tasks WHERE id = ?", [&uuid_str])
                 .context("Delete task query")?;
         }
@@ -348,7 +495,12 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
              FROM tc_tasks t
              LEFT JOIN projects p ON t.project_id = p.id"
         );
-        query_task_rows(t, &sql, [])
+        let mut tasks = query_task_rows(t, &sql, [])?;
+        for (uuid, task_map) in &mut tasks {
+            let uuid_str = uuid.to_string();
+            merge_tags_annotations(t, &uuid_str, task_map)?;
+        }
+        Ok(tasks)
     }
 
     async fn all_task_uuids(&mut self) -> Result<Vec<Uuid>> {
@@ -484,3 +636,4 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
         Ok(())
     }
 }
+

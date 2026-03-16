@@ -42,6 +42,7 @@ impl Storage for PowerSyncStorage {
 mod test {
     use super::*;
     use crate::errors::Result;
+    use crate::storage::send_wrapper::{WrappedStorage, WrappedStorageTxn};
     use crate::storage::TaskMap;
 
     async fn storage() -> Result<PowerSyncStorage> {
@@ -134,6 +135,164 @@ mod test {
         Ok(())
     }
 
+    /// Verify that tag_* keys round-trip through set_task/get_task via tc_tags table.
+    #[tokio::test]
+    async fn test_tags_round_trip() -> Result<()> {
+        let mut storage = PowerSyncStorageInner::new_for_test()?;
+        let uuid = Uuid::new_v4();
+
+        let mut txn = storage.txn().await?;
+        txn.create_task(uuid).await?;
+        let mut task = TaskMap::new();
+        task.insert("status".into(), "pending".into());
+        task.insert("description".into(), "test task".into());
+        task.insert("tag_work".into(), String::new());
+        task.insert("tag_urgent".into(), String::new());
+        txn.set_task(uuid, task).await?;
+        txn.commit().await?;
+        drop(txn);
+
+        let mut txn = storage.txn().await?;
+        let task = txn.get_task(uuid).await?.unwrap();
+        assert_eq!(task.get("tag_work").map(String::as_str), Some(""));
+        assert_eq!(task.get("tag_urgent").map(String::as_str), Some(""));
+        txn.commit().await?;
+        drop(txn);
+
+        // Update: remove tag_urgent, add tag_next
+        let mut txn = storage.txn().await?;
+        let mut task = TaskMap::new();
+        task.insert("status".into(), "pending".into());
+        task.insert("description".into(), "test task".into());
+        task.insert("tag_work".into(), String::new());
+        task.insert("tag_next".into(), String::new());
+        txn.set_task(uuid, task).await?;
+        txn.commit().await?;
+        drop(txn);
+
+        let mut txn = storage.txn().await?;
+        let task = txn.get_task(uuid).await?.unwrap();
+        assert_eq!(task.get("tag_work").map(String::as_str), Some(""));
+        assert_eq!(task.get("tag_next").map(String::as_str), Some(""));
+        assert!(task.get("tag_urgent").is_none(), "tag_urgent should be removed");
+        txn.commit().await?;
+        Ok(())
+    }
+
+    /// Verify that annotation_* keys round-trip through set_task/get_task via tc_annotations table.
+    #[tokio::test]
+    async fn test_annotations_round_trip() -> Result<()> {
+        let mut storage = PowerSyncStorageInner::new_for_test()?;
+        let uuid = Uuid::new_v4();
+
+        let mut txn = storage.txn().await?;
+        txn.create_task(uuid).await?;
+        let mut task = TaskMap::new();
+        task.insert("status".into(), "pending".into());
+        task.insert("description".into(), "test task".into());
+        task.insert("annotation_1635301873".into(), "pick up groceries".into());
+        task.insert("annotation_1635301883".into(), "left a message".into());
+        txn.set_task(uuid, task).await?;
+        txn.commit().await?;
+        drop(txn);
+
+        let mut txn = storage.txn().await?;
+        let task = txn.get_task(uuid).await?.unwrap();
+        assert_eq!(
+            task.get("annotation_1635301873").map(String::as_str),
+            Some("pick up groceries")
+        );
+        assert_eq!(
+            task.get("annotation_1635301883").map(String::as_str),
+            Some("left a message")
+        );
+        txn.commit().await?;
+        Ok(())
+    }
+
+    /// Verify that tag_* and annotation_* keys are excluded from the raw `data` blob in tc_tasks.
+    #[tokio::test]
+    async fn test_data_blob_excludes_tags_and_annotations() -> Result<()> {
+        let mut storage = PowerSyncStorageInner::new_for_test()?;
+        let uuid = Uuid::new_v4();
+
+        {
+            let mut txn = storage.txn().await?;
+            txn.create_task(uuid).await?;
+            let mut task = TaskMap::new();
+            task.insert("status".into(), "pending".into());
+            task.insert("tag_work".into(), String::new());
+            task.insert("annotation_1635301873".into(), "note".into());
+            task.insert("dep_some-uuid".into(), String::new());
+            task.insert("my_uda".into(), "custom value".into());
+            txn.set_task(uuid, task).await?;
+            txn.commit().await?;
+        }
+
+        // Query raw data column directly — bypasses get_task merge logic.
+        let data_str: String = storage.conn.query_row(
+            "SELECT data FROM tc_tasks WHERE id = ?",
+            [&uuid.to_string()],
+            |r| r.get(0),
+        )?;
+        let data_map: serde_json::Value = serde_json::from_str(&data_str)
+            .map_err(|e| crate::errors::Error::Database(e.to_string()))?;
+        let obj = data_map.as_object().unwrap();
+
+        assert!(!obj.keys().any(|k| k.starts_with("tag_")),
+            "tag_* keys should not be in data blob, got: {obj:?}");
+        assert!(!obj.keys().any(|k| k.starts_with("annotation_")),
+            "annotation_* keys should not be in data blob, got: {obj:?}");
+        assert!(obj.contains_key("dep_some-uuid"), "dep_* should remain in data blob");
+        assert!(obj.contains_key("my_uda"), "UDAs should remain in data blob");
+        Ok(())
+    }
+
+    /// Verify that deleting a task also cleans tc_tags and tc_annotations rows.
+    #[tokio::test]
+    async fn test_delete_task_cleans_tags_and_annotations() -> Result<()> {
+        let mut storage = PowerSyncStorageInner::new_for_test()?;
+        let uuid = Uuid::new_v4();
+
+        {
+            let mut txn = storage.txn().await?;
+            txn.create_task(uuid).await?;
+            let mut task = TaskMap::new();
+            task.insert("status".into(), "pending".into());
+            task.insert("tag_work".into(), String::new());
+            task.insert("annotation_1635301873".into(), "note".into());
+            txn.set_task(uuid, task).await?;
+            txn.commit().await?;
+        }
+
+        {
+            let mut txn = storage.txn().await?;
+            assert!(txn.delete_task(uuid).await?);
+            txn.commit().await?;
+        }
+
+        {
+            let mut txn = storage.txn().await?;
+            assert!(txn.get_task(uuid).await?.is_none());
+            txn.commit().await?;
+        }
+
+        let tag_count: i64 = storage.conn.query_row(
+            "SELECT COUNT(*) FROM tc_tags WHERE task_id = ?",
+            [&uuid.to_string()],
+            |r| r.get(0),
+        )?;
+        assert_eq!(tag_count, 0, "tags should be deleted");
+
+        let ann_count: i64 = storage.conn.query_row(
+            "SELECT COUNT(*) FROM tc_annotations WHERE task_id = ?",
+            [&uuid.to_string()],
+            |r| r.get(0),
+        )?;
+        assert_eq!(ann_count, 0, "annotations should be deleted");
+        Ok(())
+    }
+
     /// Verify that the project name round-trips: set_task stores the name in the
     /// projects table, and get_task JOINs it back into the returned TaskMap.
     #[tokio::test]
@@ -164,6 +323,59 @@ mod test {
         let mut txn = storage.txn().await?;
         let got2 = txn.get_task(uuid2).await?.expect("task2 should exist");
         assert_eq!(got2.get("project").map(String::as_str), Some("home"));
+        txn.commit().await?;
+        Ok(())
+    }
+
+    /// Verify that all_tasks merges tag_* and annotation_* from their side tables.
+    /// Covers the bulk-read merge path independently of get_task.
+    #[tokio::test]
+    async fn test_all_tasks_includes_tags_and_annotations() -> Result<()> {
+        let mut storage = PowerSyncStorageInner::new_for_test()?;
+        let uuid = Uuid::new_v4();
+
+        {
+            let mut txn = storage.txn().await?;
+            txn.create_task(uuid).await?;
+            let mut task = TaskMap::new();
+            task.insert("status".into(), "pending".into());
+            task.insert("tag_home".into(), String::new());
+            task.insert("annotation_1635301873".into(), "buy milk".into());
+            txn.set_task(uuid, task).await?;
+            txn.commit().await?;
+        }
+
+        let mut txn = storage.txn().await?;
+        let all = txn.all_tasks().await?;
+        txn.commit().await?;
+
+        let (_, task_map) = all.into_iter().find(|(u, _)| *u == uuid).expect("task not found");
+        assert_eq!(task_map.get("tag_home").map(String::as_str), Some(""));
+        assert_eq!(
+            task_map.get("annotation_1635301873").map(String::as_str),
+            Some("buy milk")
+        );
+        Ok(())
+    }
+
+    /// Verify that set_task returns an error for an annotation key with a non-integer epoch suffix
+    /// rather than silently leaving it in the data blob.
+    #[tokio::test]
+    async fn test_set_task_rejects_invalid_annotation_epoch() -> Result<()> {
+        let mut storage = PowerSyncStorageInner::new_for_test()?;
+        let uuid = Uuid::new_v4();
+
+        let mut txn = storage.txn().await?;
+        txn.create_task(uuid).await?;
+        let mut task = TaskMap::new();
+        task.insert("annotation_not_an_epoch".into(), "oops".into());
+        let result = txn.set_task(uuid, task).await;
+        assert!(result.is_err(), "expected error for non-integer annotation epoch");
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("epoch suffix is not an integer"),
+            "unexpected error message: {msg}"
+        );
         txn.commit().await?;
         Ok(())
     }
