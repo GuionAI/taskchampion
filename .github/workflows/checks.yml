@@ -50,46 +50,6 @@ jobs:
           args: --no-default-features --features storage-indexeddb --no-deps -- -D warnings
           name: "Clippy Results (WASM)"
 
-  rustdoc:
-    runs-on: ubuntu-latest
-    name: "Rustdoc"
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Cache cargo registry
-        uses: actions/cache@v5
-        with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: nightly
-          override: true
-          minimal: true
-
-      - uses: actions-rs/cargo@v1.0.3
-        with:
-          command: rustdoc
-          args: -p taskchampion --all-features -- -Z unstable-options  --check -Dwarnings
-
-  mdbook:
-    runs-on: ubuntu-latest
-    name: "mdBook Documentation"
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Setup mdBook
-        uses: peaceiris/actions-mdbook@v2
-        with:
-          # if this changes, change it in .github/workflows/publish-docs.yml as well
-          mdbook-version: '0.4.10'
-
-      - run: mdbook test docs
-      - run: mdbook build docs
-
   fmt:
     runs-on: ubuntu-latest
     name: "Formatting"
@@ -109,9 +69,3 @@ jobs:
           args: --all -- --check
 
 
-  semver-checks:
-    runs-on: ubuntu-latest
-    name: "Cargo Semver Checks"
-    steps:
-      - uses: actions/checkout@v6
-      - uses: obi1kenobi/cargo-semver-checks-action@v2

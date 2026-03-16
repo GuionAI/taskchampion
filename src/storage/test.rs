@@ -129,6 +129,64 @@ macro_rules! storage_tests {
 }
 pub(crate) use storage_tests;
 
+/// Subset of storage tests for backends that don't use TC's sync protocol or
+/// working-set numbering (e.g. PowerSync, where an external daemon handles sync
+/// and working-set numbers are not meaningful).
+macro_rules! storage_tests_no_sync {
+    ($storage:expr) => {
+        #[tokio::test]
+        async fn drop_transaction() -> $crate::errors::Result<()> {
+            $crate::storage::test::drop_transaction($storage).await
+        }
+
+        #[tokio::test]
+        async fn create() -> $crate::errors::Result<()> {
+            $crate::storage::test::create($storage).await
+        }
+
+        #[tokio::test]
+        async fn create_exists() -> $crate::errors::Result<()> {
+            $crate::storage::test::create_exists($storage).await
+        }
+
+        #[tokio::test]
+        async fn get_missing() -> $crate::errors::Result<()> {
+            $crate::storage::test::get_missing($storage).await
+        }
+
+        #[tokio::test]
+        async fn set_task() -> $crate::errors::Result<()> {
+            $crate::storage::test::set_task($storage).await
+        }
+
+        #[tokio::test]
+        async fn delete_task_missing() -> $crate::errors::Result<()> {
+            $crate::storage::test::delete_task_missing($storage).await
+        }
+
+        #[tokio::test]
+        async fn delete_task_exists() -> $crate::errors::Result<()> {
+            $crate::storage::test::delete_task_exists($storage).await
+        }
+
+        #[tokio::test]
+        async fn all_tasks_empty() -> $crate::errors::Result<()> {
+            $crate::storage::test::all_tasks_empty($storage).await
+        }
+
+        #[tokio::test]
+        async fn all_tasks_and_uuids() -> $crate::errors::Result<()> {
+            $crate::storage::test::all_tasks_and_uuids($storage).await
+        }
+
+        #[tokio::test]
+        async fn task_operations() -> $crate::errors::Result<()> {
+            $crate::storage::test::task_operations($storage).await
+        }
+    };
+}
+pub(crate) use storage_tests_no_sync;
+
 /// Invoke storage_tests_base with the `#[wasm_bindgen_test]` macro.
 #[cfg(target_arch = "wasm32")]
 macro_rules! storage_tests_wasm {

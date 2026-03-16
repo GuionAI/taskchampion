@@ -18,9 +18,9 @@ pub struct PowerSyncStorage(Wrapper);
 impl PowerSyncStorage {
     /// Open a PowerSync-managed database at `db_path` for the given `user_id`.
     ///
-    /// The `tc_tasks` and `tc_operations` tables must already exist (created by
-    /// PowerSync from its schema definition). Local-only tables (`tc_working_set`,
-    /// `tc_sync_meta`, `tc_operations_sync`) are created automatically.
+    /// The `tc_tasks` and `tc_operations` views must already exist (created by
+    /// PowerSync from its schema definition). Local-only tables (`tc_sync_meta`)
+    /// are created automatically.
     pub async fn new(db_path: &Path, user_id: Uuid) -> Result<Self> {
         let path = db_path.to_path_buf();
         Ok(Self(
@@ -48,7 +48,7 @@ mod test {
         ))
     }
 
-    crate::storage::test::storage_tests!(storage().await?);
+    crate::storage::test::storage_tests_no_sync!(storage().await?);
 
     /// Verify that promoted string columns (status, description, priority, parent) survive
     /// a set_task / get_task round-trip via the dedicated columns, not just the JSON blob.
@@ -95,7 +95,15 @@ mod test {
         let uuid = Uuid::new_v4();
         let epoch = "1724612771";
         let mut task: TaskMap = TaskMap::new();
-        for key in ["entry", "modified", "due", "scheduled", "start", "end", "wait"] {
+        for key in [
+            "entry",
+            "modified",
+            "due",
+            "scheduled",
+            "start",
+            "end",
+            "wait",
+        ] {
             task.insert(key.into(), epoch.into());
         }
 
@@ -105,7 +113,15 @@ mod test {
 
         let mut txn = storage.txn().await?;
         let got = txn.get_task(uuid).await?.expect("task should exist");
-        for key in ["entry", "modified", "due", "scheduled", "start", "end", "wait"] {
+        for key in [
+            "entry",
+            "modified",
+            "due",
+            "scheduled",
+            "start",
+            "end",
+            "wait",
+        ] {
             assert_eq!(
                 got.get(key).map(String::as_str),
                 Some(epoch),
