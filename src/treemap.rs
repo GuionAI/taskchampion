@@ -22,6 +22,9 @@ use crate::task::{Status, Task};
 ///
 /// Check [`TreeMap::had_invalid_data`] after construction to detect corrupted
 /// parent UUID values in the task set.
+///
+/// `Clone` is derived for use by downstream consumers (e.g., tw tree subcommands).
+#[derive(Clone)]
 pub struct TreeMap {
     children: HashMap<Uuid, Vec<Uuid>>,
     parent: HashMap<Uuid, Uuid>,
