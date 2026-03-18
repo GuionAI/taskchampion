@@ -29,6 +29,14 @@ impl PowerSyncStorage {
             Wrapper::new(async move || PowerSyncStorageInner::new(&path, user_id)).await?,
         ))
     }
+
+    /// Create an in-memory PowerSyncStorage with all required tables for testing.
+    #[cfg(test)]
+    pub async fn new_for_test() -> Result<Self> {
+        Ok(Self(
+            Wrapper::new(async || PowerSyncStorageInner::new_for_test()).await?,
+        ))
+    }
 }
 
 #[async_trait]
@@ -46,9 +54,7 @@ mod test {
     use crate::storage::TaskMap;
 
     async fn storage() -> Result<PowerSyncStorage> {
-        Ok(PowerSyncStorage(
-            Wrapper::new(async || PowerSyncStorageInner::new_for_test()).await?,
-        ))
+        PowerSyncStorage::new_for_test().await
     }
 
     crate::storage::test::storage_tests_no_sync!(storage().await?);
