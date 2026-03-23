@@ -1,6 +1,6 @@
 This crate implements the core of TaskChampion, the [replica](crate::Replica).
 
-Users of this crate can manipulate a task database using this API, including synchronizing that task database with others via a synchronization server.
+Users of this crate can manipulate a task database using this API.
 
 Example uses of this crate:
  * user interfaces for task management, such as mobile apps, web apps, or command-line interfaces
@@ -9,9 +9,7 @@ Example uses of this crate:
 
 # Replica
 
-A TaskChampion replica is a local copy of a user's task data.  As the name suggests, several
-replicas of the same data can exist (such as on a user's laptop and on their phone) and can
-synchronize with one another.
+A TaskChampion replica is a local copy of a user's task data.
 
 Replicas are accessed using the [`Replica`] type.
 
@@ -22,43 +20,27 @@ Replicas access the task database via a [storage object](crate::storage::Storage
 The [`storage`] module supports pluggable storage for a replica's data.
 An implementation is provided, but users of this crate can provide their own implementation as well.
 
-# Server
-
-Replica synchronization takes place against a server.
-Create a server with [`ServerConfig`].
-
-The [`server`] module defines the interface a server must meet.
-Several server implementations are included, and users can define their own implementations.
-
 # Example
 
 ```rust
-# #[cfg(all(feature = "storage-sqlite", feature = "server-local"))]
-# {
-# use taskchampion::{storage::AccessMode, ServerConfig, Replica, SqliteStorage};
-# use tempfile::TempDir;
+# use taskchampion::chrono::Utc;
+# use taskchampion::{Operations, Replica, Status, Uuid};
+# use taskchampion::storage::inmemory::InMemoryStorage;
+# #[tokio::main(flavor = "current_thread")]
 # async fn main() -> anyhow::Result<()> {
-# let taskdb_dir = TempDir::new()?;
-# let taskdb_dir = taskdb_dir.path().to_path_buf();
-# let server_dir = TempDir::new()?;
-# let server_dir = server_dir.path().to_path_buf();
-// Create a new Replica, storing data on disk.
-let storage = SqliteStorage::new(
-  taskdb_dir,
-  AccessMode::ReadWrite,
-  true,
-).await?;
-let mut replica = Replica::new(storage);
+# let mut replica = Replica::new(InMemoryStorage::new());
+// Create a new task, recording the required operations.
+let mut ops = Operations::new();
+let uuid = Uuid::new_v4();
+let mut t = replica.create_task(uuid, &mut ops).await?;
+t.set_description("my first task".into(), &mut ops)?;
+t.set_status(Status::Pending, &mut ops)?;
+t.set_entry(Some(Utc::now()), &mut ops)?;
 
-// Set up a local, on-disk server.
-let server_config = ServerConfig::Local { server_dir };
-let mut server = server_config.into_server().await?;
-
-// Sync to that server.
-replica.sync(&mut server, true).await?;
+// Commit those operations to storage.
+replica.commit_operations(ops).await?;
 #
 # Ok(())
-# }
 # }
 ```
 
@@ -66,36 +48,11 @@ replica.sync(&mut server, true).await?;
 
 Support for some optional functionality is controlled by feature flags.
 
- * `server-aws` - sync to Amazon Web Services
- * `server-gcp` - sync to Google Cloud Platform
- * `server-sync` - sync to the taskchampion-sync-server
- * `server-local` - sync to a local file
- * `sync` - enables all of the sync features above
- * `storage-indexeddb` - store task data in the browser using IndexedDB (WASM only)
- * `storage-sqlite` - store task data locally in SQLite
- * `storage` - enables all of the storage features above except `storage-indexeddb`
+ * `storage-powersync` - store task data using PowerSync-compatible SQLite
  * `bundled` - activates bundling system libraries like sqlite
- * `tls-webpki-roots` - use TLS roots bundled with the library, instead of reading them from
-   system configuration.
- * `tls-native-roots` - use native (system) TLS roots, instead of those bundled with rustls.
-   If both `tls-webpki-roots` and `tls-native-roots` are given, `tls-native-roots` takes
-   precedence. At least one of the `tls-*-roots` features must be enabled to support any
-   of the HTTPS-based `server-*` features.
+ * `test-utils` - expose `*_for_test()` constructors for use in external crate tests
 
-By default, `sync`, `storage`, `bundled`, and `tls-webpki-roots` are enabled.
-
-# WASM Support
-
-TaskChampion can be built for WASM with the usual WASM tools, such as
-`wasm-pack`. Only the following features are supported:
-
- * `server-sync` - communicate with the sync server using the Fetch API
- * `storage-indexeddb` - store task data in the browser using IndexedDB (WASM only)
-
-# See Also
-
-See the [TaskChampion Book](http://gothenburgbitfactory.github.io/taskchampion)
-for more information about the design and usage of the tool.
+By default, `storage-powersync` and `bundled` are enabled.
 
 # Minimum Supported Rust Version (MSRV)
 

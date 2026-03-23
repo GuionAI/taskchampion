@@ -1,7 +1,7 @@
 use super::apply;
+use super::op::SyncOp;
 use crate::errors::Result;
 use crate::operation::{Operation, Operations};
-use crate::server::SyncOp;
 use crate::storage::StorageTxn;
 use chrono::Utc;
 use log::{debug, info, trace};

@@ -1,7 +1,7 @@
 use crate::errors::{Error, Result};
 use crate::operation::Operation;
 use crate::storage::send_wrapper::{WrappedStorage, WrappedStorageTxn};
-use crate::storage::{TaskMap, VersionId, DEFAULT_BASE_VERSION};
+use crate::storage::TaskMap;
 use anyhow::Context;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -533,14 +533,6 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
             .collect()
     }
 
-    async fn base_version(&mut self) -> Result<VersionId> {
-        Ok(DEFAULT_BASE_VERSION)
-    }
-
-    async fn set_base_version(&mut self, _version: VersionId) -> Result<()> {
-        Ok(())
-    }
-
     async fn get_task_operations(&mut self, uuid: Uuid) -> Result<Vec<Operation>> {
         // tc_operations has no UUID column (schema is PowerSync-managed).
         // Filter in memory after deserializing; acceptable for the expected operation count.
@@ -561,14 +553,9 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
             .collect()
     }
 
-    // PowerSync handles sync externally via flicknote-sync; these methods are no-ops.
-
+    // PowerSync handles sync externally; unsynced_operations returns empty.
     async fn unsynced_operations(&mut self) -> Result<Vec<Operation>> {
         Ok(vec![])
-    }
-
-    async fn num_unsynced_operations(&mut self) -> Result<usize> {
-        Ok(0)
     }
 
     async fn add_operation(&mut self, op: Operation) -> Result<()> {
@@ -622,10 +609,6 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
         let t = self.get_txn()?;
         t.execute("DELETE FROM tc_operations WHERE id = ?", [&last_id])
             .context("Remove operation")?;
-        Ok(())
-    }
-
-    async fn sync_complete(&mut self) -> Result<()> {
         Ok(())
     }
 

@@ -1,7 +1,7 @@
 use super::{WrappedStorage, WrappedStorageTxn};
 use crate::errors::Result;
 use crate::operation::Operation;
-use crate::storage::{TaskMap, VersionId};
+use crate::storage::TaskMap;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
@@ -23,14 +23,10 @@ pub(super) enum TxnMessage {
     DeleteTask(Uuid, oneshot::Sender<Result<bool>>),
     AllTasks(oneshot::Sender<Result<Vec<(Uuid, TaskMap)>>>),
     AllTaskUuids(oneshot::Sender<Result<Vec<Uuid>>>),
-    BaseVersion(oneshot::Sender<Result<VersionId>>),
-    SetBaseVersion(VersionId, oneshot::Sender<Result<()>>),
     GetTaskOperations(Uuid, oneshot::Sender<Result<Vec<Operation>>>),
     UnsyncedOperations(oneshot::Sender<Result<Vec<Operation>>>),
-    NumUnsyncedOperations(oneshot::Sender<Result<usize>>),
     AddOperation(Operation, oneshot::Sender<Result<()>>),
     RemoveOperation(Operation, oneshot::Sender<Result<()>>),
-    SyncComplete(oneshot::Sender<Result<()>>),
     IsEmpty(oneshot::Sender<Result<bool>>),
 }
 
@@ -103,29 +99,17 @@ impl<S: WrappedStorage> ActorImpl<S> {
                 TxnMessage::AllTaskUuids(resp) => {
                     let _ = resp.send(txn.all_task_uuids().await);
                 }
-                TxnMessage::BaseVersion(resp) => {
-                    let _ = resp.send(txn.base_version().await);
-                }
-                TxnMessage::SetBaseVersion(v, resp) => {
-                    let _ = resp.send(txn.set_base_version(v).await);
-                }
                 TxnMessage::GetTaskOperations(u, resp) => {
                     let _ = resp.send(txn.get_task_operations(u).await);
                 }
                 TxnMessage::UnsyncedOperations(resp) => {
                     let _ = resp.send(txn.unsynced_operations().await);
                 }
-                TxnMessage::NumUnsyncedOperations(resp) => {
-                    let _ = resp.send(txn.num_unsynced_operations().await);
-                }
                 TxnMessage::AddOperation(o, resp) => {
                     let _ = resp.send(txn.add_operation(o).await);
                 }
                 TxnMessage::RemoveOperation(o, resp) => {
                     let _ = resp.send(txn.remove_operation(o).await);
-                }
-                TxnMessage::SyncComplete(resp) => {
-                    let _ = resp.send(txn.sync_complete().await);
                 }
                 TxnMessage::IsEmpty(resp) => {
                     let _ = resp.send(txn.is_empty().await);

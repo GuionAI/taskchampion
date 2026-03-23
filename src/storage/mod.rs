@@ -16,23 +16,15 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 mod config;
-#[cfg(all(target_arch = "wasm32", feature = "storage-indexeddb"))]
-pub mod indexeddb;
 pub mod inmemory;
 #[cfg(feature = "storage-powersync")]
 pub mod powersync;
-#[cfg(feature = "storage-sqlite")]
-pub mod sqlite;
 #[cfg(test)]
 mod test;
 
 pub use config::AccessMode;
 
-#[cfg(any(
-    feature = "storage-sqlite",
-    feature = "storage-powersync",
-    all(target_arch = "wasm32", feature = "storage-indexeddb")
-))]
+#[cfg(feature = "storage-powersync")]
 mod send_wrapper;
 
 #[doc(hidden)]
@@ -50,12 +42,6 @@ pub(crate) fn taskmap_with(mut properties: Vec<(String, String)>) -> TaskMap {
     }
     rv
 }
-
-/// The type of VersionIds
-use crate::server::VersionId;
-
-/// The default for base_version, if none exists in the DB.
-const DEFAULT_BASE_VERSION: Uuid = crate::server::NIL_VERSION_ID;
 
 /// A Storage transaction, in which storage operations are performed.
 ///
@@ -95,23 +81,12 @@ pub trait StorageTxn: Send {
     /// Get the uuids of all tasks in the storage, in undefined order.
     async fn all_task_uuids(&mut self) -> Result<Vec<Uuid>>;
 
-    /// Get the current base_version for this storage -- the last version synced from the server.
-    /// If no version has been set, this returns the nil version.
-    async fn base_version(&mut self) -> Result<VersionId>;
-
-    /// Set the current base_version for this storage.
-    async fn set_base_version(&mut self, version: VersionId) -> Result<()>;
-
     /// Get the set of operations for the given task.
     async fn get_task_operations(&mut self, uuid: Uuid) -> Result<Vec<Operation>>;
 
     /// Get the current set of outstanding operations (operations that have not been synced to the
     /// server yet)
     async fn unsynced_operations(&mut self) -> Result<Vec<Operation>>;
-
-    /// Get the current set of outstanding operations (operations that have not been synced to the
-    /// server yet)
-    async fn num_unsynced_operations(&mut self) -> Result<usize>;
 
     /// Add an operation to the end of the list of operations in the storage.  Note that this
     /// merely *stores* the operation; it is up to the TaskDb to apply it.
@@ -122,16 +97,11 @@ pub trait StorageTxn: Send {
     /// `add_operation` this only affects the list of operations.
     async fn remove_operation(&mut self, op: Operation) -> Result<()>;
 
-    /// A sync has been completed, so all operations should be marked as synced. The storage
-    /// may perform additional cleanup at this time.
-    async fn sync_complete(&mut self) -> Result<()>;
-
     /// Check whether this storage is entirely empty
     #[allow(clippy::wrong_self_convention)] // mut is required here for storage access
     async fn is_empty(&mut self) -> Result<bool> {
         let mut empty = true;
         empty = empty && self.all_tasks().await?.is_empty();
-        empty = empty && self.base_version().await? == Uuid::nil();
         empty = empty && self.unsynced_operations().await?.is_empty();
         Ok(empty)
     }

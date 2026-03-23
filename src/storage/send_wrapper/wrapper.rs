@@ -2,7 +2,7 @@ use super::actor::{ActorImpl, ActorMessage, TxnMessage};
 use super::WrappedStorage;
 use crate::errors::Result;
 use crate::operation::Operation;
-use crate::storage::{Storage, StorageTxn, TaskMap, VersionId};
+use crate::storage::{Storage, StorageTxn, TaskMap};
 use async_trait::async_trait;
 use std::future::Future;
 use tokio::sync::{mpsc, oneshot};
@@ -14,13 +14,10 @@ use uuid::Uuid;
 /// Async runtimes like Tokio can move a future between threads to support efficient execution.
 /// This requires the future to also implement `Send`. For most purposes, this is not an issue, but
 /// a few types are `!Send` and any async function handling such types are also `!Send`.
-///
-/// On WASM, the wrapped storage runs in an async task, but not in a thread.
 pub(in crate::storage) struct Wrapper {
     // Both fields in this struct are `Option<..>` to allow them to be dropped individually
     // in `Wrapper::drop`.
     sender: Option<mpsc::UnboundedSender<ActorMessage>>,
-    #[cfg(not(target_arch = "wasm32"))]
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -56,15 +53,7 @@ impl Wrapper {
             }
         };
 
-        // On WASM, we do not have threads, so spawn the constructor in the current thread.
-        #[cfg(target_arch = "wasm32")]
-        {
-            wasm_bindgen_futures::spawn_local(in_thread(init_sender));
-        }
-
-        // Otherwise, spawn a new thread, and within that a local Tokio RT that can handle !Send
-        // futures.
-        #[cfg(not(target_arch = "wasm32"))]
+        // Spawn a new thread, and within that a local Tokio RT that can handle !Send futures.
         let thread = {
             use std::thread;
             use tokio::runtime;
@@ -85,7 +74,6 @@ impl Wrapper {
         init_receiver.await??;
         Ok(Self {
             sender: Some(sender),
-            #[cfg(not(target_arch = "wasm32"))]
             thread: Some(thread),
         })
     }
@@ -107,7 +95,6 @@ impl Storage for Wrapper {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl Drop for Wrapper {
     fn drop(&mut self) {
         // Deleting the sender signals to the actor thread that it should drop the
@@ -115,7 +102,15 @@ impl Drop for Wrapper {
         self.sender = None;
         // Wait for the thread to terminate, indicating that the wrapped storage has
         // been fully dropped.
-        let _ = self.thread.take().expect("thread joined twice").join();
+        if self
+            .thread
+            .take()
+            .expect("thread joined twice")
+            .join()
+            .is_err()
+        {
+            log::warn!("Wrapper: actor thread panicked");
+        }
     }
 }
 
@@ -151,7 +146,9 @@ impl Drop for WrapperTxn {
             // we send a Rollback message. There's nothing we can do if this
             // fails, so ignore the result and do not use a channel to wait
             // for a response.
-            let _ = self.sender.send(TxnMessage::Rollback);
+            if self.sender.send(TxnMessage::Rollback).is_err() {
+                log::warn!("WrapperTxn: rollback could not be delivered — actor thread gone");
+            }
         }
     }
 }
@@ -194,15 +191,6 @@ impl StorageTxn for WrapperTxn {
         self.call(TxnMessage::AllTaskUuids).await
     }
 
-    async fn base_version(&mut self) -> Result<VersionId> {
-        self.call(TxnMessage::BaseVersion).await
-    }
-
-    async fn set_base_version(&mut self, version: VersionId) -> Result<()> {
-        self.call(|tx| TxnMessage::SetBaseVersion(version, tx))
-            .await
-    }
-
     async fn get_task_operations(&mut self, uuid: Uuid) -> Result<Vec<Operation>> {
         self.call(|tx| TxnMessage::GetTaskOperations(uuid, tx))
             .await
@@ -212,20 +200,12 @@ impl StorageTxn for WrapperTxn {
         self.call(TxnMessage::UnsyncedOperations).await
     }
 
-    async fn num_unsynced_operations(&mut self) -> Result<usize> {
-        self.call(TxnMessage::NumUnsyncedOperations).await
-    }
-
     async fn add_operation(&mut self, op: Operation) -> Result<()> {
         self.call(|tx| TxnMessage::AddOperation(op, tx)).await
     }
 
     async fn remove_operation(&mut self, op: Operation) -> Result<()> {
         self.call(|tx| TxnMessage::RemoveOperation(op, tx)).await
-    }
-
-    async fn sync_complete(&mut self) -> Result<()> {
-        self.call(TxnMessage::SyncComplete).await
     }
 
     async fn is_empty(&mut self) -> Result<bool> {

@@ -1,13 +1,11 @@
 use crate::depmap::DependencyMap;
 use crate::errors::Result;
 use crate::operation::{Operation, Operations};
-use crate::server::Server;
 use crate::storage::{Storage, TaskMap};
 use crate::task::{Status, Task};
 use crate::taskdb::TaskDb;
 use crate::treemap::TreeMap;
 use crate::{Error, TaskData};
-use anyhow::Context;
 use chrono::{DateTime, Duration, Utc};
 use log::trace;
 use std::collections::HashMap;
@@ -32,18 +30,12 @@ use uuid::Uuid;
 /// are not reflected in the Replica's storage until committed with [`Replica::commit_operations`].
 /**
 ```rust
-# #[cfg(feature = "storage-sqlite")]
-# {
-# use taskchampion::chrono::{TimeZone, Utc};
-# use taskchampion::{storage::AccessMode, Operations, Replica, Status, Uuid, SqliteStorage};
-# use tempfile::TempDir;
+# use taskchampion::chrono::Utc;
+# use taskchampion::{Operations, Replica, Status, Uuid};
+# use taskchampion::storage::inmemory::InMemoryStorage;
+# #[tokio::main(flavor = "current_thread")]
 # async fn main() -> anyhow::Result<()> {
-# let tmp_dir = TempDir::new()?;
-# let mut replica = Replica::new(SqliteStorage::new(
-#   tmp_dir.path().to_path_buf(),
-#   AccessMode::ReadWrite,
-#   true
-# ).await?);
+# let mut replica = Replica::new(InMemoryStorage::new());
 // Create a new task, recording the required operations.
 let mut ops = Operations::new();
 let uuid = Uuid::new_v4();
@@ -56,7 +48,6 @@ t.set_entry(Some(Utc::now()), &mut ops)?;
 replica.commit_operations(ops).await?;
 #
 # Ok(())
-# }
 # }
 ```
 **/
@@ -315,20 +306,6 @@ impl<S: Storage> Replica<S> {
         Ok(Task::new(TaskData::create(uuid, ops), depmap))
     }
 
-    /// Create a new, empty task with the given UUID.  This is useful for importing tasks, but
-    /// otherwise should be avoided in favor of `create_task`.  If the task already exists, this
-    /// does nothing and returns the existing task.
-    #[deprecated(since = "0.7.0", note = "please use TaskData instead")]
-    pub async fn import_task_with_uuid(&mut self, uuid: Uuid) -> Result<Task> {
-        let mut ops = self.make_operations();
-        TaskData::create(uuid, &mut ops);
-        self.commit_operations(ops).await?;
-        Ok(self
-            .get_task(uuid)
-            .await?
-            .expect("Task should exist after creation"))
-    }
-
     /// Delete a task.  The task must exist.  Note that this is different from setting status to
     /// Deleted; this is the final purge of the task.
     ///
@@ -363,26 +340,6 @@ impl<S: Storage> Replica<S> {
         // will continue to use the old map.
         self.depmap = None;
 
-        Ok(())
-    }
-
-    /// Synchronize this replica against the given server.
-    ///
-    /// If `avoid_snapshots` is true, the sync operations produces a snapshot only when the server
-    /// indicate it is urgent (snapshot urgency "high").  This allows time for other replicas to
-    /// create a snapshot before this one does.
-    ///
-    /// Set this to true on systems more constrained in CPU, memory, or bandwidth than a typical desktop
-    /// system
-    pub async fn sync(
-        &mut self,
-        server: &mut Box<dyn Server>,
-        avoid_snapshots: bool,
-    ) -> Result<()> {
-        self.taskdb
-            .sync(server, avoid_snapshots)
-            .await
-            .context("Failed to synchronize with server")?;
         Ok(())
     }
 
@@ -462,16 +419,6 @@ impl<S: Storage> Replica<S> {
             self.added_undo_point = true;
         }
         ops
-    }
-
-    /// Get the number of operations local to this replica and not yet synchronized to the server.
-    pub async fn num_local_operations(&mut self) -> Result<usize> {
-        self.taskdb.num_operations().await
-    }
-
-    /// Get the number of undo points available (number of times `undo` will succeed).
-    pub async fn num_undo_points(&mut self) -> Result<usize> {
-        self.taskdb.num_undo_points().await
     }
 }
 
@@ -630,17 +577,6 @@ mod tests {
                 },
             ]
         );
-
-        // num_local_operations includes all but the undo point
-        assert_eq!(rep.num_local_operations().await.unwrap(), 9);
-
-        // num_undo_points includes only the undo point
-        assert_eq!(rep.num_undo_points().await.unwrap(), 1);
-
-        // A second undo point is counted.
-        let ops = vec![Operation::UndoPoint];
-        rep.commit_operations(ops).await.unwrap();
-        assert_eq!(rep.num_undo_points().await.unwrap(), 2);
     }
 
     #[tokio::test]
@@ -746,7 +682,6 @@ mod tests {
         ops.push(Operation::UndoPoint);
         rep.create_task(uuid2, &mut ops).await.unwrap();
         rep.commit_operations(ops).await?;
-        assert_eq!(rep.num_undo_points().await.unwrap(), 2);
 
         // Trying to reverse-commit the wrong operations fails.
         let ops = vec![Operation::Delete {
@@ -758,7 +693,6 @@ mod tests {
         // Commiting the correct operations succeeds
         let ops = rep.get_undo_operations().await?;
         assert!(rep.commit_reversed_operations(ops).await?);
-        assert_eq!(rep.num_undo_points().await.unwrap(), 1);
 
         Ok(())
     }

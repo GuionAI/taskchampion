@@ -3,7 +3,7 @@ use crate::errors::{Error, Result};
 use crate::operation::Operation;
 use crate::storage::inmemory::InMemoryStorage;
 use crate::storage::send_wrapper::{WrappedStorage, WrappedStorageTxn};
-use crate::storage::{Storage, StorageTxn, TaskMap, VersionId};
+use crate::storage::{Storage, StorageTxn, TaskMap};
 use async_trait::async_trait;
 use pretty_assertions::assert_eq;
 use uuid::Uuid;
@@ -40,14 +40,6 @@ impl WrappedStorageTxn for Box<dyn StorageTxn + Send + '_> {
         self.as_mut().all_task_uuids().await
     }
 
-    async fn base_version(&mut self) -> Result<VersionId> {
-        self.as_mut().base_version().await
-    }
-
-    async fn set_base_version(&mut self, version: VersionId) -> Result<()> {
-        self.as_mut().set_base_version(version).await
-    }
-
     async fn get_task_operations(&mut self, uuid: Uuid) -> Result<Vec<Operation>> {
         self.as_mut().get_task_operations(uuid).await
     }
@@ -56,20 +48,12 @@ impl WrappedStorageTxn for Box<dyn StorageTxn + Send + '_> {
         self.as_mut().unsynced_operations().await
     }
 
-    async fn num_unsynced_operations(&mut self) -> Result<usize> {
-        self.as_mut().num_unsynced_operations().await
-    }
-
     async fn add_operation(&mut self, op: Operation) -> Result<()> {
         self.as_mut().add_operation(op).await
     }
 
     async fn remove_operation(&mut self, op: Operation) -> Result<()> {
         self.as_mut().remove_operation(op).await
-    }
-
-    async fn sync_complete(&mut self) -> Result<()> {
-        self.as_mut().sync_complete().await
     }
 
     #[allow(clippy::wrong_self_convention)] // mut is required here for storage access
@@ -93,7 +77,7 @@ async fn storage() -> Result<Wrapper> {
     Wrapper::new(async || Ok(InMemoryStorage::new())).await
 }
 
-crate::storage::test::storage_tests!(storage().await.unwrap());
+crate::storage::test::storage_tests_no_sync!(storage().await.unwrap());
 
 #[tokio::test]
 async fn test_implicit_rollback() -> Result<()> {

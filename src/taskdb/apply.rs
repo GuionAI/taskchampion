@@ -1,6 +1,6 @@
+use super::op::SyncOp;
 use crate::errors::{Error, Result};
 use crate::operation::Operation;
-use crate::server::SyncOp;
 use crate::storage::{StorageTxn, TaskMap};
 use crate::Operations;
 use std::collections::hash_map::Entry;

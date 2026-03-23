@@ -18,62 +18,24 @@ members = [ "xtask" ]
 resolver = "2"
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [features]
-default = ["sync", "bundled", "storage", "tls-webpki-roots"]
+default = ["storage-powersync", "bundled"]
 
-# Support for all sync solutions
-sync = ["server-sync", "server-gcp", "server-aws", "server-local"]
-# Support for sync to a server
-server-sync = ["encryption", "http"]
-# Support for sync to GCP
-server-gcp = ["cloud", "encryption", "http", "dep:google-cloud-storage", "dep:reqwest-middleware"]
-# Support for sync to AWS
-server-aws = ["cloud", "encryption", "http", "dep:aws-sdk-s3", "dep:aws-config", "dep:aws-credential-types", "dep:aws-smithy-runtime-api", "dep:aws-smithy-types"]
-# Suppport for sync to another SQLite database on the same machine
-server-local = ["dep:rusqlite"]
-
-# Support for all task storage backends (except indexeddb, which only works on WASM builds)
-storage = ["storage-sqlite"]
-# Support for SQLite task storage
-storage-sqlite = ["dep:rusqlite"]
 # Support for PowerSync task storage
 storage-powersync = ["dep:rusqlite", "dep:powersync_core", "rusqlite/bundled"]
-# Support for IndexedDB task storage
-storage-indexeddb = ["dep:idb", "dep:web-sys"]
 # Expose *_for_test() constructors for use in external crate tests
 test-utils = ["storage-powersync"]
-
-# (private) Support for sync protocol encryption
-encryption = ["dep:ring"]
-# (private) Generic support for cloud sync
-cloud = []
 # static bundling of dependencies
 bundled = ["rusqlite/bundled"]
-# use CA roots built into the library for all HTTPS access
-tls-webpki-roots = ["reqwest?/rustls-tls-webpki-roots"]
-# use native CA roots (from the filesystem), instead of bundled for all HTTPS access
-tls-native-roots = ["reqwest?/rustls-tls-native-roots"]
-# (private) generic support for HTTP for use by server-* features
-http = ["dep:reqwest", "dep:url"]
-
-[package.metadata.docs.rs]
-all-features = true
-additional-targets = ["wasm32-unknown-unknown"]
 
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1.89"
 fractional_index = "2.0.2"
-byteorder = "1.5"
 chrono = { version = "^0.4.44", features = ["serde"] }
-flate2 = "1"
-idb = { version = "0.6.4", optional = true }
 log = "^0.4.17"
-# Reqwest is "stuck" at 0.12 because that's what google-cloud-storage depends on.
-reqwest = { version = "0.12", default-features = false, optional = true }
-ring = { version = "0.17", optional = true }
 powersync_core = { version = "=0.4.11", features = ["static"], optional = true }
 rusqlite = { version = "0.38", features = [ "fallible_uint" ], optional = true}
 serde_json = "^1.0"
@@ -83,56 +45,10 @@ strum_macros = "0.28"
 tokio = { version = "1", features = ["macros", "sync", "rt"] }
 thiserror = "2.0"
 uuid = { version = "^1.22.0", features = ["serde", "v4", "v7"] }
-url = { version = "2", optional = true }
 
-## wasm-only dependencies.
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-uuid = { version = "1", features = ["js"] }
-ring = { version = "0", optional = true, features = ["wasm32_unknown_unknown_js"] }
-getrandom = { version = "0.4", features = ["wasm_js"] }
-wasm-bindgen = { version = "0.2" }
-wasm-bindgen-futures = { version = "0.4" }
-serde-wasm-bindgen = "0.6"
-web-sys = { version = "0.3.83", optional = true, features = [
-  "Window",
-  "IdbFactory",
-  "IdbOpenDbRequest",
-  "IdbDatabase",
-  "IdbTransaction",
-  "IdbObjectStore",
-  "IdbRequest",
-  "DomException",
-  "IdbObjectStoreParameters",
-  "IdbTransactionMode",
-  "EventTarget",
-  "Event",
-  "console",
-]}
-
-## non-wasm dependencies
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-aws-sdk-s3 = { version = "1.125", default-features = false, optional = true }
-aws-config = { version = "1.8", default-features = false, features = ["rt-tokio", "behavior-version-latest"], optional = true }
-aws-credential-types = { version = "1", default-features = false, features = ["hardcoded-credentials"], optional = true }
-aws-smithy-runtime-api = { version = "1.11", default-features = false, optional = true }
-aws-smithy-types = { version = "1.4", default-features = false, optional = true }
-google-cloud-storage = { version = "0.24.0", default-features = false, features = ["rustls-tls", "auth"], optional = true }
-reqwest-middleware = { version = "0.4", optional = true }
-
-## common dev-dependencies
 [dev-dependencies]
 tempfile = "3"
 rstest = "0.26"
 pretty_assertions = "1"
 libc = "0.2"
 tokio = { version = "1", features = ["time", "rt"] }
-
-## wasm-only dev-dependencies
-[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
-wasm-bindgen-test = "0.3"
-
-## non-wasm dev-dependencies
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-# proptest has a number of non-WASM-compatible requirements
-proptest = "^1.10.0"
-httptest = "0.16.4"

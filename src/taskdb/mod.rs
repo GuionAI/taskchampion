@@ -1,14 +1,12 @@
 use crate::errors::Result;
 #[cfg(test)]
 use crate::operation::Operation;
-use crate::server::Server;
 use crate::storage::{Storage, TaskMap};
 use crate::Operations;
 use uuid::Uuid;
 
 mod apply;
-mod snapshot;
-mod sync;
+pub(crate) mod op;
 pub(crate) mod undo;
 
 /// A TaskDb is the backend for a replica.  It manages the storage, operations, synchronization,
@@ -68,23 +66,6 @@ impl<S: Storage> TaskDb<S> {
         txn.get_task_operations(uuid).await
     }
 
-    /// Sync to the given server, pulling remote changes and pushing local changes.
-    ///
-    /// If `avoid_snapshots` is true, the sync operations produces a snapshot only when the server
-    /// indicate it is urgent (snapshot urgency "high").  This allows time for other replicas to
-    /// create a snapshot before this one does.
-    ///
-    /// Set this to true on systems more constrained in CPU, memory, or bandwidth than a typical desktop
-    /// system
-    pub(crate) async fn sync(
-        &mut self,
-        server: &mut Box<dyn Server>,
-        avoid_snapshots: bool,
-    ) -> Result<()> {
-        let mut txn = self.storage.txn().await?;
-        sync::sync(server, txn.as_mut(), avoid_snapshots).await
-    }
-
     /// Return the operations back to and including the last undo point, or since the last sync if
     /// no undo point is found.
     ///
@@ -106,29 +87,6 @@ impl<S: Storage> TaskDb<S> {
     ) -> Result<bool> {
         let mut txn = self.storage.txn().await?;
         undo::commit_reversed_operations(txn.as_mut(), undo_ops).await
-    }
-
-    /// Get the number of un-synchronized operations in storage, excluding undo
-    /// operations.
-    pub(crate) async fn num_operations(&mut self) -> Result<usize> {
-        let mut txn = self.storage.txn().await?;
-        Ok(txn
-            .unsynced_operations()
-            .await?
-            .iter()
-            .filter(|o| !o.is_undo_point())
-            .count())
-    }
-
-    /// Get the number of (un-synchronized) undo points in storage.
-    pub(crate) async fn num_undo_points(&mut self) -> Result<usize> {
-        let mut txn = self.storage.txn().await?;
-        Ok(txn
-            .unsynced_operations()
-            .await?
-            .iter()
-            .filter(|o| o.is_undo_point())
-            .count())
     }
 
     // functions for supporting tests
@@ -204,34 +162,5 @@ mod tests {
             ]
         );
         Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_num_operations() {
-        let mut db = TaskDb::new(InMemoryStorage::new());
-        let mut ops = Operations::new();
-        ops.push(Operation::Create {
-            uuid: Uuid::new_v4(),
-        });
-        ops.push(Operation::UndoPoint);
-        ops.push(Operation::Create {
-            uuid: Uuid::new_v4(),
-        });
-        db.commit_operations(ops).await.unwrap();
-        assert_eq!(db.num_operations().await.unwrap(), 2);
-    }
-
-    #[tokio::test]
-    async fn test_num_undo_points() {
-        let mut db = TaskDb::new(InMemoryStorage::new());
-        let mut ops = Operations::new();
-        ops.push(Operation::UndoPoint);
-        db.commit_operations(ops).await.unwrap();
-        assert_eq!(db.num_undo_points().await.unwrap(), 1);
-
-        let mut ops = Operations::new();
-        ops.push(Operation::UndoPoint);
-        db.commit_operations(ops).await.unwrap();
-        assert_eq!(db.num_undo_points().await.unwrap(), 2);
     }
 }

@@ -2,7 +2,7 @@
 
 use crate::errors::{Error, Result};
 use crate::operation::Operation;
-use crate::storage::{Storage, StorageTxn, TaskMap, VersionId, DEFAULT_BASE_VERSION};
+use crate::storage::{Storage, StorageTxn, TaskMap};
 use async_trait::async_trait;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -11,8 +11,7 @@ use uuid::Uuid;
 #[derive(PartialEq, Debug, Clone)]
 struct Data {
     tasks: HashMap<Uuid, TaskMap>,
-    base_version: VersionId,
-    operations: Vec<(bool, Operation)>,
+    operations: Vec<Operation>,
 }
 
 struct Txn<'t> {
@@ -97,56 +96,27 @@ impl StorageTxn for Txn<'_> {
         Ok(self.data_ref().tasks.keys().copied().collect())
     }
 
-    async fn base_version(&mut self) -> Result<VersionId> {
-        Ok(self.data_ref().base_version)
-    }
-
-    async fn set_base_version(&mut self, version: VersionId) -> Result<()> {
-        self.mut_data_ref().base_version = version;
-        Ok(())
-    }
-
     async fn get_task_operations(&mut self, uuid: Uuid) -> Result<Vec<Operation>> {
         Ok(self
             .data_ref()
             .operations
             .iter()
-            .filter(|(_, op)| op.get_uuid() == Some(uuid))
-            .map(|(_, op)| op.clone())
+            .filter(|op| op.get_uuid() == Some(uuid))
+            .cloned()
             .collect())
     }
 
     async fn unsynced_operations(&mut self) -> Result<Vec<Operation>> {
-        Ok(self
-            .data_ref()
-            .operations
-            .iter()
-            .filter(|(synced, _)| !synced)
-            .map(|(_, op)| op.clone())
-            .collect())
-    }
-
-    async fn num_unsynced_operations(&mut self) -> Result<usize> {
-        Ok(self
-            .data_ref()
-            .operations
-            .iter()
-            .filter(|(synced, _)| !synced)
-            .count())
+        Ok(self.data_ref().operations.clone())
     }
 
     async fn add_operation(&mut self, op: Operation) -> Result<()> {
-        self.mut_data_ref().operations.push((false, op));
+        self.mut_data_ref().operations.push(op);
         Ok(())
     }
 
     async fn remove_operation(&mut self, op: Operation) -> Result<()> {
-        if let Some((synced, last_op)) = self.data_ref().operations.last() {
-            if *synced {
-                return Err(Error::Database(
-                    "Last operation has been synced -- cannot remove".to_string(),
-                ));
-            }
+        if let Some(last_op) = self.data_ref().operations.last() {
             if last_op == &op {
                 self.mut_data_ref().operations.pop();
                 return Ok(());
@@ -155,28 +125,6 @@ impl StorageTxn for Txn<'_> {
         Err(Error::Database(
             "Last operation does not match -- cannot remove".to_string(),
         ))
-    }
-
-    async fn sync_complete(&mut self) -> Result<()> {
-        let data = self.data_ref();
-
-        // Mark all operations as synced, but drop operations which no longer have a
-        // corresponding task.
-        let new_operations = data
-            .operations
-            .iter()
-            .filter(|(_, op)| {
-                if let Some(uuid) = op.get_uuid() {
-                    data.tasks.contains_key(&uuid)
-                } else {
-                    true
-                }
-            })
-            .map(|(_, op)| (true, op.clone()))
-            .collect();
-        self.mut_data_ref().operations = new_operations;
-
-        Ok(())
     }
 
     async fn commit(&mut self) -> Result<()> {
@@ -200,7 +148,6 @@ impl InMemoryStorage {
         InMemoryStorage {
             data: Data {
                 tasks: HashMap::new(),
-                base_version: DEFAULT_BASE_VERSION,
                 operations: vec![],
             },
         }
@@ -225,5 +172,5 @@ mod test {
         InMemoryStorage::new()
     }
 
-    crate::storage::test::storage_tests!(storage().await);
+    crate::storage::test::storage_tests_no_sync!(storage().await);
 }
