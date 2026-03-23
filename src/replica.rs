@@ -352,6 +352,16 @@ impl<S: Storage> Replica<S> {
         self.taskdb.get_undo_operations().await
     }
 
+    /// Get the number of operations local to this replica, excluding undo points.
+    pub async fn num_local_operations(&mut self) -> Result<usize> {
+        self.taskdb.num_operations().await
+    }
+
+    /// Get the number of undo points available (number of times `undo` will succeed).
+    pub async fn num_undo_points(&mut self) -> Result<usize> {
+        self.taskdb.num_undo_points().await
+    }
+
     /// Commit the reverse of the given operations, beginning with the last operation in the given
     /// operations and proceeding to the first.
     ///
@@ -692,7 +702,33 @@ mod tests {
 
         // Commiting the correct operations succeeds
         let ops = rep.get_undo_operations().await?;
+        assert_eq!(rep.num_undo_points().await.unwrap(), 2);
         assert!(rep.commit_reversed_operations(ops).await?);
+        assert_eq!(rep.num_undo_points().await.unwrap(), 1);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn num_local_operations_and_undo_points() -> Result<()> {
+        let mut rep = Replica::new(InMemoryStorage::new());
+
+        let mut ops = Operations::new();
+        ops.push(Operation::UndoPoint);
+        let uuid1 = Uuid::new_v4();
+        rep.create_task(uuid1, &mut ops).await.unwrap();
+        let uuid2 = Uuid::new_v4();
+        rep.create_task(uuid2, &mut ops).await.unwrap();
+        rep.commit_operations(ops).await?;
+
+        // 2 Create ops, 1 UndoPoint
+        assert_eq!(rep.num_local_operations().await?, 2);
+        assert_eq!(rep.num_undo_points().await?, 1);
+
+        // A second undo point is counted.
+        let ops = vec![Operation::UndoPoint];
+        rep.commit_operations(ops).await?;
+        assert_eq!(rep.num_undo_points().await?, 2);
 
         Ok(())
     }

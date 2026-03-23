@@ -416,6 +416,39 @@ mod test {
         Ok(())
     }
 
+    /// Verify that all_operations() returns operations added via add_operation() in insertion
+    /// order. This is the core fix — previously returned empty vec.
+    #[tokio::test]
+    async fn test_all_operations_round_trip() -> Result<()> {
+        use crate::Operation;
+        let mut storage = storage().await?;
+        let uuid = uuid::Uuid::new_v4();
+        let now = chrono::Utc::now();
+
+        let mut txn = storage.txn().await?;
+        txn.add_operation(Operation::Create { uuid }).await?;
+        txn.add_operation(Operation::Update {
+            uuid,
+            property: "status".into(),
+            value: Some("pending".into()),
+            old_value: None,
+            timestamp: now,
+        })
+        .await?;
+        txn.add_operation(Operation::UndoPoint).await?;
+        txn.commit().await?;
+        drop(txn);
+
+        let mut txn = storage.txn().await?;
+        let ops = txn.all_operations().await?;
+        assert_eq!(ops.len(), 3, "should return all 3 operations: {ops:?}");
+        assert!(matches!(&ops[0], Operation::Create { .. }));
+        assert!(matches!(&ops[1], Operation::Update { .. }));
+        assert!(matches!(&ops[2], Operation::UndoPoint));
+        txn.commit().await?;
+        Ok(())
+    }
+
     /// Verify that set_task returns an error for an annotation key with a non-integer epoch suffix
     /// rather than silently leaving it in the data blob.
     #[tokio::test]

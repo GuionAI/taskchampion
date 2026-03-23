@@ -143,8 +143,8 @@ impl StorageTxn for DirectTxn<'_> {
         SendFut(self.0.get_task_operations(uuid)).await
     }
 
-    async fn unsynced_operations(&mut self) -> Result<Vec<Operation>> {
-        SendFut(self.0.unsynced_operations()).await
+    async fn all_operations(&mut self) -> Result<Vec<Operation>> {
+        SendFut(self.0.all_operations()).await
     }
 
     async fn add_operation(&mut self, op: Operation) -> Result<()> {

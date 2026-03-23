@@ -196,8 +196,8 @@ impl StorageTxn for WrapperTxn {
             .await
     }
 
-    async fn unsynced_operations(&mut self) -> Result<Vec<Operation>> {
-        self.call(TxnMessage::UnsyncedOperations).await
+    async fn all_operations(&mut self) -> Result<Vec<Operation>> {
+        self.call(TxnMessage::AllOperations).await
     }
 
     async fn add_operation(&mut self, op: Operation) -> Result<()> {

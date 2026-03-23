@@ -154,15 +154,12 @@ fn test_all_tasks_includes_completed() {
 }
 
 #[test]
-fn test_undo_api_not_error() {
-    // `undo()` is exported for completeness but PowerSyncStorage::unsynced_operations()
-    // returns empty (PowerSync tracks operations externally), so undo always returns
-    // `false` with this backend. This test verifies the API doesn't panic or error.
+fn test_undo_reverses_last_mutation() {
     let conn = make_conn();
     let handle = handle_i64(&conn);
     let uuid = Uuid::new_v4().to_string();
 
-    create_task(handle, USER_ID.into(), uuid.clone(), "To undo".into()).expect("create");
+    create_task(handle, USER_ID.into(), uuid.clone(), "Original".into()).expect("create");
 
     mutate_task(
         handle,
@@ -174,11 +171,21 @@ fn test_undo_api_not_error() {
     )
     .expect("mutate");
 
-    // undo() returns Ok(false) because PowerSyncStorage::unsynced_operations is empty.
-    let result = undo(handle, USER_ID.into());
-    assert!(result.is_ok(), "undo must not error: {result:?}");
-    // false because the storage doesn't expose unsynced operations
-    assert!(!result.unwrap(), "undo returns false with PowerSyncStorage");
+    // Verify mutation applied
+    let task = get_task(handle, USER_ID.into(), uuid.clone())
+        .expect("get_task ok")
+        .expect("task exists");
+    assert_eq!(task.description, "Changed");
+
+    // Undo should now succeed
+    let undone = undo(handle, USER_ID.into()).expect("undo must not error");
+    assert!(undone, "undo should return true after mutation");
+
+    // Verify task reverted to original description
+    let task = get_task(handle, USER_ID.into(), uuid.clone())
+        .expect("get_task ok")
+        .expect("task exists after undo");
+    assert_eq!(task.description, "Original");
 }
 
 #[test]

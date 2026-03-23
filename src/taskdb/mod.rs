@@ -66,6 +66,28 @@ impl<S: Storage> TaskDb<S> {
         txn.get_task_operations(uuid).await
     }
 
+    /// Get the number of operations in storage, excluding undo points.
+    pub(crate) async fn num_operations(&mut self) -> Result<usize> {
+        let mut txn = self.storage.txn().await?;
+        Ok(txn
+            .all_operations()
+            .await?
+            .iter()
+            .filter(|o| !o.is_undo_point())
+            .count())
+    }
+
+    /// Get the number of undo points in storage.
+    pub(crate) async fn num_undo_points(&mut self) -> Result<usize> {
+        let mut txn = self.storage.txn().await?;
+        Ok(txn
+            .all_operations()
+            .await?
+            .iter()
+            .filter(|o| o.is_undo_point())
+            .count())
+    }
+
     /// Return the operations back to and including the last undo point, or since the last sync if
     /// no undo point is found.
     ///
@@ -114,7 +136,7 @@ impl<S: Storage> TaskDb<S> {
     #[cfg(test)]
     pub(crate) async fn operations(&mut self) -> Vec<Operation> {
         let mut txn = self.storage.txn().await.unwrap();
-        txn.unsynced_operations().await.unwrap().to_vec()
+        txn.all_operations().await.unwrap().to_vec()
     }
 }
 
@@ -162,5 +184,34 @@ mod tests {
             ]
         );
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_num_operations() {
+        let mut db = TaskDb::new(InMemoryStorage::new());
+        let mut ops = Operations::new();
+        ops.push(Operation::Create {
+            uuid: Uuid::new_v4(),
+        });
+        ops.push(Operation::UndoPoint);
+        ops.push(Operation::Create {
+            uuid: Uuid::new_v4(),
+        });
+        db.commit_operations(ops).await.unwrap();
+        assert_eq!(db.num_operations().await.unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_num_undo_points() {
+        let mut db = TaskDb::new(InMemoryStorage::new());
+        let mut ops = Operations::new();
+        ops.push(Operation::UndoPoint);
+        db.commit_operations(ops).await.unwrap();
+        assert_eq!(db.num_undo_points().await.unwrap(), 1);
+
+        let mut ops = Operations::new();
+        ops.push(Operation::UndoPoint);
+        db.commit_operations(ops).await.unwrap();
+        assert_eq!(db.num_undo_points().await.unwrap(), 2);
     }
 }

@@ -553,9 +553,17 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
             .collect()
     }
 
-    // PowerSync handles sync externally; unsynced_operations returns empty.
-    async fn unsynced_operations(&mut self) -> Result<Vec<Operation>> {
-        Ok(vec![])
+    async fn all_operations(&mut self) -> Result<Vec<Operation>> {
+        let t = self.get_txn()?;
+        let mut q = t.prepare("SELECT data FROM tc_operations ORDER BY id ASC")?;
+        let rows = q.query_map([], |r| r.get::<_, String>("data"))?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()?
+            .into_iter()
+            .map(|data_str| {
+                serde_json::from_str::<Operation>(&data_str)
+                    .map_err(|e| Error::Database(format!("Failed to parse operation: {e}")))
+            })
+            .collect()
     }
 
     async fn add_operation(&mut self, op: Operation) -> Result<()> {

@@ -106,7 +106,7 @@ impl StorageTxn for Txn<'_> {
             .collect())
     }
 
-    async fn unsynced_operations(&mut self) -> Result<Vec<Operation>> {
+    async fn all_operations(&mut self) -> Result<Vec<Operation>> {
         Ok(self.data_ref().operations.clone())
     }
 

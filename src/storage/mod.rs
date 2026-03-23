@@ -84,9 +84,8 @@ pub trait StorageTxn: Send {
     /// Get the set of operations for the given task.
     async fn get_task_operations(&mut self, uuid: Uuid) -> Result<Vec<Operation>>;
 
-    /// Get the current set of outstanding operations (operations that have not been synced to the
-    /// server yet)
-    async fn unsynced_operations(&mut self) -> Result<Vec<Operation>>;
+    /// Get all operations stored locally (the full operation log).
+    async fn all_operations(&mut self) -> Result<Vec<Operation>>;
 
     /// Add an operation to the end of the list of operations in the storage.  Note that this
     /// merely *stores* the operation; it is up to the TaskDb to apply it.
@@ -102,7 +101,7 @@ pub trait StorageTxn: Send {
     async fn is_empty(&mut self) -> Result<bool> {
         let mut empty = true;
         empty = empty && self.all_tasks().await?.is_empty();
-        empty = empty && self.unsynced_operations().await?.is_empty();
+        empty = empty && self.all_operations().await?.is_empty();
         Ok(empty)
     }
 

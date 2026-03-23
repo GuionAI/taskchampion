@@ -12,7 +12,7 @@ use log::{debug, info, trace};
 /// The operations are returned in the order they were applied. Use [`commit_reversed_operations`]
 /// to "undo" them.
 pub(crate) async fn get_undo_operations(txn: &mut dyn StorageTxn) -> Result<Operations> {
-    let local_ops = txn.unsynced_operations().await?;
+    let local_ops = txn.all_operations().await?;
     let last_undo_op_idx = local_ops
         .iter()
         .enumerate()
@@ -71,7 +71,7 @@ pub(crate) async fn commit_reversed_operations(
     undo_ops: Operations,
 ) -> Result<bool> {
     let mut applied = false;
-    let local_ops = txn.unsynced_operations().await?;
+    let local_ops = txn.all_operations().await?;
     let mut undo_ops = undo_ops.to_vec();
 
     if undo_ops.is_empty() {

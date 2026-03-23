@@ -24,7 +24,7 @@ pub(super) enum TxnMessage {
     AllTasks(oneshot::Sender<Result<Vec<(Uuid, TaskMap)>>>),
     AllTaskUuids(oneshot::Sender<Result<Vec<Uuid>>>),
     GetTaskOperations(Uuid, oneshot::Sender<Result<Vec<Operation>>>),
-    UnsyncedOperations(oneshot::Sender<Result<Vec<Operation>>>),
+    AllOperations(oneshot::Sender<Result<Vec<Operation>>>),
     AddOperation(Operation, oneshot::Sender<Result<()>>),
     RemoveOperation(Operation, oneshot::Sender<Result<()>>),
     IsEmpty(oneshot::Sender<Result<bool>>),
@@ -102,8 +102,8 @@ impl<S: WrappedStorage> ActorImpl<S> {
                 TxnMessage::GetTaskOperations(u, resp) => {
                     let _ = resp.send(txn.get_task_operations(u).await);
                 }
-                TxnMessage::UnsyncedOperations(resp) => {
-                    let _ = resp.send(txn.unsynced_operations().await);
+                TxnMessage::AllOperations(resp) => {
+                    let _ = resp.send(txn.all_operations().await);
                 }
                 TxnMessage::AddOperation(o, resp) => {
                     let _ = resp.send(txn.add_operation(o).await);
