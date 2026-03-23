@@ -317,7 +317,7 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
         let status = task_data.remove("status");
         let description = task_data.remove("description");
         let priority = task_data.remove("priority");
-        let parent_id = task_data.remove("parent");
+        let parent_id = task_data.remove("parent_id");
         let position = task_data.remove("position");
 
         // Extract and convert timestamp columns. An Err propagates immediately,

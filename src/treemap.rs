@@ -1,6 +1,6 @@
 //! Tree-structured task relationships via parent/child links.
 //!
-//! [`TreeMap`] builds a parent/child graph from a task set using the `parent` property,
+//! [`TreeMap`] builds a parent/child graph from a task set using the `parent_id` property,
 //! providing traversal helpers for tree-structured task hierarchies.
 //!
 //! See also [`crate::position`] for sibling ordering and [`crate::plan`] for creating
@@ -35,7 +35,7 @@ pub struct TreeMap {
     positions: HashMap<Uuid, String>,
     /// Set of task UUIDs whose status is `Pending` at construction time.
     pending: HashSet<Uuid>,
-    /// Set to `true` if any task had a `parent` value that could not be parsed
+    /// Set to `true` if any task had a `parent_id` value that could not be parsed
     /// as a UUID.  Callers can use this to detect corrupted task data.
     had_invalid_data: bool,
 }
@@ -43,11 +43,11 @@ pub struct TreeMap {
 impl TreeMap {
     /// Build a TreeMap from a full task set.
     ///
-    /// Tasks with a `parent` property pointing to a valid UUID are linked as children.
+    /// Tasks with a `parent_id` property pointing to a valid UUID are linked as children.
     /// Children are sorted by `(position, entry, uuid)` — positioned tasks first in
     /// lexicographic order, then unpositioned by creation time, UUID as tiebreaker.
     ///
-    /// If any task has a `parent` value that is not a valid UUID it is treated as a
+    /// If any task has a `parent_id` value that is not a valid UUID it is treated as a
     /// root task and [`TreeMap::had_invalid_data`] is set to `true`.
     pub fn from_tasks(tasks: &HashMap<Uuid, Task>) -> Self {
         let mut children: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
@@ -76,8 +76,8 @@ impl TreeMap {
                     parent_map.insert(*uuid, parent_uuid);
                     children.entry(parent_uuid).or_default().push(*uuid);
                 }
-                None if task.get_value("parent").is_some() => {
-                    // "parent" key exists but the value is not a valid UUID.
+                None if task.get_value("parent_id").is_some() => {
+                    // "parent_id" key exists but the value is not a valid UUID.
                     log::warn!("task {} has invalid parent UUID — treating as root", uuid);
                     had_invalid_data = true;
                 }
@@ -369,7 +369,7 @@ mod tests {
         {
             let mut ops = Operations::new();
             let mut task = rep.get_task(uuid).await.unwrap().unwrap();
-            task.set_value("parent", Some("not-a-uuid".to_string()), &mut ops)
+            task.set_value("parent_id", Some("not-a-uuid".to_string()), &mut ops)
                 .unwrap();
             rep.commit_operations(ops).await.unwrap();
         }

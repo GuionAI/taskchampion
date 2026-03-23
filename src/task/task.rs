@@ -281,7 +281,7 @@ impl Task {
     /// Get the parent task UUID, if this task is a subtask.
     pub fn get_parent(&self) -> Option<Uuid> {
         self.data
-            .get("parent")
+            .get("parent_id")
             .and_then(|s| Uuid::parse_str(s).ok())
     }
 
@@ -290,7 +290,7 @@ impl Task {
     /// Pass `Some(uuid)` to make this task a child of `uuid`, or `None` to remove the
     /// parent relationship.
     pub fn set_parent(&mut self, parent: Option<Uuid>, ops: &mut Operations) -> Result<()> {
-        self.set_value("parent", parent.map(|u| u.to_string()), ops)
+        self.set_value("parent_id", parent.map(|u| u.to_string()), ops)
     }
 
     /// Get this task's fractional-index position string, if set.

@@ -101,7 +101,7 @@ mod test {
         task.insert("description".into(), "round-trip test".into());
         task.insert("priority".into(), "H".into());
         let parent_uuid = Uuid::new_v4();
-        task.insert("parent".into(), parent_uuid.to_string());
+        task.insert("parent_id".into(), parent_uuid.to_string());
         task.insert("position".into(), "80".into());
 
         txn.set_task(uuid, task.clone()).await?;
@@ -117,7 +117,7 @@ mod test {
         );
         assert_eq!(got.get("priority").map(String::as_str), Some("H"));
         assert_eq!(
-            got.get("parent").map(String::as_str),
+            got.get("parent_id").map(String::as_str),
             Some(parent_uuid.to_string().as_str())
         );
         assert_eq!(got.get("position").map(String::as_str), Some("80"));

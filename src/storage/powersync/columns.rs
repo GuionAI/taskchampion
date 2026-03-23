@@ -88,7 +88,7 @@ pub(super) fn raw_to_task(raw: RawTaskRow) -> Result<(Uuid, TaskMap)> {
         task_map.insert("priority".into(), v);
     }
     if let Some(v) = raw.parent_id {
-        task_map.insert("parent".into(), v);
+        task_map.insert("parent_id".into(), v);
     }
     if let Some(v) = raw.position {
         task_map.insert("position".into(), v);
@@ -262,7 +262,7 @@ mod tests {
         );
         assert_eq!(task_map.get("priority").map(String::as_str), Some("H"));
         assert_eq!(
-            task_map.get("parent").map(String::as_str),
+            task_map.get("parent_id").map(String::as_str),
             Some("parent-uuid")
         );
         assert_eq!(task_map.get("position").map(String::as_str), Some("80"));
