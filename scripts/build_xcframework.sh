@@ -52,6 +52,7 @@ done
 # --- Build static libraries ---
 
 echo "==> Building static libraries (parallel)..."
+pids=()
 for target in "${TARGETS[@]}"; do
   echo "    Spawning build for ${target}..."
   cargo build \
@@ -60,8 +61,11 @@ for target in "${TARGETS[@]}"; do
     --release \
     --target "${target}" \
     --manifest-path "${PROJECT_ROOT}/Cargo.toml" &
+  pids+=($!)
 done
-wait
+for pid in "${pids[@]}"; do
+  wait "$pid"
+done
 
 # --- Generate Swift bindings ---
 
