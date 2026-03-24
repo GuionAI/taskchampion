@@ -18,6 +18,11 @@ use uuid::Uuid;
 mod config;
 pub(crate) mod columns;
 pub mod inmemory;
+#[cfg(feature = "storage-external")]
+pub mod external;
+#[cfg(feature = "storage-external")]
+pub mod sql_ops;
+#[cfg(not(feature = "storage-external"))]
 pub(crate) mod sql_ops;
 #[cfg(feature = "storage-powersync")]
 pub mod powersync;

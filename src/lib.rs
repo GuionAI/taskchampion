@@ -21,6 +21,10 @@ pub use errors::Error;
 pub use operation::{Operation, Operations};
 pub use position::{append_position, between_position, prepend_position, sequential_positions};
 pub use replica::Replica;
+#[cfg(feature = "storage-external")]
+pub use storage::external::{ExternalStorage, SqlExecutor};
+#[cfg(feature = "storage-external")]
+pub use storage::sql_ops::{SqlParam, SqlStatement};
 #[cfg(feature = "storage-ffi")]
 pub use storage::powersync::DirectPowerSyncStorage;
 #[cfg(feature = "storage-powersync")]

@@ -13,14 +13,16 @@ use crate::storage::TaskMap;
 
 /// A single SQL statement with bound parameters.
 #[derive(Debug, Clone)]
-pub(crate) struct SqlStatement {
-    pub(crate) sql: String,
-    pub(crate) params: Vec<SqlParam>,
+#[cfg_attr(not(feature = "storage-external"), allow(unreachable_pub))]
+pub struct SqlStatement {
+    pub sql: String,
+    pub params: Vec<SqlParam>,
 }
 
 /// Parameter types for SQL statements.
 #[derive(Debug, Clone)]
-pub(crate) enum SqlParam {
+#[cfg_attr(not(feature = "storage-external"), allow(unreachable_pub))]
+pub enum SqlParam {
     Text(String),
     Null,
 }
