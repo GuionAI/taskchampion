@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Build an XCFramework containing the taskchampion-ffi static library
-# for iOS device + simulator targets, plus generate Swift bindings.
+# for iOS device + simulator (arm64) targets, plus generate Swift bindings.
 #
 # Prerequisites:
 #   - Rust toolchain (stable)
@@ -37,7 +37,6 @@ SWIFT_OUT_DIR="${PROJECT_ROOT}/Sources/TaskChampionFFI"
 TARGETS=(
   aarch64-apple-ios
   aarch64-apple-ios-sim
-  x86_64-apple-ios
 )
 
 # --- Ensure Rust targets are installed ---
@@ -66,15 +65,12 @@ done
 # --- Generate Swift bindings ---
 
 echo "==> Generating Swift bindings..."
-# Build host library for binding generation — uniffi-bindgen reads UniFFI
-# metadata embedded in the compiled library. We use --release so the output
-# lands in target/release/ alongside the cross-compiled targets, keeping the
-# HOST_LIB path simple. Architecture doesn't matter for metadata extraction.
-cargo build -p taskchampion-ffi --lib --release --manifest-path "${PROJECT_ROOT}/Cargo.toml"
-
-HOST_LIB="${PROJECT_ROOT}/target/release/libtaskchampion_ffi.a"
-if [ ! -f "${HOST_LIB}" ]; then
-  echo "ERROR: staticlib not found at ${HOST_LIB} — cargo build may have failed" >&2
+# uniffi-bindgen reads type metadata from the compiled library — architecture
+# doesn't matter, so we reuse the already-built iOS device lib instead of
+# compiling a redundant host-native build.
+METADATA_LIB="${PROJECT_ROOT}/target/aarch64-apple-ios/release/libtaskchampion_ffi.a"
+if [ ! -f "${METADATA_LIB}" ]; then
+  echo "ERROR: iOS device lib not found at ${METADATA_LIB} — did the cargo build step fail?" >&2
   exit 1
 fi
 
@@ -87,7 +83,7 @@ cargo run \
   --bin uniffi-bindgen \
   --manifest-path "${PROJECT_ROOT}/Cargo.toml" \
   -- generate \
-  --library "${HOST_LIB}" \
+  --library "${METADATA_LIB}" \
   --language swift \
   --out-dir "${BUILD_DIR}/generated"
 
@@ -104,15 +100,12 @@ cp "${BUILD_DIR}/generated/${XCFRAMEWORK_NAME}.h" "${HEADERS_DIR}/${XCFRAMEWORK_
 # UniFFI generates a modulemap, but xcodebuild needs it named module.modulemap
 cp "${BUILD_DIR}/generated/${XCFRAMEWORK_NAME}.modulemap" "${HEADERS_DIR}/module.modulemap"
 
-# --- Create fat simulator library ---
+# --- Prepare simulator library ---
 
-echo "==> Creating fat simulator library (arm64 + x86_64)..."
+echo "==> Preparing simulator library..."
 mkdir -p "${BUILD_DIR}/ios-simulator"
-lipo \
-  "${PROJECT_ROOT}/target/aarch64-apple-ios-sim/release/libtaskchampion_ffi.a" \
-  "${PROJECT_ROOT}/target/x86_64-apple-ios/release/libtaskchampion_ffi.a" \
-  -create \
-  -output "${BUILD_DIR}/ios-simulator/libtaskchampion_ffi.a"
+cp "${PROJECT_ROOT}/target/aarch64-apple-ios-sim/release/libtaskchampion_ffi.a" \
+   "${BUILD_DIR}/ios-simulator/libtaskchampion_ffi.a"
 
 # --- Create XCFramework ---
 
