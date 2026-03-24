@@ -74,8 +74,8 @@ cargo build -p taskchampion-ffi --lib --release --manifest-path "${PROJECT_ROOT}
 
 HOST_LIB="${PROJECT_ROOT}/target/release/libtaskchampion_ffi.a"
 if [ ! -f "${HOST_LIB}" ]; then
-  # Fallback: try dylib
-  HOST_LIB="${PROJECT_ROOT}/target/release/libtaskchampion_ffi.dylib"
+  echo "ERROR: staticlib not found at ${HOST_LIB} — cargo build may have failed" >&2
+  exit 1
 fi
 
 mkdir -p "${SWIFT_OUT_DIR}"
@@ -134,4 +134,5 @@ echo "==> Done!"
 echo "    XCFramework: ${XCFRAMEWORK_DIR}"
 echo "    Swift sources: ${SWIFT_OUT_DIR}/TaskChampionFFI.swift"
 echo ""
-echo "    Add to fn-ios as a local SPM package pointing to this repo root."
+echo "    Tag a version and push to create a GitHub Release. SPM consumers add:
+    https://github.com/tta-lab/taskchampion.git"
