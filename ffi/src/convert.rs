@@ -126,9 +126,9 @@ fn collect_tree(tm: &TreeMap, parent: Option<Uuid>, uuids: &[Uuid], nodes: &mut 
 // FfiSqlExecutor → SqlExecutor adapter
 // ---------------------------------------------------------------------------
 
+use crate::types::{FfiSqlExecutor, FfiSqlParam, FfiSqlStatement};
 use std::sync::Arc;
 use taskchampion::{SqlExecutor, SqlParam, SqlStatement};
-use crate::types::{FfiSqlExecutor, FfiSqlParam, FfiSqlStatement};
 
 /// Wraps a UniFFI callback interface (`Arc<dyn FfiSqlExecutor>`) and
 /// implements the core [`SqlExecutor`] trait by converting between

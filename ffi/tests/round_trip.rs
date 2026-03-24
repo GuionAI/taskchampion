@@ -93,11 +93,7 @@ impl MockFfiSqlExecutor {
 }
 
 impl FfiSqlExecutor for MockFfiSqlExecutor {
-    fn query_one(
-        &self,
-        sql: String,
-        params: Vec<FfiSqlParam>,
-    ) -> Result<Option<String>, FfiError> {
+    fn query_one(&self, sql: String, params: Vec<FfiSqlParam>) -> Result<Option<String>, FfiError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(&sql).map_err(|e| FfiError::Database {
             message: format!("Prepare failed: {e}"),
@@ -115,11 +111,7 @@ impl FfiSqlExecutor for MockFfiSqlExecutor {
         }
     }
 
-    fn query_all(
-        &self,
-        sql: String,
-        params: Vec<FfiSqlParam>,
-    ) -> Result<Vec<String>, FfiError> {
+    fn query_all(&self, sql: String, params: Vec<FfiSqlParam>) -> Result<Vec<String>, FfiError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(&sql).map_err(|e| FfiError::Database {
             message: format!("Prepare failed: {e}"),
@@ -138,21 +130,18 @@ impl FfiSqlExecutor for MockFfiSqlExecutor {
             })
     }
 
-    fn execute_batch(
-        &self,
-        statements: Vec<FfiSqlStatement>,
-    ) -> Result<(), FfiError> {
+    fn execute_batch(&self, statements: Vec<FfiSqlStatement>) -> Result<(), FfiError> {
         let mut conn = self.conn.lock().unwrap();
         let txn = conn.transaction().map_err(|e| FfiError::Database {
             message: format!("Begin txn failed: {e}"),
         })?;
         for stmt in &statements {
             let bound = Self::bind_params(&stmt.params);
-            let refs: Vec<&dyn rusqlite::types::ToSql> =
-                bound.iter().map(|b| b.as_ref()).collect();
-            txn.execute(&stmt.sql, &*refs).map_err(|e| FfiError::Database {
-                message: format!("Execute failed: {e} (sql: {})", stmt.sql),
-            })?;
+            let refs: Vec<&dyn rusqlite::types::ToSql> = bound.iter().map(|b| b.as_ref()).collect();
+            txn.execute(&stmt.sql, &*refs)
+                .map_err(|e| FfiError::Database {
+                    message: format!("Execute failed: {e} (sql: {})", stmt.sql),
+                })?;
         }
         txn.commit().map_err(|e| FfiError::Database {
             message: format!("Commit failed: {e}"),

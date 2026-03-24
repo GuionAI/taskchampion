@@ -183,10 +183,7 @@ pub fn create_task(
 ///
 /// Returns `true` if an undo was performed, `false` if there is nothing to undo.
 #[uniffi::export]
-pub fn undo(
-    executor: Arc<dyn FfiSqlExecutor>,
-    user_id: String,
-) -> Result<bool, FfiError> {
+pub fn undo(executor: Arc<dyn FfiSqlExecutor>, user_id: String) -> Result<bool, FfiError> {
     with_replica(executor, &user_id, |mut replica| async move {
         let ops = replica
             .get_undo_operations()
