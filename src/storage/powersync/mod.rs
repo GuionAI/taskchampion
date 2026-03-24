@@ -5,9 +5,9 @@ use async_trait::async_trait;
 use std::path::Path;
 use uuid::Uuid;
 
-mod row_reader;
 mod extension;
 mod inner;
+mod row_reader;
 use inner::PowerSyncStorageInner;
 
 /// PowerSyncStorage stores task data in a PowerSync-managed SQLite database.
@@ -37,7 +37,6 @@ impl PowerSyncStorage {
             Wrapper::new(async || PowerSyncStorageInner::new_for_test()).await?,
         ))
     }
-
 }
 
 #[async_trait]
@@ -446,5 +445,4 @@ mod test {
         txn.commit().await?;
         Ok(())
     }
-
 }
