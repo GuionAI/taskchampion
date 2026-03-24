@@ -27,6 +27,17 @@ pub enum SqlParam {
     Null,
 }
 
+/// Allow `SqlParam` values to be used directly with rusqlite execute/query calls.
+#[cfg(feature = "storage-powersync")]
+impl rusqlite::types::ToSql for SqlParam {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        match self {
+            SqlParam::Text(s) => s.to_sql(),
+            SqlParam::Null => rusqlite::types::Null.to_sql(),
+        }
+    }
+}
+
 /// Task data parsed into promoted columns, tags, annotations, and residual blob.
 /// This is the shared preparation step before generating SQL.
 pub(crate) struct PreparedTask {
@@ -142,7 +153,7 @@ pub(crate) fn set_task_stmts(
     user_id: &Uuid,
     exists: bool,
     project_id: Option<&str>,
-) -> Vec<SqlStatement> {
+) -> Result<Vec<SqlStatement>> {
     let mut stmts = Vec::new();
     let uuid_str = uuid.to_string();
     let user_id_str = user_id.to_string();
@@ -231,7 +242,11 @@ pub(crate) fn set_task_stmts(
     for (epoch, description) in &prepared.annotations {
         let entry_at = DateTime::from_timestamp(*epoch, 0)
             .map(|dt| dt.to_rfc3339())
-            .unwrap_or_default();
+            .ok_or_else(|| {
+                Error::Database(format!(
+                    "Invalid annotation timestamp: epoch {epoch} is out of range"
+                ))
+            })?;
         stmts.push(SqlStatement {
             sql: "INSERT INTO tc_annotations (id, task_id, user_id, entry_at, description) \
                   VALUES (?, ?, ?, ?, ?)"
@@ -246,7 +261,7 @@ pub(crate) fn set_task_stmts(
         });
     }
 
-    stmts
+    Ok(stmts)
 }
 
 /// Generate SQL statement for create_task (empty task).
@@ -323,9 +338,8 @@ pub(crate) fn insert_project_stmt(id: &Uuid, name: &str, user_id: &Uuid) -> SqlS
 
 // ── Read SQL constants ─────────────────────────────────────────────────────
 
-pub(crate) const TASK_EXISTS_SQL: &str = "SELECT EXISTS(SELECT 1 FROM tc_tasks WHERE id = ?)";
-#[cfg(feature = "storage-external")]
-pub(crate) const TASK_COUNT_SQL: &str = "SELECT count(id) FROM tc_tasks WHERE id = ?";
+pub(crate) const TASK_EXISTS_SQL: &str =
+    "SELECT EXISTS(SELECT 1 FROM tc_tasks WHERE id = ?) AS exists_flag";
 #[cfg(feature = "storage-external")]
 pub(crate) const PROJECT_LOOKUP_SQL: &str =
     "SELECT id FROM projects WHERE name = ? ORDER BY created_at LIMIT 1";

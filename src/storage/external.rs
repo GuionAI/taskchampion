@@ -16,7 +16,7 @@ use crate::storage::sql_ops::{
     add_operation_stmt, create_task_stmt, delete_task_stmts, insert_project_stmt, prepare_task,
     remove_operation_stmt, set_task_stmts, SqlParam, SqlStatement, ALL_OPERATIONS_SQL,
     ALL_TASK_UUIDS_SQL, ANNOTATION_QUERY_SQL, LAST_OPERATION_SQL, PROJECT_LOOKUP_SQL,
-    TAG_QUERY_SQL, TASK_COUNT_SQL, TASK_EXISTS_SQL,
+    TAG_QUERY_SQL, TASK_EXISTS_SQL,
 };
 use crate::storage::{Storage, StorageTxn, TaskMap};
 
@@ -118,30 +118,28 @@ impl ExternalStorageTxn<'_> {
             .as_object()
             .ok_or_else(|| Error::Database("Expected JSON object for task row".into()))?;
 
-        fn get_str(obj: &serde_json::Map<String, serde_json::Value>, key: &str) -> Option<String> {
-            obj.get(key).and_then(|v| match v {
-                serde_json::Value::String(s) => Some(s.clone()),
-                serde_json::Value::Null => None,
-                _ => None,
-            })
-        }
+        // Required fields — missing or null means the host returned a broken row.
+        let id = get_opt_str(obj, "id")
+            .ok_or_else(|| Error::Database("Missing 'id' in task row".into()))?;
+        let data = get_opt_str(obj, "data")
+            .ok_or_else(|| Error::Database("Missing 'data' in task row".into()))?;
 
         Ok(RawTaskRow {
-            id: get_str(obj, "id").unwrap_or_default(),
-            data: get_str(obj, "data").unwrap_or_else(|| "{}".to_string()),
-            status: get_str(obj, "status"),
-            description: get_str(obj, "description"),
-            priority: get_str(obj, "priority"),
-            entry_at: get_str(obj, "entry_at"),
-            modified_at: get_str(obj, "modified_at"),
-            due_at: get_str(obj, "due_at"),
-            scheduled_at: get_str(obj, "scheduled_at"),
-            start_at: get_str(obj, "start_at"),
-            end_at: get_str(obj, "end_at"),
-            wait_at: get_str(obj, "wait_at"),
-            parent_id: get_str(obj, "parent_id"),
-            position: get_str(obj, "position"),
-            project_name: get_str(obj, "project_name"),
+            id,
+            data,
+            status: get_opt_str(obj, "status"),
+            description: get_opt_str(obj, "description"),
+            priority: get_opt_str(obj, "priority"),
+            entry_at: get_opt_str(obj, "entry_at"),
+            modified_at: get_opt_str(obj, "modified_at"),
+            due_at: get_opt_str(obj, "due_at"),
+            scheduled_at: get_opt_str(obj, "scheduled_at"),
+            start_at: get_opt_str(obj, "start_at"),
+            end_at: get_opt_str(obj, "end_at"),
+            wait_at: get_opt_str(obj, "wait_at"),
+            parent_id: get_opt_str(obj, "parent_id"),
+            position: get_opt_str(obj, "position"),
+            project_name: get_opt_str(obj, "project_name"),
         })
     }
 
@@ -221,11 +219,10 @@ impl StorageTxn for ExternalStorageTxn<'_> {
         if self.pending_creates.contains(&uuid) {
             return Ok(false);
         }
-        let count_json = self
+        let exists_json = self
             .executor
-            .query_one(TASK_COUNT_SQL, &[SqlParam::Text(uuid.to_string())])?;
-        let count = parse_json_int_field(&count_json, 0)?;
-        if count > 0 {
+            .query_one(TASK_EXISTS_SQL, &[SqlParam::Text(uuid.to_string())])?;
+        if parse_json_bool(&exists_json, "exists_flag")? {
             return Ok(false);
         }
         self.write_buffer
@@ -250,7 +247,7 @@ impl StorageTxn for ExternalStorageTxn<'_> {
             let exists_json = self
                 .executor
                 .query_one(TASK_EXISTS_SQL, &[SqlParam::Text(uuid.to_string())])?;
-            parse_json_bool(&exists_json)?
+            parse_json_bool(&exists_json, "exists_flag")?
         };
 
         // Buffer write statements.
@@ -260,7 +257,7 @@ impl StorageTxn for ExternalStorageTxn<'_> {
             &self.user_id,
             exists,
             project_id.as_deref(),
-        ));
+        )?);
         Ok(())
     }
 
@@ -272,7 +269,7 @@ impl StorageTxn for ExternalStorageTxn<'_> {
             let exists_json = self
                 .executor
                 .query_one(TASK_EXISTS_SQL, &[SqlParam::Text(uuid.to_string())])?;
-            parse_json_bool(&exists_json)?
+            parse_json_bool(&exists_json, "exists_flag")?
         };
         if exists {
             self.write_buffer.extend(delete_task_stmts(&uuid));
@@ -371,7 +368,17 @@ impl StorageTxn for ExternalStorageTxn<'_> {
 
 // ── JSON parsing helpers ──────────────────────────────────────────────────
 
-/// Extract a string field from a JSON object string.
+/// Extract an optional string field from a JSON object. Returns `None` for
+/// missing or null fields; non-string types also return `None`.
+fn get_opt_str(obj: &serde_json::Map<String, serde_json::Value>, key: &str) -> Option<String> {
+    obj.get(key).and_then(|v| match v {
+        serde_json::Value::String(s) => Some(s.clone()),
+        _ => None,
+    })
+}
+
+/// Extract a required string field from a JSON object string.
+/// Returns `Err` if the field is missing, null, or not a string type.
 fn parse_json_string_field(json: &str, field: &str) -> Result<String> {
     let v: serde_json::Value = serde_json::from_str(json)
         .map_err(|e| Error::Database(format!("Failed to parse JSON: {e}")))?;
@@ -380,46 +387,31 @@ fn parse_json_string_field(json: &str, field: &str) -> Result<String> {
         Some(serde_json::Value::Null) | None => Err(Error::Database(format!(
             "Missing field {field:?} in JSON row"
         ))),
-        Some(other) => Ok(other.to_string()),
+        Some(other) => Err(Error::Database(format!(
+            "Field {field:?} must be a string, got: {other}"
+        ))),
     }
 }
 
-/// Parse a JSON row containing a single boolean/integer EXISTS result.
-/// The first value in the object is interpreted as truthy (bool or int != 0).
-fn parse_json_bool(json: &Option<String>) -> Result<bool> {
+/// Parse the named field from a JSON row as a boolean/integer flag.
+/// Returns `Err` if the row is missing, if the field is absent, or if
+/// the field value is neither a bool nor an integer.
+fn parse_json_bool(json: &Option<String>, field: &str) -> Result<bool> {
     let Some(json) = json else {
         return Ok(false);
     };
     let v: serde_json::Value = serde_json::from_str(json)
         .map_err(|e| Error::Database(format!("Failed to parse JSON: {e}")))?;
-    if let Some(obj) = v.as_object() {
-        if let Some((_, val)) = obj.iter().next() {
-            return match val {
-                serde_json::Value::Bool(b) => Ok(*b),
-                serde_json::Value::Number(n) => Ok(n.as_i64().unwrap_or(0) != 0),
-                _ => Ok(false),
-            };
-        }
+    match v.get(field) {
+        Some(serde_json::Value::Bool(b)) => Ok(*b),
+        Some(serde_json::Value::Number(n)) => Ok(n.as_i64().unwrap_or(0) != 0),
+        Some(other) => Err(Error::Database(format!(
+            "Field {field:?} must be a number, got: {other}"
+        ))),
+        None => Err(Error::Database(format!(
+            "Missing field {field:?} in result"
+        ))),
     }
-    Ok(false)
-}
-
-/// Parse a JSON row containing a single integer count result.
-fn parse_json_int_field(json: &Option<String>, default: i64) -> Result<i64> {
-    let Some(json) = json else {
-        return Ok(default);
-    };
-    let v: serde_json::Value = serde_json::from_str(json)
-        .map_err(|e| Error::Database(format!("Failed to parse JSON: {e}")))?;
-    if let Some(obj) = v.as_object() {
-        if let Some((_, val)) = obj.iter().next() {
-            return match val {
-                serde_json::Value::Number(n) => Ok(n.as_i64().unwrap_or(default)),
-                _ => Ok(default),
-            };
-        }
-    }
-    Ok(default)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────
@@ -501,20 +493,11 @@ mod test {
     impl SqlExecutor for MockSqlExecutor {
         fn query_one(&self, sql: &str, params: &[SqlParam]) -> Result<Option<String>> {
             let conn = self.conn.lock().unwrap();
-            let param_values: Vec<Box<dyn rusqlite::types::ToSql>> = params
-                .iter()
-                .map(|p| -> Box<dyn rusqlite::types::ToSql> {
-                    match p {
-                        SqlParam::Text(s) => Box::new(s.clone()),
-                        SqlParam::Null => Box::new(rusqlite::types::Null),
-                    }
-                })
-                .collect();
             let mut stmt = conn
                 .prepare(sql)
                 .map_err(|e| Error::Database(format!("Prepare failed: {e}")))?;
             let col_count = stmt.column_count();
-            let result = stmt.query_row(rusqlite::params_from_iter(param_values), |row| {
+            let result = stmt.query_row(rusqlite::params_from_iter(params.iter()), |row| {
                 Self::row_to_json(row, col_count)
             });
             match result {
@@ -526,21 +509,12 @@ mod test {
 
         fn query_all(&self, sql: &str, params: &[SqlParam]) -> Result<Vec<String>> {
             let conn = self.conn.lock().unwrap();
-            let param_values: Vec<Box<dyn rusqlite::types::ToSql>> = params
-                .iter()
-                .map(|p| -> Box<dyn rusqlite::types::ToSql> {
-                    match p {
-                        SqlParam::Text(s) => Box::new(s.clone()),
-                        SqlParam::Null => Box::new(rusqlite::types::Null),
-                    }
-                })
-                .collect();
             let mut stmt = conn
                 .prepare(sql)
                 .map_err(|e| Error::Database(format!("Prepare failed: {e}")))?;
             let col_count = stmt.column_count();
             let rows = stmt
-                .query_map(rusqlite::params_from_iter(param_values), |row| {
+                .query_map(rusqlite::params_from_iter(params.iter()), |row| {
                     Self::row_to_json(row, col_count)
                 })
                 .map_err(|e| Error::Database(format!("Query failed: {e}")))?;
@@ -554,17 +528,7 @@ mod test {
                 .transaction()
                 .map_err(|e| Error::Database(format!("Begin txn failed: {e}")))?;
             for stmt in statements {
-                let param_values: Vec<Box<dyn rusqlite::types::ToSql>> = stmt
-                    .params
-                    .iter()
-                    .map(|p| -> Box<dyn rusqlite::types::ToSql> {
-                        match p {
-                            SqlParam::Text(s) => Box::new(s.clone()),
-                            SqlParam::Null => Box::new(rusqlite::types::Null),
-                        }
-                    })
-                    .collect();
-                txn.execute(&stmt.sql, rusqlite::params_from_iter(param_values))
+                txn.execute(&stmt.sql, rusqlite::params_from_iter(stmt.params.iter()))
                     .map_err(|e| {
                         Error::Database(format!("Execute failed: {e} (sql: {})", stmt.sql))
                     })?;
@@ -707,5 +671,75 @@ mod test {
         ] {
             assert_eq!(got.get(key).map(String::as_str), Some(epoch), "field {key}");
         }
+    }
+
+    /// Verify get_pending_tasks returns only status='pending' tasks with full data.
+    #[tokio::test]
+    async fn test_external_get_pending_tasks() {
+        let mut storage = storage().await;
+        let uuid_pending = Uuid::new_v4();
+        let uuid_completed = Uuid::new_v4();
+
+        let mut txn = storage.txn().await.unwrap();
+        txn.create_task(uuid_pending).await.unwrap();
+        let mut t1 = TaskMap::new();
+        t1.insert("status".into(), "pending".into());
+        t1.insert("description".into(), "pending task".into());
+        t1.insert("tag_work".into(), String::new());
+        txn.set_task(uuid_pending, t1).await.unwrap();
+
+        txn.create_task(uuid_completed).await.unwrap();
+        let mut t2 = TaskMap::new();
+        t2.insert("status".into(), "completed".into());
+        txn.set_task(uuid_completed, t2).await.unwrap();
+        txn.commit().await.unwrap();
+        drop(txn);
+
+        let mut txn = storage.txn().await.unwrap();
+        let pending = txn.get_pending_tasks().await.unwrap();
+        assert_eq!(pending.len(), 1, "should return exactly one pending task");
+        let (got_uuid, got_task) = &pending[0];
+        assert_eq!(*got_uuid, uuid_pending);
+        assert_eq!(got_task.get("status").map(String::as_str), Some("pending"));
+        assert_eq!(
+            got_task.get("description").map(String::as_str),
+            Some("pending task")
+        );
+        // Tags must be merged in for pending tasks too.
+        assert_eq!(got_task.get("tag_work").map(String::as_str), Some(""));
+    }
+
+    /// Verify remove_operation errors when the operation log is empty.
+    #[tokio::test]
+    async fn test_external_remove_operation_empty() {
+        let mut storage = storage().await;
+        let mut txn = storage.txn().await.unwrap();
+        let result = txn.remove_operation(Operation::UndoPoint).await;
+        assert!(result.is_err(), "should error on empty op log");
+        assert!(
+            result.unwrap_err().to_string().contains("No operations"),
+            "error message should mention empty log"
+        );
+    }
+
+    /// Verify remove_operation errors when the last op doesn't match.
+    #[tokio::test]
+    async fn test_external_remove_operation_mismatch() {
+        let mut storage = storage().await;
+        let uuid = Uuid::new_v4();
+
+        let mut txn = storage.txn().await.unwrap();
+        txn.add_operation(Operation::Create { uuid }).await.unwrap();
+        txn.commit().await.unwrap();
+        drop(txn);
+
+        // Try to remove UndoPoint, but the last op is Create.
+        let mut txn = storage.txn().await.unwrap();
+        let result = txn.remove_operation(Operation::UndoPoint).await;
+        assert!(result.is_err(), "should error on mismatch");
+        assert!(
+            result.unwrap_err().to_string().contains("does not match"),
+            "error message should mention mismatch"
+        );
     }
 }

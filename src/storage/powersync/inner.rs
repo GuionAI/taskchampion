@@ -14,8 +14,8 @@ use super::row_reader::{query_task_rows, read_raw_task_row};
 use crate::storage::columns::{raw_to_task, TASK_SELECT_COLS};
 use crate::storage::sql_ops::{
     add_operation_stmt, create_task_stmt, delete_task_stmts, prepare_task, remove_operation_stmt,
-    set_task_stmts, SqlParam, SqlStatement, ALL_OPERATIONS_SQL, ALL_TASK_UUIDS_SQL,
-    LAST_OPERATION_SQL, TASK_EXISTS_SQL,
+    set_task_stmts, SqlStatement, ALL_OPERATIONS_SQL, ALL_TASK_UUIDS_SQL, LAST_OPERATION_SQL,
+    TASK_EXISTS_SQL,
 };
 
 /// Query tc_tags and tc_annotations for the given task UUID and inject them
@@ -59,17 +59,7 @@ fn merge_tags_annotations(
 
 /// Execute a SqlStatement against a rusqlite Transaction.
 fn execute_sql_stmt(t: &rusqlite::Transaction, stmt: &SqlStatement) -> Result<()> {
-    let params: Vec<Box<dyn rusqlite::types::ToSql>> = stmt
-        .params
-        .iter()
-        .map(|p| -> Box<dyn rusqlite::types::ToSql> {
-            match p {
-                SqlParam::Text(s) => Box::new(s.clone()),
-                SqlParam::Null => Box::new(rusqlite::types::Null),
-            }
-        })
-        .collect();
-    t.execute(&stmt.sql, rusqlite::params_from_iter(params))
+    t.execute(&stmt.sql, rusqlite::params_from_iter(stmt.params.iter()))
         .context("Executing SQL statement")?;
     Ok(())
 }
@@ -377,7 +367,7 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
             &self.user_id,
             exists,
             project_id.as_deref(),
-        );
+        )?;
         for stmt in &stmts {
             execute_sql_stmt(t, stmt)?;
         }
