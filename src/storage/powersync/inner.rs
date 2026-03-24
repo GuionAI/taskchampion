@@ -9,9 +9,8 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::path::Path;
 use uuid::Uuid;
 
-use super::columns::{
-    extract_timestamp, query_task_rows, raw_to_task, read_raw_task_row, TASK_SELECT_COLS,
-};
+use crate::storage::columns::{extract_timestamp, raw_to_task, TASK_SELECT_COLS};
+use super::row_reader::{query_task_rows, read_raw_task_row};
 use super::extension::init_powersync_extension;
 
 const TS_FMT: &str = "%Y-%m-%d %H:%M:%S%.3f";

@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 mod config;
+pub(crate) mod columns;
 pub mod inmemory;
 #[cfg(feature = "storage-powersync")]
 pub mod powersync;
