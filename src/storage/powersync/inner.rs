@@ -253,6 +253,33 @@ impl<'t> PowerSyncTxn<'t> {
     }
 }
 
+/// Parse an operation from a JSON string, handling double-encoded JSONB values.
+///
+/// PowerSync sync from Supabase can double-encode bare JSON string values:
+/// `Operation::UndoPoint` serializes as `"UndoPoint"` (a JSON string), which
+/// Supabase JSONB stores as a string value. When PowerSync syncs back to SQLite
+/// TEXT, it re-serializes the JSONB, producing `"\"UndoPoint\""`. Object variants
+/// like `{"Create":{...}}` are unaffected because JSON objects don't get re-wrapped.
+fn parse_operation(data_str: &str) -> Result<Operation> {
+    match serde_json::from_str::<Operation>(data_str) {
+        Ok(op) => Ok(op),
+        Err(original_err) => {
+            // If the string is a double-encoded JSON value (starts and ends with `"`),
+            // unwrap one layer of JSON string encoding and retry.
+            if data_str.starts_with('"') && data_str.ends_with('"') {
+                if let Ok(inner) = serde_json::from_str::<String>(data_str) {
+                    return serde_json::from_str::<Operation>(&inner).map_err(|e| {
+                        Error::Database(format!("Failed to parse operation (unwrapped): {e}"))
+                    });
+                }
+            }
+            Err(Error::Database(format!(
+                "Failed to parse operation: {original_err}"
+            )))
+        }
+    }
+}
+
 #[async_trait(?Send)]
 impl WrappedStorageTxn for PowerSyncTxn<'_> {
     async fn get_task(&mut self, uuid: Uuid) -> Result<Option<TaskMap>> {
@@ -541,10 +568,7 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
         let rows = q.query_map([], |r| r.get::<_, String>("data"))?;
         let raw: Vec<String> = rows.collect::<std::result::Result<_, _>>()?;
         raw.into_iter()
-            .map(|data_str| {
-                serde_json::from_str::<Operation>(&data_str)
-                    .map_err(|e| Error::Database(format!("Failed to parse operation: {e}")))
-            })
+            .map(|data_str| parse_operation(&data_str))
             .filter_map(|res| match res {
                 Ok(op) if op.get_uuid() == Some(uuid) => Some(Ok(op)),
                 Ok(_) => None,
@@ -559,10 +583,7 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
         let rows = q.query_map([], |r| r.get::<_, String>("data"))?;
         rows.collect::<std::result::Result<Vec<_>, _>>()?
             .into_iter()
-            .map(|data_str| {
-                serde_json::from_str::<Operation>(&data_str)
-                    .map_err(|e| Error::Database(format!("Failed to parse operation: {e}")))
-            })
+            .map(|data_str| parse_operation(&data_str))
             .collect()
     }
 
@@ -604,8 +625,7 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
             return Err(Error::Database("No operations to remove".into()));
         };
 
-        let last_op: Operation = serde_json::from_str(&last_data)
-            .map_err(|e| Error::Database(format!("Failed to parse operation: {e}")))?;
+        let last_op: Operation = parse_operation(&last_data)?;
 
         if last_op != op {
             return Err(Error::Database(format!(
@@ -627,5 +647,56 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
             .ok_or_else(|| Error::Database("Transaction already committed".into()))?;
         t.commit().context("Committing transaction")?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod parse_tests {
+    use super::*;
+
+    #[test]
+    fn normal_undo_point() {
+        // Normal: locally-written UndoPoint → "UndoPoint"
+        let data = r#""UndoPoint""#;
+        let op = parse_operation(data).unwrap();
+        assert!(op.is_undo_point());
+    }
+
+    #[test]
+    fn double_encoded_undo_point() {
+        // Double-encoded: JSONB round-trip wraps the JSON string in another layer
+        // Simulates: SQLite TEXT column contains "\"UndoPoint\""
+        let data = r#""\"UndoPoint\"""#;
+        let op = parse_operation(data).unwrap();
+        assert!(op.is_undo_point());
+    }
+
+    #[test]
+    fn double_encoded_invalid_variant() {
+        // Double-encoded but inner value is not a valid Operation variant.
+        // Unwrap succeeds, but second parse fails → should return Err, not panic.
+        let data = r#""\"NotARealVariant\"""#;
+        let result = parse_operation(data);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("unwrapped"),
+            "error should indicate unwrapped path: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn normal_create() {
+        // Object variants are not double-encoded
+        let uuid = uuid::Uuid::new_v4();
+        let data = format!(r#"{{"Create":{{"uuid":"{}"}}}}"#, uuid);
+        let op = parse_operation(&data).unwrap();
+        assert_eq!(op.get_uuid(), Some(uuid));
+    }
+
+    #[test]
+    fn invalid_data() {
+        let data = "not valid json at all";
+        assert!(parse_operation(data).is_err());
     }
 }
