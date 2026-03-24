@@ -4,17 +4,19 @@ use crate::storage::send_wrapper::{WrappedStorage, WrappedStorageTxn};
 use crate::storage::TaskMap;
 use anyhow::Context;
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::DateTime;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::path::Path;
 use uuid::Uuid;
 
-use super::columns::{
-    extract_timestamp, query_task_rows, raw_to_task, read_raw_task_row, TASK_SELECT_COLS,
-};
 use super::extension::init_powersync_extension;
-
-const TS_FMT: &str = "%Y-%m-%d %H:%M:%S%.3f";
+use super::row_reader::{query_task_rows, read_raw_task_row};
+use crate::storage::columns::{raw_to_task, TASK_SELECT_COLS};
+use crate::storage::sql_ops::{
+    add_operation_stmt, create_task_stmt, delete_task_stmts, prepare_task, remove_operation_stmt,
+    set_task_stmts, SqlStatement, ALL_OPERATIONS_SQL, ALL_TASK_UUIDS_SQL, LAST_OPERATION_SQL,
+    TASK_EXISTS_SQL,
+};
 
 /// Query tc_tags and tc_annotations for the given task UUID and inject them
 /// into the TaskMap as `tag_<name>` and `annotation_<epoch>` keys.
@@ -52,6 +54,13 @@ fn merge_tags_annotations(
         task_map.insert(format!("annotation_{}", dt.timestamp()), description);
     }
 
+    Ok(())
+}
+
+/// Execute a SqlStatement against a rusqlite Transaction.
+fn execute_sql_stmt(t: &rusqlite::Transaction, stmt: &SqlStatement) -> Result<()> {
+    t.execute(&stmt.sql, rusqlite::params_from_iter(stmt.params.iter()))
+        .context("Executing SQL statement")?;
     Ok(())
 }
 
@@ -329,186 +338,39 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
         if count > 0 {
             return Ok(false);
         }
-        t.execute(
-            "INSERT INTO tc_tasks (id, user_id, data) VALUES (?, ?, '{}')",
-            params![&uuid.to_string(), &self.user_id.to_string()],
-        )
-        .context("Create task query")?;
+        execute_sql_stmt(t, &create_task_stmt(&uuid, &self.user_id))?;
         Ok(true)
     }
 
     async fn set_task(&mut self, uuid: Uuid, task: TaskMap) -> Result<()> {
-        let mut task_data = task;
-
-        // Extract string columns.
-        let status = task_data.remove("status");
-        let description = task_data.remove("description");
-        let priority = task_data.remove("priority");
-        let parent_id = task_data.remove("parent_id");
-        let position = task_data.remove("position");
-
-        // Extract and convert timestamp columns. An Err propagates immediately,
-        // aborting set_task before any DB write, so no partial state is committed.
-        let entry_at = extract_timestamp(&mut task_data, "entry")?;
-        let modified_at = extract_timestamp(&mut task_data, "modified")?;
-        let due_at = extract_timestamp(&mut task_data, "due")?;
-        let scheduled_at = extract_timestamp(&mut task_data, "scheduled")?;
-        let start_at = extract_timestamp(&mut task_data, "start")?;
-        let end_at = extract_timestamp(&mut task_data, "end")?;
-        let wait_at = extract_timestamp(&mut task_data, "wait")?;
+        let prepared = prepare_task(task)?;
 
         // Resolve project name → project_id (look up or create in projects table).
-        let project_id: Option<String> = task_data
-            .remove("project")
-            .map(|name| self.resolve_project_id(&name))
+        let project_id: Option<String> = prepared
+            .project_name
+            .as_ref()
+            .map(|name| self.resolve_project_id(name))
             .transpose()?;
-
-        // Extract tags (tag_<name> → "") before serializing data blob.
-        // Collect keys first to break the immutable borrow, then remove via mutable borrow.
-        let tag_names: Vec<String> = task_data
-            .keys()
-            .filter(|k| k.starts_with("tag_"))
-            .cloned()
-            .collect::<Vec<_>>()
-            .into_iter()
-            .filter_map(|k| {
-                task_data.remove(&k);
-                k.strip_prefix("tag_").map(String::from)
-            })
-            .collect();
-
-        // Extract annotations (annotation_<epoch> → description) before serializing data blob.
-        // Always remove annotation keys from task_data (even on error), then validate the epoch.
-        // An unparseable suffix is a data-integrity error — propagate rather than leave a
-        // stale key in the blob.
-        let annotation_keys: Vec<String> = task_data
-            .keys()
-            .filter(|k| k.starts_with("annotation_"))
-            .cloned()
-            .collect();
-        let annotations: Vec<(i64, String)> = annotation_keys
-            .into_iter()
-            .map(|k| {
-                let desc = task_data.remove(&k).expect("key collected from same map");
-                let epoch_str = k.strip_prefix("annotation_").unwrap();
-                let epoch: i64 = epoch_str.parse().map_err(|_| {
-                    Error::Database(format!(
-                        "Invalid annotation key {k:?}: epoch suffix is not an integer"
-                    ))
-                })?;
-                Ok((epoch, desc))
-            })
-            .collect::<Result<Vec<_>>>()?;
-
-        let data_str = serde_json::to_string(&task_data)
-            .map_err(|e| Error::Database(format!("Failed to serialize task data: {e}")))?;
 
         // PowerSync views don't support UPSERT (INSERT ... ON CONFLICT DO UPDATE).
         // INSTEAD OF triggers also report 0 rows changed regardless of success,
         // so we check existence with SELECT, then INSERT or UPDATE accordingly.
         let t = self.get_txn()?;
-        let uuid_str = uuid.to_string();
         let exists: bool = t
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM tc_tasks WHERE id = ?)",
-                [&uuid_str],
-                |row| row.get(0),
-            )
+            .query_row(TASK_EXISTS_SQL, [&uuid.to_string()], |row| row.get(0))
             .context("Set task existence check")?;
 
-        if exists {
-            t.execute(
-                "UPDATE tc_tasks SET
-                   user_id = ?, data = ?, status = ?, description = ?, priority = ?,
-                   entry_at = ?, modified_at = ?, due_at = ?, scheduled_at = ?,
-                   start_at = ?, end_at = ?, wait_at = ?, parent_id = ?, position = ?, project_id = ?
-                 WHERE id = ?",
-                params![
-                    &self.user_id.to_string(),
-                    &data_str,
-                    &status,
-                    &description,
-                    &priority,
-                    &entry_at,
-                    &modified_at,
-                    &due_at,
-                    &scheduled_at,
-                    &start_at,
-                    &end_at,
-                    &wait_at,
-                    &parent_id,
-                    &position,
-                    &project_id,
-                    &uuid_str,
-                ],
-            )
-            .context("Set task UPDATE query")?;
-        } else {
-            t.execute(
-                "INSERT INTO tc_tasks
-                 (id, user_id, data, status, description, priority,
-                  entry_at, modified_at, due_at, scheduled_at, start_at, end_at, wait_at,
-                  parent_id, position, project_id)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                params![
-                    &uuid_str,
-                    &self.user_id.to_string(),
-                    &data_str,
-                    &status,
-                    &description,
-                    &priority,
-                    &entry_at,
-                    &modified_at,
-                    &due_at,
-                    &scheduled_at,
-                    &start_at,
-                    &end_at,
-                    &wait_at,
-                    &parent_id,
-                    &position,
-                    &project_id,
-                ],
-            )
-            .context("Set task INSERT query")?;
+        // Generate and execute statements.
+        let stmts = set_task_stmts(
+            &uuid,
+            &prepared,
+            &self.user_id,
+            exists,
+            project_id.as_deref(),
+        )?;
+        for stmt in &stmts {
+            execute_sql_stmt(t, stmt)?;
         }
-
-        // Sync tags: delete all existing rows for this task, then insert current set.
-        let user_id_str = self.user_id.to_string();
-        t.execute("DELETE FROM tc_tags WHERE task_id = ?", [&uuid_str])
-            .context("Delete existing tags")?;
-        for tag_name in &tag_names {
-            t.execute(
-                "INSERT INTO tc_tags (id, task_id, user_id, name) VALUES (?, ?, ?, ?)",
-                params![
-                    &Uuid::now_v7().to_string(),
-                    &uuid_str,
-                    &user_id_str,
-                    tag_name,
-                ],
-            )
-            .context("Insert tag")?;
-        }
-
-        // Sync annotations: delete all existing rows for this task, then insert current set.
-        t.execute("DELETE FROM tc_annotations WHERE task_id = ?", [&uuid_str])
-            .context("Delete existing annotations")?;
-        for (epoch, description) in &annotations {
-            let entry_at = DateTime::from_timestamp(*epoch, 0)
-                .map(|dt| dt.to_rfc3339())
-                .ok_or_else(|| Error::Database(format!("Invalid annotation timestamp: {epoch}")))?;
-            t.execute(
-                "INSERT INTO tc_annotations (id, task_id, user_id, entry_at, description) VALUES (?, ?, ?, ?, ?)",
-                params![
-                    &Uuid::now_v7().to_string(),
-                    &uuid_str,
-                    &user_id_str,
-                    &entry_at,
-                    description,
-                ],
-            )
-            .context("Insert annotation")?;
-        }
-
         Ok(())
     }
 
@@ -518,19 +380,12 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
         // INSTEAD OF triggers on PowerSync views report 0 rows changed,
         // so check existence before DELETE to return the correct boolean.
         let exists: bool = t
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM tc_tasks WHERE id = ?)",
-                [&uuid_str],
-                |row| row.get(0),
-            )
+            .query_row(TASK_EXISTS_SQL, [&uuid_str], |row| row.get(0))
             .context("Delete task existence check")?;
         if exists {
-            t.execute("DELETE FROM tc_tags WHERE task_id = ?", [&uuid_str])
-                .context("Delete task tags")?;
-            t.execute("DELETE FROM tc_annotations WHERE task_id = ?", [&uuid_str])
-                .context("Delete task annotations")?;
-            t.execute("DELETE FROM tc_tasks WHERE id = ?", [&uuid_str])
-                .context("Delete task query")?;
+            for stmt in &delete_task_stmts(&uuid) {
+                execute_sql_stmt(t, stmt)?;
+            }
         }
         Ok(exists)
     }
@@ -552,7 +407,7 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
 
     async fn all_task_uuids(&mut self) -> Result<Vec<Uuid>> {
         let t = self.get_txn()?;
-        let mut q = t.prepare("SELECT id FROM tc_tasks")?;
+        let mut q = t.prepare(ALL_TASK_UUIDS_SQL)?;
         let rows = q.query_map([], |r| r.get::<_, String>(0))?;
         rows.collect::<std::result::Result<Vec<_>, _>>()?
             .into_iter()
@@ -564,7 +419,7 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
         // tc_operations has no UUID column (schema is PowerSync-managed).
         // Filter in memory after deserializing; acceptable for the expected operation count.
         let t = self.get_txn()?;
-        let mut q = t.prepare("SELECT data FROM tc_operations ORDER BY id ASC")?;
+        let mut q = t.prepare(ALL_OPERATIONS_SQL)?;
         let rows = q.query_map([], |r| r.get::<_, String>("data"))?;
         let raw: Vec<String> = rows.collect::<std::result::Result<_, _>>()?;
         raw.into_iter()
@@ -579,7 +434,7 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
 
     async fn all_operations(&mut self) -> Result<Vec<Operation>> {
         let t = self.get_txn()?;
-        let mut q = t.prepare("SELECT data FROM tc_operations ORDER BY id ASC")?;
+        let mut q = t.prepare(ALL_OPERATIONS_SQL)?;
         let rows = q.query_map([], |r| r.get::<_, String>("data"))?;
         rows.collect::<std::result::Result<Vec<_>, _>>()?
             .into_iter()
@@ -588,37 +443,15 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
     }
 
     async fn add_operation(&mut self, op: Operation) -> Result<()> {
-        // Only Update carries a timestamp; Create, Delete, and UndoPoint don't have one.
-        let created_at = match &op {
-            Operation::Update { timestamp, .. } => timestamp.format(TS_FMT).to_string(),
-            Operation::Create { .. } | Operation::Delete { .. } | Operation::UndoPoint => {
-                Utc::now().format(TS_FMT).to_string()
-            }
-        };
-        let data_str = serde_json::to_string(&op)
-            .map_err(|e| Error::Database(format!("Failed to serialize operation: {e}")))?;
         let t = self.get_txn()?;
-        t.execute(
-            "INSERT INTO tc_operations (id, user_id, data, created_at) VALUES (?, ?, ?, ?)",
-            params![
-                &Uuid::now_v7().to_string(),
-                &self.user_id.to_string(),
-                &data_str,
-                &created_at
-            ],
-        )
-        .context("Add operation query")?;
+        execute_sql_stmt(t, &add_operation_stmt(&op, &self.user_id)?)?;
         Ok(())
     }
 
     async fn remove_operation(&mut self, op: Operation) -> Result<()> {
         let t = self.get_txn()?;
         let last: Option<(String, String)> = t
-            .query_row(
-                "SELECT id, data FROM tc_operations ORDER BY id DESC LIMIT 1",
-                [],
-                |x| Ok((x.get(0)?, x.get(1)?)),
-            )
+            .query_row(LAST_OPERATION_SQL, [], |x| Ok((x.get(0)?, x.get(1)?)))
             .optional()?;
 
         let Some((last_id, last_data)) = last else {
@@ -634,9 +467,7 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
             )));
         }
 
-        let t = self.get_txn()?;
-        t.execute("DELETE FROM tc_operations WHERE id = ?", [&last_id])
-            .context("Remove operation")?;
+        execute_sql_stmt(t, &remove_operation_stmt(&last_id))?;
         Ok(())
     }
 

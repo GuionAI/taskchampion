@@ -21,10 +21,14 @@ pub use errors::Error;
 pub use operation::{Operation, Operations};
 pub use position::{append_position, between_position, prepend_position, sequential_positions};
 pub use replica::Replica;
+#[cfg(feature = "storage-external")]
+pub use storage::external::{ExternalStorage, SqlExecutor};
 #[cfg(feature = "storage-ffi")]
 pub use storage::powersync::DirectPowerSyncStorage;
 #[cfg(feature = "storage-powersync")]
 pub use storage::powersync::PowerSyncStorage;
+#[cfg(feature = "storage-external")]
+pub use storage::sql_ops::{SqlParam, SqlStatement};
 pub use task::{utc_timestamp, Annotation, Status, Tag, Task, TaskData};
 pub use treemap::TreeMap;
 

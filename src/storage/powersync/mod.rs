@@ -5,9 +5,9 @@ use async_trait::async_trait;
 use std::path::Path;
 use uuid::Uuid;
 
-mod columns;
 #[cfg(feature = "storage-ffi")]
 mod direct;
+mod row_reader;
 #[cfg(feature = "storage-ffi")]
 pub use direct::DirectPowerSyncStorage;
 mod extension;
