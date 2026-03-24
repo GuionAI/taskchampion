@@ -121,3 +121,82 @@ fn collect_tree(tm: &TreeMap, parent: Option<Uuid>, uuids: &[Uuid], nodes: &mut 
         collect_tree(tm, Some(uuid), &children, nodes);
     }
 }
+
+// ---------------------------------------------------------------------------
+// FfiSqlExecutor → SqlExecutor adapter
+// ---------------------------------------------------------------------------
+
+use crate::types::{FfiSqlExecutor, FfiSqlParam, FfiSqlStatement};
+use std::sync::Arc;
+use taskchampion::{SqlExecutor, SqlParam, SqlStatement};
+
+/// Wraps a UniFFI callback interface (`Arc<dyn FfiSqlExecutor>`) and
+/// implements the core [`SqlExecutor`] trait by converting between
+/// owned FFI types and reference-based core types.
+pub(crate) struct FfiSqlExecutorAdapter {
+    inner: Arc<dyn FfiSqlExecutor>,
+}
+
+impl FfiSqlExecutorAdapter {
+    pub(crate) fn new(executor: Arc<dyn FfiSqlExecutor>) -> Self {
+        Self { inner: executor }
+    }
+}
+
+impl SqlExecutor for FfiSqlExecutorAdapter {
+    fn query_one(
+        &self,
+        sql: &str,
+        params: &[SqlParam],
+    ) -> std::result::Result<Option<String>, taskchampion::Error> {
+        let ffi_params: Vec<FfiSqlParam> = params.iter().map(core_param_to_ffi).collect();
+        self.inner
+            .query_one(sql.to_string(), ffi_params)
+            .map_err(ffi_error_to_core)
+    }
+
+    fn query_all(
+        &self,
+        sql: &str,
+        params: &[SqlParam],
+    ) -> std::result::Result<Vec<String>, taskchampion::Error> {
+        let ffi_params: Vec<FfiSqlParam> = params.iter().map(core_param_to_ffi).collect();
+        self.inner
+            .query_all(sql.to_string(), ffi_params)
+            .map_err(ffi_error_to_core)
+    }
+
+    fn execute_batch(
+        &self,
+        statements: &[SqlStatement],
+    ) -> std::result::Result<(), taskchampion::Error> {
+        let ffi_stmts: Vec<FfiSqlStatement> = statements.iter().map(core_stmt_to_ffi).collect();
+        self.inner
+            .execute_batch(ffi_stmts)
+            .map_err(ffi_error_to_core)
+    }
+}
+
+fn core_param_to_ffi(param: &SqlParam) -> FfiSqlParam {
+    match param {
+        SqlParam::Text(s) => FfiSqlParam::Text { value: s.clone() },
+        SqlParam::Null => FfiSqlParam::Null,
+    }
+}
+
+fn core_stmt_to_ffi(stmt: &SqlStatement) -> FfiSqlStatement {
+    FfiSqlStatement {
+        sql: stmt.sql.clone(),
+        params: stmt.params.iter().map(core_param_to_ffi).collect(),
+    }
+}
+
+fn ffi_error_to_core(e: FfiError) -> taskchampion::Error {
+    match e {
+        FfiError::Database { message } => taskchampion::Error::Database(message),
+        FfiError::Usage { message } => taskchampion::Error::Usage(message),
+        FfiError::Internal { message } => {
+            taskchampion::Error::Other(anyhow::anyhow!("{}", message))
+        }
+    }
+}

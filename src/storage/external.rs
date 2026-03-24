@@ -15,7 +15,7 @@ use crate::storage::columns::{raw_to_task, RawTaskRow, TASK_SELECT_COLS};
 use crate::storage::sql_ops::{
     add_operation_stmt, create_task_stmt, delete_task_stmts, insert_project_stmt, prepare_task,
     remove_operation_stmt, set_task_stmts, SqlParam, SqlStatement, ALL_OPERATIONS_SQL,
-    ALL_TASK_UUIDS_SQL, ANNOTATION_QUERY_SQL, LAST_OPERATION_SQL, PROJECT_LOOKUP_SQL,
+    ALL_OPS_WITH_ID_DESC_SQL, ALL_TASK_UUIDS_SQL, ANNOTATION_QUERY_SQL, PROJECT_LOOKUP_SQL,
     TAG_QUERY_SQL, TASK_EXISTS_SQL,
 };
 use crate::storage::{Storage, StorageTxn, TaskMap};
@@ -62,6 +62,8 @@ impl Storage for ExternalStorage {
             write_buffer: Vec::new(),
             project_cache: HashMap::new(),
             pending_creates: HashSet::new(),
+            pending_op_deletes: HashSet::new(),
+            task_write_cache: HashMap::new(),
         }))
     }
 }
@@ -78,6 +80,20 @@ struct ExternalStorageTxn<'a> {
     /// Prevents double-INSERT when `create_task` + `set_task` are called
     /// for the same UUID in one transaction (the shared test suite does this).
     pending_creates: HashSet<Uuid>,
+    /// Track IDs of operations deleted in this transaction's write buffer.
+    /// Since writes are batched and reads go directly to committed DB state,
+    /// we must track buffered deletes locally so that `remove_operation`
+    /// sees the correct "effective last" operation across multiple removals
+    /// within the same transaction (e.g. during undo).
+    pending_op_deletes: HashSet<String>,
+    /// Write-ahead cache: stores the latest in-memory state of tasks that
+    /// have been written via `set_task` in this transaction.  Since reads go
+    /// directly to the committed DB state, consecutive `get_task` / `set_task`
+    /// pairs within the same transaction (e.g. inside `apply_op` during undo)
+    /// would otherwise lose earlier buffered mutations.  By returning the
+    /// cached state here we provide read-your-writes semantics within a
+    /// single transaction.
+    task_write_cache: HashMap<Uuid, TaskMap>,
 }
 
 impl ExternalStorageTxn<'_> {
@@ -178,6 +194,16 @@ impl ExternalStorageTxn<'_> {
 #[async_trait]
 impl StorageTxn for ExternalStorageTxn<'_> {
     async fn get_task(&mut self, uuid: Uuid) -> Result<Option<TaskMap>> {
+        // Read-your-writes: return the most recent in-transaction state.
+        if let Some(task) = self.task_write_cache.get(&uuid) {
+            return Ok(Some(task.clone()));
+        }
+        // A task created in this transaction is in the write buffer but not yet
+        // visible to the host DB. Return an empty TaskMap so that subsequent
+        // Update operations within the same transaction can build on it.
+        if self.pending_creates.contains(&uuid) {
+            return Ok(Some(TaskMap::new()));
+        }
         let sql = format!(
             "SELECT {TASK_SELECT_COLS} FROM tc_tasks t \
              LEFT JOIN projects p ON t.project_id = p.id \
@@ -232,6 +258,9 @@ impl StorageTxn for ExternalStorageTxn<'_> {
     }
 
     async fn set_task(&mut self, uuid: Uuid, task: TaskMap) -> Result<()> {
+        // Cache the task map so subsequent get_task calls within this
+        // transaction see the buffered state (read-your-writes).
+        self.task_write_cache.insert(uuid, task.clone());
         let prepared = prepare_task(task)?;
 
         // Resolve project (uses local cache for buffered projects).
@@ -262,6 +291,8 @@ impl StorageTxn for ExternalStorageTxn<'_> {
     }
 
     async fn delete_task(&mut self, uuid: Uuid) -> Result<bool> {
+        // Evict from write cache — task no longer exists in this transaction.
+        self.task_write_cache.remove(&uuid);
         // Check pending_creates first.
         let exists = if self.pending_creates.contains(&uuid) {
             true
@@ -338,13 +369,21 @@ impl StorageTxn for ExternalStorageTxn<'_> {
     }
 
     async fn remove_operation(&mut self, op: Operation) -> Result<()> {
-        // Must read from host to verify the last operation matches.
-        let last_json = self.executor.query_one(LAST_OPERATION_SQL, &[])?;
-        let Some(json) = last_json else {
+        // Read all operations ordered newest-first and find the effective last,
+        // skipping any that have already been buffered for deletion in this
+        // transaction (reads see committed state; buffered deletes are not yet
+        // visible to the host DB).
+        let rows = self.executor.query_all(ALL_OPS_WITH_ID_DESC_SQL, &[])?;
+        let effective_last = rows.iter().find(|json| {
+            parse_json_string_field(json, "id")
+                .map(|id| !self.pending_op_deletes.contains(&id))
+                .unwrap_or(false)
+        });
+        let Some(json) = effective_last else {
             return Err(Error::Database("No operations to remove".into()));
         };
-        let last_id = parse_json_string_field(&json, "id")?;
-        let last_data = parse_json_string_field(&json, "data")?;
+        let last_id = parse_json_string_field(json, "id")?;
+        let last_data = parse_json_string_field(json, "data")?;
         let last_op: Operation = serde_json::from_str(&last_data)
             .map_err(|e| Error::Database(format!("Failed to parse operation: {e}")))?;
         if last_op != op {
@@ -354,6 +393,7 @@ impl StorageTxn for ExternalStorageTxn<'_> {
             )));
         }
         self.write_buffer.push(remove_operation_stmt(&last_id));
+        self.pending_op_deletes.insert(last_id);
         Ok(())
     }
 

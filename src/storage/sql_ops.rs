@@ -344,6 +344,9 @@ pub(crate) const TASK_EXISTS_SQL: &str =
 pub(crate) const PROJECT_LOOKUP_SQL: &str =
     "SELECT id FROM projects WHERE name = ? ORDER BY created_at LIMIT 1";
 pub(crate) const ALL_OPERATIONS_SQL: &str = "SELECT data FROM tc_operations ORDER BY id ASC";
+#[cfg(feature = "storage-external")]
+pub(crate) const ALL_OPS_WITH_ID_DESC_SQL: &str =
+    "SELECT id, data FROM tc_operations ORDER BY id DESC";
 pub(crate) const LAST_OPERATION_SQL: &str =
     "SELECT id, data FROM tc_operations ORDER BY id DESC LIMIT 1";
 pub(crate) const ALL_TASK_UUIDS_SQL: &str = "SELECT id FROM tc_tasks";
