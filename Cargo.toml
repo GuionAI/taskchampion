@@ -29,6 +29,8 @@ storage-powersync = ["dep:rusqlite", "dep:powersync_core", "rusqlite/bundled"]
 storage-ffi = ["storage-powersync"]
 # Expose *_for_test() constructors for use in external crate tests
 test-utils = ["storage-powersync"]
+# Callback-based storage where the host executes SQL (for fn-ios, HTTP proxies)
+storage-external = []
 # static bundling of dependencies
 bundled = ["rusqlite/bundled"]
 

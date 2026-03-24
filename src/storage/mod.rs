@@ -18,6 +18,7 @@ use uuid::Uuid;
 mod config;
 pub(crate) mod columns;
 pub mod inmemory;
+pub(crate) mod sql_ops;
 #[cfg(feature = "storage-powersync")]
 pub mod powersync;
 #[cfg(test)]
