@@ -1,10 +1,12 @@
 //! Exported FFI function for task mutations.
 
+use std::sync::Arc;
+
 use chrono::DateTime;
 use taskchampion::{Annotation, Operation, Operations, Status, Tag};
 
 use crate::replica_ops::{parse_uuid, with_replica};
-use crate::types::{FfiError, FfiTask, TaskMutation};
+use crate::types::{FfiError, FfiSqlExecutor, FfiTask, TaskMutation};
 
 /// Apply a batch of mutations to a task in a single transaction.
 ///
@@ -15,12 +17,12 @@ use crate::types::{FfiError, FfiTask, TaskMutation};
 /// mutations (defensive; should not happen via normal mutations).
 #[uniffi::export]
 pub fn mutate_task(
-    db_handle: i64,
+    executor: Arc<dyn FfiSqlExecutor>,
     user_id: String,
     uuid: String,
     mutations: Vec<TaskMutation>,
 ) -> Result<Option<FfiTask>, FfiError> {
-    with_replica(db_handle, &user_id, |mut replica| async move {
+    with_replica(executor, &user_id, |mut replica| async move {
         let task_uuid = parse_uuid(&uuid)?;
         let mut task = replica
             .get_task(task_uuid)

@@ -1,17 +1,17 @@
 //! Exported FFI functions for Replica-level operations.
 //!
-//! Every function is stateless — the caller passes a raw `sqlite3*` handle as
-//! an `i64`, and Rust wraps it in an ephemeral [`DirectPowerSyncStorage`] and
+//! Every function is stateless — the caller passes an `Arc<dyn FfiSqlExecutor>`
+//! (UniFFI callback interface), and Rust wraps it in an [`ExternalStorage`] and
 //! [`Replica`], performs the work, then drops everything before returning.
 
-use std::sync::LazyLock;
-use taskchampion::{DirectPowerSyncStorage, Operation, Operations, Replica, Status};
+use std::sync::{Arc, LazyLock};
+use taskchampion::{ExternalStorage, Operation, Operations, Replica, Status};
 use uuid::Uuid;
 
 use chrono::Utc;
 
-use crate::convert::tree_map_to_ffi;
-use crate::types::{FfiDependencyEdge, FfiError, FfiTask, FfiTreeNode};
+use crate::convert::{tree_map_to_ffi, FfiSqlExecutorAdapter};
+use crate::types::{FfiDependencyEdge, FfiError, FfiSqlExecutor, FfiTask, FfiTreeNode};
 
 // ---------------------------------------------------------------------------
 // Global single-threaded Tokio runtime
@@ -21,7 +21,7 @@ use crate::types::{FfiDependencyEdge, FfiError, FfiTask, FfiTreeNode};
 ///
 /// `block_on` is used to drive each FFI call synchronously.  No futures are
 /// moved between threads, satisfying the safety contract of
-/// [`DirectPowerSyncStorage`].
+/// [`ExternalStorage`].
 static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -33,21 +33,22 @@ static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/// Build an ephemeral [`Replica`] from the raw handle and run `f` on it.
-pub(crate) fn with_replica<F, Fut, T>(db_handle: i64, user_id: &str, f: F) -> Result<T, FfiError>
+/// Build an ephemeral [`Replica`] from the callback executor and run `f` on it.
+pub(crate) fn with_replica<F, Fut, T>(
+    executor: Arc<dyn FfiSqlExecutor>,
+    user_id: &str,
+    f: F,
+) -> Result<T, FfiError>
 where
-    F: FnOnce(Replica<DirectPowerSyncStorage>) -> Fut,
+    F: FnOnce(Replica<ExternalStorage>) -> Fut,
     Fut: std::future::Future<Output = Result<T, FfiError>>,
 {
     RUNTIME.block_on(async {
         let user_uuid = Uuid::parse_str(user_id).map_err(|e| FfiError::Usage {
             message: format!("Invalid user_id: {e}"),
         })?;
-        let ptr = db_handle as *mut rusqlite::ffi::sqlite3;
-        // SAFETY: FFI caller guarantees a valid, open handle; RUNTIME is current_thread
-        // so the !Send connection is never accessed from multiple threads.
-        let storage = unsafe { DirectPowerSyncStorage::from_handle(ptr, user_uuid) }
-            .map_err(FfiError::from)?;
+        let adapter = FfiSqlExecutorAdapter::new(executor);
+        let storage = ExternalStorage::new(Box::new(adapter), user_uuid);
         let replica = Replica::new(storage);
         f(replica).await
     })
@@ -66,11 +67,11 @@ pub(crate) fn parse_uuid(s: &str) -> Result<Uuid, FfiError> {
 /// Fetch a single task by UUID. Returns `None` if not found.
 #[uniffi::export]
 pub fn get_task(
-    db_handle: i64,
+    executor: Arc<dyn FfiSqlExecutor>,
     user_id: String,
     uuid: String,
 ) -> Result<Option<FfiTask>, FfiError> {
-    with_replica(db_handle, &user_id, |mut replica| async move {
+    with_replica(executor, &user_id, |mut replica| async move {
         let uuid = parse_uuid(&uuid)?;
         let task = replica.get_task(uuid).await.map_err(FfiError::from)?;
         Ok(task.as_ref().map(FfiTask::from))
@@ -79,8 +80,11 @@ pub fn get_task(
 
 /// Return all tasks (pending, completed, deleted).
 #[uniffi::export]
-pub fn all_tasks(db_handle: i64, user_id: String) -> Result<Vec<FfiTask>, FfiError> {
-    with_replica(db_handle, &user_id, |mut replica| async move {
+pub fn all_tasks(
+    executor: Arc<dyn FfiSqlExecutor>,
+    user_id: String,
+) -> Result<Vec<FfiTask>, FfiError> {
+    with_replica(executor, &user_id, |mut replica| async move {
         let tasks = replica.all_tasks().await.map_err(FfiError::from)?;
         Ok(tasks.values().map(FfiTask::from).collect())
     })
@@ -88,8 +92,11 @@ pub fn all_tasks(db_handle: i64, user_id: String) -> Result<Vec<FfiTask>, FfiErr
 
 /// Return pending tasks only.
 #[uniffi::export]
-pub fn pending_tasks(db_handle: i64, user_id: String) -> Result<Vec<FfiTask>, FfiError> {
-    with_replica(db_handle, &user_id, |mut replica| async move {
+pub fn pending_tasks(
+    executor: Arc<dyn FfiSqlExecutor>,
+    user_id: String,
+) -> Result<Vec<FfiTask>, FfiError> {
+    with_replica(executor, &user_id, |mut replica| async move {
         let tasks = replica.pending_tasks().await.map_err(FfiError::from)?;
         Ok(tasks.iter().map(FfiTask::from).collect())
     })
@@ -97,8 +104,11 @@ pub fn pending_tasks(db_handle: i64, user_id: String) -> Result<Vec<FfiTask>, Ff
 
 /// Return the task tree as a flat list of [`FfiTreeNode`]s.
 #[uniffi::export]
-pub fn tree_map(db_handle: i64, user_id: String) -> Result<Vec<FfiTreeNode>, FfiError> {
-    with_replica(db_handle, &user_id, |mut replica| async move {
+pub fn tree_map(
+    executor: Arc<dyn FfiSqlExecutor>,
+    user_id: String,
+) -> Result<Vec<FfiTreeNode>, FfiError> {
+    with_replica(executor, &user_id, |mut replica| async move {
         let tm = replica.tree_map().await.map_err(FfiError::from)?;
         Ok(tree_map_to_ffi(&tm))
     })
@@ -106,8 +116,11 @@ pub fn tree_map(db_handle: i64, user_id: String) -> Result<Vec<FfiTreeNode>, Ffi
 
 /// Return all dependency edges as `(from_uuid depends_on to_uuid)` pairs.
 #[uniffi::export]
-pub fn dependency_map(db_handle: i64, user_id: String) -> Result<Vec<FfiDependencyEdge>, FfiError> {
-    with_replica(db_handle, &user_id, |mut replica| async move {
+pub fn dependency_map(
+    executor: Arc<dyn FfiSqlExecutor>,
+    user_id: String,
+) -> Result<Vec<FfiDependencyEdge>, FfiError> {
+    with_replica(executor, &user_id, |mut replica| async move {
         let uuids = replica.all_task_uuids().await.map_err(FfiError::from)?;
         let dm = replica
             .dependency_map(false)
@@ -131,12 +144,12 @@ pub fn dependency_map(db_handle: i64, user_id: String) -> Result<Vec<FfiDependen
 /// The task is immediately committed with `status: Pending` and `entry: now`.
 #[uniffi::export]
 pub fn create_task(
-    db_handle: i64,
+    executor: Arc<dyn FfiSqlExecutor>,
     user_id: String,
     uuid: String,
     description: String,
 ) -> Result<FfiTask, FfiError> {
-    with_replica(db_handle, &user_id, |mut replica| async move {
+    with_replica(executor, &user_id, |mut replica| async move {
         let task_uuid = parse_uuid(&uuid)?;
         let mut ops = Operations::new();
         ops.push(Operation::UndoPoint);
@@ -170,8 +183,11 @@ pub fn create_task(
 ///
 /// Returns `true` if an undo was performed, `false` if there is nothing to undo.
 #[uniffi::export]
-pub fn undo(db_handle: i64, user_id: String) -> Result<bool, FfiError> {
-    with_replica(db_handle, &user_id, |mut replica| async move {
+pub fn undo(
+    executor: Arc<dyn FfiSqlExecutor>,
+    user_id: String,
+) -> Result<bool, FfiError> {
+    with_replica(executor, &user_id, |mut replica| async move {
         let ops = replica
             .get_undo_operations()
             .await

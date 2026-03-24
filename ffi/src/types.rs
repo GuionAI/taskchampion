@@ -145,3 +145,37 @@ impl std::fmt::Display for FfiError {
 }
 
 impl std::error::Error for FfiError {}
+
+// ── External Storage FFI types ───────────────────────────────────────
+
+/// SQL parameter for external storage queries.
+#[derive(uniffi::Enum, Clone)]
+pub enum FfiSqlParam {
+    Text { value: String },
+    Null,
+}
+
+/// A single SQL statement with parameters, for batched execution.
+#[derive(uniffi::Record, Clone)]
+pub struct FfiSqlStatement {
+    pub sql: String,
+    pub params: Vec<FfiSqlParam>,
+}
+
+/// Callback interface for host-side SQL execution.
+///
+/// The host (Swift/Kotlin) implements this trait. TaskChampion calls these
+/// methods to read/write task data through the host's database connection.
+#[uniffi::export(with_foreign)]
+pub trait FfiSqlExecutor: Send + Sync {
+    /// Execute a read query returning at most one row as a JSON object string.
+    /// Returns `None` if no rows match.
+    fn query_one(&self, sql: String, params: Vec<FfiSqlParam>) -> Result<Option<String>, FfiError>;
+
+    /// Execute a read query returning all matching rows as JSON object strings.
+    fn query_all(&self, sql: String, params: Vec<FfiSqlParam>) -> Result<Vec<String>, FfiError>;
+
+    /// Execute a batch of write statements atomically.
+    /// The host MUST wrap these in a transaction.
+    fn execute_batch(&self, statements: Vec<FfiSqlStatement>) -> Result<(), FfiError>;
+}

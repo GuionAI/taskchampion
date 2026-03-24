@@ -1170,8 +1170,10 @@ dependencies = [
 name = "taskchampion-ffi"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "chrono",
  "rusqlite",
+ "serde_json",
  "taskchampion",
  "tokio",
  "uniffi",
