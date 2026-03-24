@@ -70,7 +70,7 @@ echo "==> Generating Swift bindings..."
 # compiling a redundant host-native build.
 METADATA_LIB="${PROJECT_ROOT}/target/aarch64-apple-ios/release/libtaskchampion_ffi.a"
 if [ ! -f "${METADATA_LIB}" ]; then
-  echo "ERROR: iOS device lib not found at ${METADATA_LIB}" >&2
+  echo "ERROR: iOS device lib not found at ${METADATA_LIB} — did the cargo build step fail?" >&2
   exit 1
 fi
 
