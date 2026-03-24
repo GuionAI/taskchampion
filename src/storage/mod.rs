@@ -15,17 +15,17 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-mod config;
 pub(crate) mod columns;
-pub mod inmemory;
+mod config;
 #[cfg(feature = "storage-external")]
 pub mod external;
+pub mod inmemory;
+#[cfg(feature = "storage-powersync")]
+pub mod powersync;
 #[cfg(feature = "storage-external")]
 pub mod sql_ops;
 #[cfg(not(feature = "storage-external"))]
 pub(crate) mod sql_ops;
-#[cfg(feature = "storage-powersync")]
-pub mod powersync;
 #[cfg(test)]
 mod test;
 

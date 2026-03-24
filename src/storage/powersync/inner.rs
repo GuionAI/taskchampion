@@ -9,14 +9,14 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::path::Path;
 use uuid::Uuid;
 
+use super::extension::init_powersync_extension;
+use super::row_reader::{query_task_rows, read_raw_task_row};
 use crate::storage::columns::{raw_to_task, TASK_SELECT_COLS};
 use crate::storage::sql_ops::{
     add_operation_stmt, create_task_stmt, delete_task_stmts, prepare_task, remove_operation_stmt,
     set_task_stmts, SqlParam, SqlStatement, ALL_OPERATIONS_SQL, ALL_TASK_UUIDS_SQL,
     LAST_OPERATION_SQL, TASK_EXISTS_SQL,
 };
-use super::extension::init_powersync_extension;
-use super::row_reader::{query_task_rows, read_raw_task_row};
 
 /// Query tc_tags and tc_annotations for the given task UUID and inject them
 /// into the TaskMap as `tag_<name>` and `annotation_<epoch>` keys.
@@ -371,7 +371,13 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
             .context("Set task existence check")?;
 
         // Generate and execute statements.
-        let stmts = set_task_stmts(&uuid, &prepared, &self.user_id, exists, project_id.as_deref());
+        let stmts = set_task_stmts(
+            &uuid,
+            &prepared,
+            &self.user_id,
+            exists,
+            project_id.as_deref(),
+        );
         for stmt in &stmts {
             execute_sql_stmt(t, stmt)?;
         }
@@ -415,9 +421,7 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
         let rows = q.query_map([], |r| r.get::<_, String>(0))?;
         rows.collect::<std::result::Result<Vec<_>, _>>()?
             .into_iter()
-            .map(|s| {
-                Uuid::parse_str(&s).map_err(|e| Error::Database(format!("Invalid UUID: {e}")))
-            })
+            .map(|s| Uuid::parse_str(&s).map_err(|e| Error::Database(format!("Invalid UUID: {e}"))))
             .collect()
     }
 
@@ -457,11 +461,7 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
     async fn remove_operation(&mut self, op: Operation) -> Result<()> {
         let t = self.get_txn()?;
         let last: Option<(String, String)> = t
-            .query_row(
-                LAST_OPERATION_SQL,
-                [],
-                |x| Ok((x.get(0)?, x.get(1)?)),
-            )
+            .query_row(LAST_OPERATION_SQL, [], |x| Ok((x.get(0)?, x.get(1)?)))
             .optional()?;
 
         let Some((last_id, last_data)) = last else {

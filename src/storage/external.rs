@@ -105,7 +105,8 @@ impl ExternalStorageTxn<'_> {
         self.write_buffer
             .push(insert_project_stmt(&new_id, name, &self.user_id));
         let new_id_str = new_id.to_string();
-        self.project_cache.insert(name.to_string(), new_id_str.clone());
+        self.project_cache
+            .insert(name.to_string(), new_id_str.clone());
         Ok(new_id_str)
     }
 
@@ -117,10 +118,7 @@ impl ExternalStorageTxn<'_> {
             .as_object()
             .ok_or_else(|| Error::Database("Expected JSON object for task row".into()))?;
 
-        fn get_str(
-            obj: &serde_json::Map<String, serde_json::Value>,
-            key: &str,
-        ) -> Option<String> {
+        fn get_str(obj: &serde_json::Map<String, serde_json::Value>, key: &str) -> Option<String> {
             obj.get(key).and_then(|v| match v {
                 serde_json::Value::String(s) => Some(s.clone()),
                 serde_json::Value::Null => None,
@@ -230,7 +228,8 @@ impl StorageTxn for ExternalStorageTxn<'_> {
         if count > 0 {
             return Ok(false);
         }
-        self.write_buffer.push(create_task_stmt(&uuid, &self.user_id));
+        self.write_buffer
+            .push(create_task_stmt(&uuid, &self.user_id));
         self.pending_creates.insert(uuid);
         Ok(true)
     }
@@ -515,10 +514,9 @@ mod test {
                 .prepare(sql)
                 .map_err(|e| Error::Database(format!("Prepare failed: {e}")))?;
             let col_count = stmt.column_count();
-            let result = stmt.query_row(
-                rusqlite::params_from_iter(param_values),
-                |row| Self::row_to_json(row, col_count),
-            );
+            let result = stmt.query_row(rusqlite::params_from_iter(param_values), |row| {
+                Self::row_to_json(row, col_count)
+            });
             match result {
                 Ok(json) => Ok(Some(json)),
                 Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -681,7 +679,15 @@ mod test {
 
         let mut txn = storage.txn().await.unwrap();
         let mut task = TaskMap::new();
-        for key in ["entry", "modified", "due", "scheduled", "start", "end", "wait"] {
+        for key in [
+            "entry",
+            "modified",
+            "due",
+            "scheduled",
+            "start",
+            "end",
+            "wait",
+        ] {
             task.insert(key.into(), epoch.into());
         }
         txn.set_task(uuid, task).await.unwrap();
@@ -690,7 +696,15 @@ mod test {
 
         let mut txn = storage.txn().await.unwrap();
         let got = txn.get_task(uuid).await.unwrap().unwrap();
-        for key in ["entry", "modified", "due", "scheduled", "start", "end", "wait"] {
+        for key in [
+            "entry",
+            "modified",
+            "due",
+            "scheduled",
+            "start",
+            "end",
+            "wait",
+        ] {
             assert_eq!(got.get(key).map(String::as_str), Some(epoch), "field {key}");
         }
     }
