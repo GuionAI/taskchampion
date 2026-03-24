@@ -69,13 +69,6 @@ pub(super) struct PowerSyncStorageInner {
     user_id: Uuid,
 }
 
-/// Newtype wrapper that makes a raw SQLite pointer `Send`.
-///
-/// Sound because the Wrapper actor guarantees single-threaded access —
-/// only one thread touches the connection at a time.
-pub(super) struct SendPtr(pub(super) *mut rusqlite::ffi::sqlite3);
-unsafe impl Send for SendPtr {}
-
 impl PowerSyncStorageInner {
     /// Open an existing PowerSync-managed database file and create local-only tables.
     pub(super) fn new(db_path: &Path, user_id: Uuid) -> Result<Self> {
@@ -125,21 +118,6 @@ impl PowerSyncStorageInner {
         // views; sync state (working-set, base_version, operations_sync) is unused since
         // PowerSync handles replication externally via flicknote-sync.
 
-        Ok(Self { conn, user_id })
-    }
-
-    /// Create a `PowerSyncStorageInner` from an existing SQLite handle.
-    ///
-    /// # Safety
-    ///
-    /// - `ptr.0` must be a valid, open `sqlite3*` pointer
-    /// - The caller retains ownership — this connection will NOT close the handle on drop
-    /// - The handle must remain valid for the lifetime of this `PowerSyncStorageInner`
-    /// - PowerSync SDK must have already initialized the connection (WAL mode, powersync_init,
-    ///   tc_tasks view, etc.)
-    pub(super) unsafe fn from_handle(ptr: SendPtr, user_id: Uuid) -> Result<Self> {
-        let conn = Connection::from_handle(ptr.0)
-            .context("Creating rusqlite Connection from raw handle")?;
         Ok(Self { conn, user_id })
     }
 

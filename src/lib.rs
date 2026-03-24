@@ -23,8 +23,6 @@ pub use position::{append_position, between_position, prepend_position, sequenti
 pub use replica::Replica;
 #[cfg(feature = "storage-external")]
 pub use storage::external::{ExternalStorage, SqlExecutor};
-#[cfg(feature = "storage-ffi")]
-pub use storage::powersync::DirectPowerSyncStorage;
 #[cfg(feature = "storage-powersync")]
 pub use storage::powersync::PowerSyncStorage;
 #[cfg(feature = "storage-external")]

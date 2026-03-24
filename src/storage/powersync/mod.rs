@@ -5,14 +5,10 @@ use async_trait::async_trait;
 use std::path::Path;
 use uuid::Uuid;
 
-#[cfg(feature = "storage-ffi")]
-mod direct;
 mod row_reader;
-#[cfg(feature = "storage-ffi")]
-pub use direct::DirectPowerSyncStorage;
 mod extension;
 mod inner;
-use inner::{PowerSyncStorageInner, SendPtr};
+use inner::PowerSyncStorageInner;
 
 /// PowerSyncStorage stores task data in a PowerSync-managed SQLite database.
 ///
@@ -42,28 +38,6 @@ impl PowerSyncStorage {
         ))
     }
 
-    /// Create a PowerSyncStorage from an existing SQLite handle.
-    ///
-    /// This is intended for FFI use where the caller (e.g. PowerSync Swift SDK)
-    /// owns the SQLite connection. The connection is ephemeral — create the storage,
-    /// perform operations, and drop it within a single FFI call.
-    ///
-    /// # Safety
-    ///
-    /// - `handle` must be a valid, open `sqlite3*` pointer
-    /// - The caller retains ownership — this storage will NOT close the handle on drop
-    /// - The handle must remain valid until this `PowerSyncStorage` is dropped
-    /// - PowerSync SDK must have already initialized the connection
-    pub async unsafe fn from_handle(
-        handle: *mut rusqlite::ffi::sqlite3,
-        user_id: Uuid,
-    ) -> Result<Self> {
-        let ptr = SendPtr(handle);
-        Ok(Self(
-            Wrapper::new(async move || unsafe { PowerSyncStorageInner::from_handle(ptr, user_id) })
-                .await?,
-        ))
-    }
 }
 
 #[async_trait]
@@ -79,8 +53,7 @@ mod test {
     use crate::errors::Result;
     use crate::storage::send_wrapper::{WrappedStorage, WrappedStorageTxn};
     use crate::storage::TaskMap;
-    use inner::{PowerSyncStorageInner, SendPtr};
-    use rusqlite::Connection;
+    use inner::PowerSyncStorageInner;
 
     async fn storage() -> Result<PowerSyncStorage> {
         PowerSyncStorage::new_for_test().await
@@ -474,110 +447,4 @@ mod test {
         Ok(())
     }
 
-    /// Verify that from_handle creates a non-owning connection:
-    /// - CRUD works through the borrowed handle
-    /// - Data is visible to the original connection (shared handle)
-    /// - The original connection survives after the from_handle storage is dropped
-    #[tokio::test]
-    async fn test_from_handle_round_trip() -> Result<()> {
-        // 1. Open an in-memory connection and set up required tables
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS tc_tasks (
-                id TEXT PRIMARY KEY,
-                user_id TEXT,
-                data TEXT NOT NULL DEFAULT '{}',
-                entry_at TEXT,
-                status TEXT,
-                description TEXT,
-                priority TEXT,
-                modified_at TEXT,
-                due_at TEXT,
-                scheduled_at TEXT,
-                start_at TEXT,
-                end_at TEXT,
-                wait_at TEXT,
-                parent_id TEXT,
-                position TEXT,
-                project_id TEXT
-            );
-            CREATE TABLE IF NOT EXISTS tc_operations (
-                id TEXT PRIMARY KEY,
-                user_id TEXT,
-                data TEXT NOT NULL,
-                created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
-            );
-            CREATE TABLE IF NOT EXISTS projects (
-                id TEXT PRIMARY KEY,
-                name TEXT,
-                user_id TEXT,
-                created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
-            );
-            CREATE TABLE IF NOT EXISTS tc_tags (
-                id TEXT PRIMARY KEY,
-                task_id TEXT NOT NULL,
-                user_id TEXT,
-                name TEXT NOT NULL,
-                UNIQUE (task_id, name)
-            );
-            CREATE TABLE IF NOT EXISTS tc_annotations (
-                id TEXT PRIMARY KEY,
-                task_id TEXT NOT NULL,
-                user_id TEXT,
-                entry_at TEXT NOT NULL,
-                description TEXT NOT NULL
-            );
-            ",
-        )
-        .unwrap();
-
-        // 2. Extract the raw handle and wrap in SendPtr
-        let handle = unsafe { conn.handle() };
-
-        // 3. Create PowerSyncStorageInner::from_handle and do CRUD
-        let mut storage =
-            unsafe { PowerSyncStorageInner::from_handle(SendPtr(handle), Uuid::nil())? };
-
-        let uuid = Uuid::new_v4();
-        let mut txn = storage.txn().await?;
-        txn.create_task(uuid).await?;
-        let mut task = TaskMap::new();
-        task.insert("description".into(), "test from_handle".into());
-        txn.set_task(uuid, task).await?;
-        txn.commit().await?;
-        drop(txn);
-
-        // Verify read-back through the same storage
-        let mut txn = storage.txn().await?;
-        let read = txn.get_task(uuid).await?.expect("task should exist");
-        assert_eq!(
-            read.get("description").map(String::as_str),
-            Some("test from_handle")
-        );
-        txn.commit().await?;
-        drop(txn);
-
-        // 4. Drop the from_handle storage — must NOT close the underlying sqlite3*
-        drop(storage);
-
-        // 5. Original connection still works after storage is dropped (non-owning)
-        let still_works: i64 = conn.query_row("SELECT 1", [], |r| r.get(0)).unwrap();
-        assert_eq!(still_works, 1);
-
-        // 6. Data written through from_handle is visible via the original connection
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM tc_tasks WHERE id = ?",
-                [uuid.to_string()],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(
-            count, 1,
-            "data written via from_handle should be visible through original connection"
-        );
-
-        Ok(())
-    }
 }
