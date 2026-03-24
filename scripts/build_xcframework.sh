@@ -51,16 +51,17 @@ done
 
 # --- Build static libraries ---
 
-echo "==> Building static libraries..."
+echo "==> Building static libraries (parallel)..."
 for target in "${TARGETS[@]}"; do
-  echo "    Building for ${target}..."
+  echo "    Spawning build for ${target}..."
   cargo build \
     -p taskchampion-ffi \
     --lib \
     --release \
     --target "${target}" \
-    --manifest-path "${PROJECT_ROOT}/Cargo.toml"
+    --manifest-path "${PROJECT_ROOT}/Cargo.toml" &
 done
+wait
 
 # --- Generate Swift bindings ---
 
