@@ -69,7 +69,7 @@ jobs:
           generate_release_notes: true
           files: TaskChampionFFIFFI.xcframework.zip
 
-      - name: Commit updated Package.swift to main
+      - name: Commit updated Package.swift and Swift bindings to main
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           RELEASE_URL: https://github.com/GuionAI/taskchampion/releases/download/${{ github.ref_name }}/TaskChampionFFIFFI.xcframework.zip
@@ -77,11 +77,17 @@ jobs:
         run: |
           git config user.name "guion-release-bot[bot]"
           git config user.email "guion-release-bot[bot]@users.noreply.github.com"
+          # Preserve the freshly-generated Swift bindings before switching branches.
+          # build_xcframework.sh writes Sources/TaskChampionFFI/TaskChampionFFI.swift,
+          # but git checkout main would reset it to the old committed version.
+          cp Sources/TaskChampionFFI/TaskChampionFFI.swift /tmp/TaskChampionFFI.swift
           # Fetch and check out the current tip of main to avoid non-fast-forward rejection.
           # The Rust cross-compile takes ~10+ min; other commits may land on main during that time.
           git fetch origin main
           git checkout main
           git pull --ff-only origin main
+          # Restore the generated Swift bindings onto the freshly-fetched main.
+          cp /tmp/TaskChampionFFI.swift Sources/TaskChampionFFI/TaskChampionFFI.swift
           # Re-apply Package.swift patch on the freshly-fetched main
           python3 -c "
           import re, os, sys
@@ -113,8 +119,8 @@ jobs:
           with open('Package.swift', 'w') as f:
               f.write(content)
           "
-          git add Package.swift
-          # Exit cleanly if Package.swift is already up to date (e.g. re-run of same tag)
-          git diff --cached --quiet && { echo "Package.swift already up to date — nothing to commit"; exit 0; }
-          git commit -m "chore(spm): update Package.swift for ${{ github.ref_name }} release"
+          git add Package.swift Sources/TaskChampionFFI/TaskChampionFFI.swift
+          # Exit cleanly if both files are already up to date (e.g. re-run of same tag)
+          git diff --cached --quiet && { echo "Package.swift and Swift bindings already up to date — nothing to commit"; exit 0; }
+          git commit -m "chore(spm): update Package.swift and Swift bindings for ${{ github.ref_name }} release"
           git push origin main
