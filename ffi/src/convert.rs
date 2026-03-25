@@ -80,12 +80,20 @@ impl From<FfiStatus> for Status {
 impl From<taskchampion::Error> for FfiError {
     fn from(e: taskchampion::Error) -> Self {
         match e {
-            taskchampion::Error::Database(msg) => FfiError::Database { message: msg },
-            taskchampion::Error::Usage(msg) => FfiError::Usage { message: msg },
+            taskchampion::Error::TaskNotFound(uuid) => FfiError::TaskNotFound {
+                uuid: uuid.to_string(),
+            },
+            taskchampion::Error::TaskAlreadyExists(uuid) => FfiError::TaskAlreadyExists {
+                uuid: uuid.to_string(),
+            },
+            taskchampion::Error::Database(msg) => FfiError::Storage { message: msg },
+            taskchampion::Error::Usage(msg) => FfiError::InvalidInput { message: msg },
             taskchampion::Error::Other(e) => FfiError::Internal {
                 message: e.to_string(),
             },
-            // Error is #[non_exhaustive] — catch future variants
+            // IMPORTANT: Error is #[non_exhaustive] — this catch-all is required
+            // and must not be removed. Future core variants land here until
+            // explicitly mapped.
             _ => FfiError::Internal {
                 message: e.to_string(),
             },
@@ -196,10 +204,25 @@ fn core_stmt_to_ffi(stmt: &SqlStatement) -> FfiSqlStatement {
     }
 }
 
+/// Convert FFI errors back to core errors.
+///
+/// This is called by `FfiSqlExecutorAdapter` when the Swift-side SQL executor
+/// returns an error. In practice, Swift should only return `Storage` or
+/// `Internal` — `TaskNotFound` and `TaskAlreadyExists` flow Rust→Swift only.
+/// However, the match must be exhaustive, so we handle them defensively with
+/// best-effort UUID parsing.
 fn ffi_error_to_core(e: FfiError) -> taskchampion::Error {
     match e {
-        FfiError::Database { message } => taskchampion::Error::Database(message),
-        FfiError::Usage { message } => taskchampion::Error::Usage(message),
+        FfiError::TaskNotFound { uuid } => match uuid::Uuid::parse_str(&uuid) {
+            Ok(u) => taskchampion::Error::TaskNotFound(u),
+            Err(_) => taskchampion::Error::Database(format!("Task not found: {uuid}")),
+        },
+        FfiError::TaskAlreadyExists { uuid } => match uuid::Uuid::parse_str(&uuid) {
+            Ok(u) => taskchampion::Error::TaskAlreadyExists(u),
+            Err(_) => taskchampion::Error::Database(format!("Task already exists: {uuid}")),
+        },
+        FfiError::Storage { message } => taskchampion::Error::Database(message),
+        FfiError::InvalidInput { message } => taskchampion::Error::Usage(message),
         FfiError::Internal { message } => {
             taskchampion::Error::Other(anyhow::anyhow!("{}", message))
         }

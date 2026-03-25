@@ -99,7 +99,7 @@ impl FfiSqlExecutor for MockFfiSqlExecutor {
         params: Vec<FfiSqlParam>,
     ) -> Result<Option<String>, FfiError> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(&sql).map_err(|e| FfiError::Database {
+        let mut stmt = conn.prepare(&sql).map_err(|e| FfiError::Storage {
             message: format!("Prepare failed: {e}"),
         })?;
         let col_count = stmt.column_count();
@@ -109,7 +109,7 @@ impl FfiSqlExecutor for MockFfiSqlExecutor {
         match result {
             Ok(json) => Ok(Some(json)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(e) => Err(FfiError::Database {
+            Err(e) => Err(FfiError::Storage {
                 message: format!("Query failed: {e}"),
             }),
         }
@@ -121,7 +121,7 @@ impl FfiSqlExecutor for MockFfiSqlExecutor {
         params: Vec<FfiSqlParam>,
     ) -> Result<Vec<String>, FfiError> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(&sql).map_err(|e| FfiError::Database {
+        let mut stmt = conn.prepare(&sql).map_err(|e| FfiError::Storage {
             message: format!("Prepare failed: {e}"),
         })?;
         let col_count = stmt.column_count();
@@ -129,29 +129,29 @@ impl FfiSqlExecutor for MockFfiSqlExecutor {
         let refs: Vec<&dyn rusqlite::types::ToSql> = bound.iter().map(|b| b.as_ref()).collect();
         let rows = stmt
             .query_map(&*refs, |row| Self::row_to_json(row, col_count))
-            .map_err(|e| FfiError::Database {
+            .map_err(|e| FfiError::Storage {
                 message: format!("Query failed: {e}"),
             })?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(|e| FfiError::Database {
+            .map_err(|e| FfiError::Storage {
                 message: format!("Row read failed: {e}"),
             })
     }
 
     async fn execute_batch(&self, statements: Vec<FfiSqlStatement>) -> Result<(), FfiError> {
         let mut conn = self.conn.lock().unwrap();
-        let txn = conn.transaction().map_err(|e| FfiError::Database {
+        let txn = conn.transaction().map_err(|e| FfiError::Storage {
             message: format!("Begin txn failed: {e}"),
         })?;
         for stmt in &statements {
             let bound = Self::bind_params(&stmt.params);
             let refs: Vec<&dyn rusqlite::types::ToSql> = bound.iter().map(|b| b.as_ref()).collect();
             txn.execute(&stmt.sql, &*refs)
-                .map_err(|e| FfiError::Database {
+                .map_err(|e| FfiError::Storage {
                     message: format!("Execute failed: {e} (sql: {})", stmt.sql),
                 })?;
         }
-        txn.commit().map_err(|e| FfiError::Database {
+        txn.commit().map_err(|e| FfiError::Storage {
             message: format!("Commit failed: {e}"),
         })?;
         Ok(())
@@ -468,4 +468,26 @@ async fn test_dependency_map_edge() {
         .iter()
         .find(|e| e.from_uuid == task_a && e.to_uuid == task_b);
     assert!(edge.is_some(), "dependency edge A→B should exist");
+}
+
+#[tokio::test]
+async fn test_create_duplicate_returns_task_already_exists() {
+    let session = make_session();
+    let uuid = Uuid::new_v4().to_string();
+
+    session
+        .create_task(uuid.clone(), "First".into())
+        .await
+        .expect("first create");
+
+    match session
+        .create_task(uuid.clone(), "Duplicate".into())
+        .await
+    {
+        Ok(_) => panic!("duplicate create should have failed"),
+        Err(err) => assert!(
+            matches!(err, FfiError::TaskAlreadyExists { .. }),
+            "Expected TaskAlreadyExists, got: {err:?}"
+        ),
+    }
 }
