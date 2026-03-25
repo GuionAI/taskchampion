@@ -1,53 +1,53 @@
-//! Exported FFI function for task mutations.
-
-use std::sync::Arc;
+//! Task mutation methods on [`FfiSession`].
 
 use chrono::DateTime;
 use taskchampion::{Annotation, Operation, Operations, Status, Tag};
 
-use crate::replica_ops::{parse_uuid, with_replica};
-use crate::types::{FfiError, FfiSqlExecutor, FfiTask, TaskMutation};
+use crate::replica_ops::{parse_uuid, FfiSession};
+use crate::types::{FfiError, FfiTask, TaskMutation};
 
-/// Apply a batch of mutations to a task in a single transaction.
-///
-/// All mutations share one undo point — a single `undo()` call will reverse
-/// the entire batch.
-///
-/// Returns the updated task, or `None` if the task no longer exists after the
-/// mutations (defensive; should not happen via normal mutations).
 #[uniffi::export]
-pub fn mutate_task(
-    executor: Arc<dyn FfiSqlExecutor>,
-    user_id: String,
-    uuid: String,
-    mutations: Vec<TaskMutation>,
-) -> Result<Option<FfiTask>, FfiError> {
-    with_replica(executor, &user_id, |mut replica| async move {
-        let task_uuid = parse_uuid(&uuid)?;
-        let mut task = replica
-            .get_task(task_uuid)
-            .await
-            .map_err(FfiError::from)?
-            .ok_or_else(|| FfiError::Usage {
-                message: format!("Task {uuid} not found"),
-            })?;
+impl FfiSession {
+    /// Apply a batch of mutations to a task in a single transaction.
+    ///
+    /// All mutations share one undo point — a single `undo()` call will reverse
+    /// the entire batch.
+    ///
+    /// Returns the updated task, or `None` if the task no longer exists after the
+    /// mutations (defensive; should not happen via normal mutations).
+    pub async fn mutate_task(
+        &self,
+        uuid: String,
+        mutations: Vec<TaskMutation>,
+    ) -> Result<Option<FfiTask>, FfiError> {
+        self.with_replica(|mut replica| async move {
+            let task_uuid = parse_uuid(&uuid)?;
+            let mut task = replica
+                .get_task(task_uuid)
+                .await
+                .map_err(FfiError::from)?
+                .ok_or_else(|| FfiError::Usage {
+                    message: format!("Task {uuid} not found"),
+                })?;
 
-        let mut ops = Operations::new();
-        ops.push(Operation::UndoPoint);
+            let mut ops = Operations::new();
+            ops.push(Operation::UndoPoint);
 
-        for mutation in mutations {
-            apply_mutation(&mut task, mutation, &mut ops)?;
-        }
+            for mutation in mutations {
+                apply_mutation(&mut task, mutation, &mut ops)?;
+            }
 
-        replica
-            .commit_operations(ops)
-            .await
-            .map_err(FfiError::from)?;
+            replica
+                .commit_operations(ops)
+                .await
+                .map_err(FfiError::from)?;
 
-        // Re-fetch — may be `None` if the task was hard-deleted (defensive).
-        let updated = replica.get_task(task_uuid).await.map_err(FfiError::from)?;
-        Ok(updated.as_ref().map(FfiTask::from))
-    })
+            // Re-fetch — may be `None` if the task was hard-deleted (defensive).
+            let updated = replica.get_task(task_uuid).await.map_err(FfiError::from)?;
+            Ok(updated.as_ref().map(FfiTask::from))
+        })
+        .await
+    }
 }
 
 fn apply_mutation(
