@@ -352,19 +352,29 @@ private func uniffiTraitInterfaceCallWithError<T, E>(
         callStatus.pointee.errorBuf = FfiConverterString.lower(String(describing: error))
     }
 }
+// Initial value and increment amount for handles. 
+// These ensure that SWIFT handles always have the lowest bit set
+fileprivate let UNIFFI_HANDLEMAP_INITIAL: UInt64 = 1
+fileprivate let UNIFFI_HANDLEMAP_DELTA: UInt64 = 2
+
 fileprivate final class UniffiHandleMap<T>: @unchecked Sendable {
     // All mutation happens with this lock held, which is why we implement @unchecked Sendable.
     private let lock = NSLock()
     private var map: [UInt64: T] = [:]
-    private var currentHandle: UInt64 = 1
+    private var currentHandle: UInt64 = UNIFFI_HANDLEMAP_INITIAL
 
     func insert(obj: T) -> UInt64 {
         lock.withLock {
-            let handle = currentHandle
-            currentHandle += 1
-            map[handle] = obj
-            return handle
+            return doInsert(obj)
         }
+    }
+
+    // Low-level insert function, this assumes `lock` is held.
+    private func doInsert(_ obj: T) -> UInt64 {
+        let handle = currentHandle
+        currentHandle += UNIFFI_HANDLEMAP_DELTA
+        map[handle] = obj
+        return handle
     }
 
      func get(handle: UInt64) throws -> T {
@@ -373,6 +383,15 @@ fileprivate final class UniffiHandleMap<T>: @unchecked Sendable {
                 throw UniffiInternalError.unexpectedStaleHandle
             }
             return obj
+        }
+    }
+
+     func clone(handle: UInt64) throws -> UInt64 {
+        try lock.withLock {
+            guard let obj = map[handle] else {
+                throw UniffiInternalError.unexpectedStaleHandle
+            }
+            return doInsert(obj)
         }
     }
 
@@ -519,17 +538,6 @@ public protocol FfiSessionProtocol: AnyObject, Sendable {
     func getTask(uuid: String) async throws  -> FfiTask?
     
     /**
-     * Apply a batch of mutations to a task in a single transaction.
-     *
-     * All mutations share one undo point — a single `undo()` call will reverse
-     * the entire batch.
-     *
-     * Returns the updated task, or `None` if the task no longer exists after the
-     * mutations (defensive; should not happen via normal mutations).
-     */
-    func mutateTask(uuid: String, mutations: [TaskMutation]) async throws  -> FfiTask?
-    
-    /**
      * Return pending tasks only.
      */
     func pendingTasks() async throws  -> [FfiTask]
@@ -546,6 +554,17 @@ public protocol FfiSessionProtocol: AnyObject, Sendable {
      */
     func undo() async throws  -> Bool
     
+    /**
+     * Apply a batch of mutations to a task in a single transaction.
+     *
+     * All mutations share one undo point — a single `undo()` call will reverse
+     * the entire batch.
+     *
+     * Returns the updated task, or `None` if the task no longer exists after the
+     * mutations (defensive; should not happen via normal mutations).
+     */
+    func mutateTask(uuid: String, mutations: [TaskMutation]) async throws  -> FfiTask?
+    
 }
 /**
  * Holds the executor and user identity for a TaskChampion session.
@@ -555,13 +574,13 @@ public protocol FfiSessionProtocol: AnyObject, Sendable {
  * persistent state is held between calls, making concurrent use safe.
  */
 open class FfiSession: FfiSessionProtocol, @unchecked Sendable {
-    fileprivate let pointer: UnsafeMutableRawPointer!
+    fileprivate let handle: UInt64
 
-    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
 #if swift(>=5.8)
     @_documentation(visibility: private)
 #endif
-    public struct NoPointer {
+    public struct NoHandle {
         public init() {}
     }
 
@@ -571,27 +590,27 @@ open class FfiSession: FfiSessionProtocol, @unchecked Sendable {
 #if swift(>=5.8)
     @_documentation(visibility: private)
 #endif
-    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
-        self.pointer = pointer
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
     }
 
     // This constructor can be used to instantiate a fake object.
-    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
     //
     // - Warning:
-    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
 #if swift(>=5.8)
     @_documentation(visibility: private)
 #endif
-    public init(noPointer: NoPointer) {
-        self.pointer = nil
+    public init(noHandle: NoHandle) {
+        self.handle = 0
     }
 
 #if swift(>=5.8)
     @_documentation(visibility: private)
 #endif
-    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
-        return try! rustCall { uniffi_taskchampion_ffi_fn_clone_ffisession(self.pointer, $0) }
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_taskchampion_ffi_fn_clone_ffisession(self.handle, $0) }
     }
     /**
      * Create a new session.
@@ -600,22 +619,23 @@ open class FfiSession: FfiSessionProtocol, @unchecked Sendable {
      * the parsed UUID without re-validation.
      */
 public convenience init(executor: FfiSqlExecutor, userId: String)throws  {
-    let pointer =
+    let handle =
         try rustCallWithError(FfiConverterTypeFfiError_lift) {
     uniffi_taskchampion_ffi_fn_constructor_ffisession_new(
         FfiConverterTypeFfiSqlExecutor_lower(executor),
         FfiConverterString.lower(userId),$0
     )
 }
-    self.init(unsafeFromRawPointer: pointer)
+    self.init(unsafeFromHandle: handle)
 }
 
     deinit {
-        guard let pointer = pointer else {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
             return
         }
 
-        try! rustCall { uniffi_taskchampion_ffi_fn_free_ffisession(pointer, $0) }
+        try! rustCall { uniffi_taskchampion_ffi_fn_free_ffisession(handle, $0) }
     }
 
     
@@ -629,7 +649,7 @@ open func allTasks()async throws  -> [FfiTask]  {
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_taskchampion_ffi_fn_method_ffisession_all_tasks(
-                    self.uniffiClonePointer()
+                    self.uniffiCloneHandle()
                     
                 )
             },
@@ -651,7 +671,7 @@ open func createTask(uuid: String, description: String)async throws  -> FfiTask 
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_taskchampion_ffi_fn_method_ffisession_create_task(
-                    self.uniffiClonePointer(),
+                    self.uniffiCloneHandle(),
                     FfiConverterString.lower(uuid),FfiConverterString.lower(description)
                 )
             },
@@ -671,7 +691,7 @@ open func dependencyMap()async throws  -> [FfiDependencyEdge]  {
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_taskchampion_ffi_fn_method_ffisession_dependency_map(
-                    self.uniffiClonePointer()
+                    self.uniffiCloneHandle()
                     
                 )
             },
@@ -691,34 +711,8 @@ open func getTask(uuid: String)async throws  -> FfiTask?  {
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_taskchampion_ffi_fn_method_ffisession_get_task(
-                    self.uniffiClonePointer(),
+                    self.uniffiCloneHandle(),
                     FfiConverterString.lower(uuid)
-                )
-            },
-            pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
-            completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
-            freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterOptionTypeFfiTask.lift,
-            errorHandler: FfiConverterTypeFfiError_lift
-        )
-}
-    
-    /**
-     * Apply a batch of mutations to a task in a single transaction.
-     *
-     * All mutations share one undo point — a single `undo()` call will reverse
-     * the entire batch.
-     *
-     * Returns the updated task, or `None` if the task no longer exists after the
-     * mutations (defensive; should not happen via normal mutations).
-     */
-open func mutateTask(uuid: String, mutations: [TaskMutation])async throws  -> FfiTask?  {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_taskchampion_ffi_fn_method_ffisession_mutate_task(
-                    self.uniffiClonePointer(),
-                    FfiConverterString.lower(uuid),FfiConverterSequenceTypeTaskMutation.lower(mutations)
                 )
             },
             pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
@@ -737,7 +731,7 @@ open func pendingTasks()async throws  -> [FfiTask]  {
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_taskchampion_ffi_fn_method_ffisession_pending_tasks(
-                    self.uniffiClonePointer()
+                    self.uniffiCloneHandle()
                     
                 )
             },
@@ -757,7 +751,7 @@ open func treeMap()async throws  -> [FfiTreeNode]  {
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_taskchampion_ffi_fn_method_ffisession_tree_map(
-                    self.uniffiClonePointer()
+                    self.uniffiCloneHandle()
                     
                 )
             },
@@ -779,7 +773,7 @@ open func undo()async throws  -> Bool  {
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_taskchampion_ffi_fn_method_ffisession_undo(
-                    self.uniffiClonePointer()
+                    self.uniffiCloneHandle()
                     
                 )
             },
@@ -791,7 +785,34 @@ open func undo()async throws  -> Bool  {
         )
 }
     
+    /**
+     * Apply a batch of mutations to a task in a single transaction.
+     *
+     * All mutations share one undo point — a single `undo()` call will reverse
+     * the entire batch.
+     *
+     * Returns the updated task, or `None` if the task no longer exists after the
+     * mutations (defensive; should not happen via normal mutations).
+     */
+open func mutateTask(uuid: String, mutations: [TaskMutation])async throws  -> FfiTask?  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_taskchampion_ffi_fn_method_ffisession_mutate_task(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(uuid),FfiConverterSequenceTypeTaskMutation.lower(mutations)
+                )
+            },
+            pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterOptionTypeFfiTask.lift,
+            errorHandler: FfiConverterTypeFfiError_lift
+        )
+}
+    
 
+    
 }
 
 
@@ -799,33 +820,24 @@ open func undo()async throws  -> Bool  {
 @_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeFfiSession: FfiConverter {
-
-    typealias FfiType = UnsafeMutableRawPointer
+    typealias FfiType = UInt64
     typealias SwiftType = FfiSession
 
-    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> FfiSession {
-        return FfiSession(unsafeFromRawPointer: pointer)
+    public static func lift(_ handle: UInt64) throws -> FfiSession {
+        return FfiSession(unsafeFromHandle: handle)
     }
 
-    public static func lower(_ value: FfiSession) -> UnsafeMutableRawPointer {
-        return value.uniffiClonePointer()
+    public static func lower(_ value: FfiSession) -> UInt64 {
+        return value.uniffiCloneHandle()
     }
 
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiSession {
-        let v: UInt64 = try readInt(&buf)
-        // The Rust code won't compile if a pointer won't fit in a UInt64.
-        // We have to go via `UInt` because that's the thing that's the size of a pointer.
-        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
-        if (ptr == nil) {
-            throw UniffiInternalError.unexpectedNullPointer
-        }
-        return try lift(ptr!)
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
     }
 
     public static func write(_ value: FfiSession, into buf: inout [UInt8]) {
-        // This fiddling is because `Int` is the thing that's the same size as a pointer.
-        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
-        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+        writeInt(&buf, lower(value))
     }
 }
 
@@ -833,14 +845,14 @@ public struct FfiConverterTypeFfiSession: FfiConverter {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeFfiSession_lift(_ pointer: UnsafeMutableRawPointer) throws -> FfiSession {
-    return try FfiConverterTypeFfiSession.lift(pointer)
+public func FfiConverterTypeFfiSession_lift(_ handle: UInt64) throws -> FfiSession {
+    return try FfiConverterTypeFfiSession.lift(handle)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeFfiSession_lower(_ value: FfiSession) -> UnsafeMutableRawPointer {
+public func FfiConverterTypeFfiSession_lower(_ value: FfiSession) -> UInt64 {
     return FfiConverterTypeFfiSession.lower(value)
 }
 
@@ -884,13 +896,13 @@ public protocol FfiSqlExecutor: AnyObject, Sendable {
  * host's database connection.
  */
 open class FfiSqlExecutorImpl: FfiSqlExecutor, @unchecked Sendable {
-    fileprivate let pointer: UnsafeMutableRawPointer!
+    fileprivate let handle: UInt64
 
-    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
 #if swift(>=5.8)
     @_documentation(visibility: private)
 #endif
-    public struct NoPointer {
+    public struct NoHandle {
         public init() {}
     }
 
@@ -900,36 +912,37 @@ open class FfiSqlExecutorImpl: FfiSqlExecutor, @unchecked Sendable {
 #if swift(>=5.8)
     @_documentation(visibility: private)
 #endif
-    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
-        self.pointer = pointer
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
     }
 
     // This constructor can be used to instantiate a fake object.
-    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
     //
     // - Warning:
-    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
 #if swift(>=5.8)
     @_documentation(visibility: private)
 #endif
-    public init(noPointer: NoPointer) {
-        self.pointer = nil
+    public init(noHandle: NoHandle) {
+        self.handle = 0
     }
 
 #if swift(>=5.8)
     @_documentation(visibility: private)
 #endif
-    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
-        return try! rustCall { uniffi_taskchampion_ffi_fn_clone_ffisqlexecutor(self.pointer, $0) }
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_taskchampion_ffi_fn_clone_ffisqlexecutor(self.handle, $0) }
     }
     // No primary constructor declared for this class.
 
     deinit {
-        guard let pointer = pointer else {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
             return
         }
 
-        try! rustCall { uniffi_taskchampion_ffi_fn_free_ffisqlexecutor(pointer, $0) }
+        try! rustCall { uniffi_taskchampion_ffi_fn_free_ffisqlexecutor(handle, $0) }
     }
 
     
@@ -944,7 +957,7 @@ open func queryOne(sql: String, params: [FfiSqlParam])async throws  -> String?  
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_taskchampion_ffi_fn_method_ffisqlexecutor_query_one(
-                    self.uniffiClonePointer(),
+                    self.uniffiCloneHandle(),
                     FfiConverterString.lower(sql),FfiConverterSequenceTypeFfiSqlParam.lower(params)
                 )
             },
@@ -964,7 +977,7 @@ open func queryAll(sql: String, params: [FfiSqlParam])async throws  -> [String] 
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_taskchampion_ffi_fn_method_ffisqlexecutor_query_all(
-                    self.uniffiClonePointer(),
+                    self.uniffiCloneHandle(),
                     FfiConverterString.lower(sql),FfiConverterSequenceTypeFfiSqlParam.lower(params)
                 )
             },
@@ -985,7 +998,7 @@ open func executeBatch(statements: [FfiSqlStatement])async throws   {
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_taskchampion_ffi_fn_method_ffisqlexecutor_execute_batch(
-                    self.uniffiClonePointer(),
+                    self.uniffiCloneHandle(),
                     FfiConverterSequenceTypeFfiSqlStatement.lower(statements)
                 )
             },
@@ -998,7 +1011,9 @@ open func executeBatch(statements: [FfiSqlStatement])async throws   {
 }
     
 
+    
 }
+
 
 
 // Put the implementation in a struct so we don't pollute the top-level namespace
@@ -1010,13 +1025,27 @@ fileprivate struct UniffiCallbackInterfaceFfiSqlExecutor {
     // This creates 1-element array, since this seems to be the only way to construct a const
     // pointer that we can pass to the Rust code.
     static let vtable: [UniffiVTableCallbackInterfaceFfiSqlExecutor] = [UniffiVTableCallbackInterfaceFfiSqlExecutor(
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
+            do {
+                try FfiConverterTypeFfiSqlExecutor.handleMap.remove(handle: uniffiHandle)
+            } catch {
+                print("Uniffi callback interface FfiSqlExecutor: handle missing in uniffiFree")
+            }
+        },
+        uniffiClone: { (uniffiHandle: UInt64) -> UInt64 in
+            do {
+                return try FfiConverterTypeFfiSqlExecutor.handleMap.clone(handle: uniffiHandle)
+            } catch {
+                fatalError("Uniffi callback interface FfiSqlExecutor: handle missing in uniffiClone")
+            }
+        },
         queryOne: { (
             uniffiHandle: UInt64,
             sql: RustBuffer,
             params: RustBuffer,
             uniffiFutureCallback: @escaping UniffiForeignFutureCompleteRustBuffer,
             uniffiCallbackData: UInt64,
-            uniffiOutReturn: UnsafeMutablePointer<UniffiForeignFuture>
+            uniffiOutDroppedCallback: UnsafeMutablePointer<UniffiForeignFutureDroppedCallbackStruct>
         ) in
             let makeCall = {
                 () async throws -> String? in
@@ -1032,7 +1061,7 @@ fileprivate struct UniffiCallbackInterfaceFfiSqlExecutor {
             let uniffiHandleSuccess = { (returnValue: String?) in
                 uniffiFutureCallback(
                     uniffiCallbackData,
-                    UniffiForeignFutureStructRustBuffer(
+                    UniffiForeignFutureResultRustBuffer(
                         returnValue: FfiConverterOptionString.lower(returnValue),
                         callStatus: RustCallStatus()
                     )
@@ -1041,19 +1070,19 @@ fileprivate struct UniffiCallbackInterfaceFfiSqlExecutor {
             let uniffiHandleError = { (statusCode, errorBuf) in
                 uniffiFutureCallback(
                     uniffiCallbackData,
-                    UniffiForeignFutureStructRustBuffer(
+                    UniffiForeignFutureResultRustBuffer(
                         returnValue: RustBuffer.empty(),
                         callStatus: RustCallStatus(code: statusCode, errorBuf: errorBuf)
                     )
                 )
             }
-            let uniffiForeignFuture = uniffiTraitInterfaceCallAsyncWithError(
+            uniffiTraitInterfaceCallAsyncWithError(
                 makeCall: makeCall,
                 handleSuccess: uniffiHandleSuccess,
                 handleError: uniffiHandleError,
-                lowerError: FfiConverterTypeFfiError_lower
+                lowerError: FfiConverterTypeFfiError_lower,
+                droppedCallback: uniffiOutDroppedCallback
             )
-            uniffiOutReturn.pointee = uniffiForeignFuture
         },
         queryAll: { (
             uniffiHandle: UInt64,
@@ -1061,7 +1090,7 @@ fileprivate struct UniffiCallbackInterfaceFfiSqlExecutor {
             params: RustBuffer,
             uniffiFutureCallback: @escaping UniffiForeignFutureCompleteRustBuffer,
             uniffiCallbackData: UInt64,
-            uniffiOutReturn: UnsafeMutablePointer<UniffiForeignFuture>
+            uniffiOutDroppedCallback: UnsafeMutablePointer<UniffiForeignFutureDroppedCallbackStruct>
         ) in
             let makeCall = {
                 () async throws -> [String] in
@@ -1077,7 +1106,7 @@ fileprivate struct UniffiCallbackInterfaceFfiSqlExecutor {
             let uniffiHandleSuccess = { (returnValue: [String]) in
                 uniffiFutureCallback(
                     uniffiCallbackData,
-                    UniffiForeignFutureStructRustBuffer(
+                    UniffiForeignFutureResultRustBuffer(
                         returnValue: FfiConverterSequenceString.lower(returnValue),
                         callStatus: RustCallStatus()
                     )
@@ -1086,26 +1115,26 @@ fileprivate struct UniffiCallbackInterfaceFfiSqlExecutor {
             let uniffiHandleError = { (statusCode, errorBuf) in
                 uniffiFutureCallback(
                     uniffiCallbackData,
-                    UniffiForeignFutureStructRustBuffer(
+                    UniffiForeignFutureResultRustBuffer(
                         returnValue: RustBuffer.empty(),
                         callStatus: RustCallStatus(code: statusCode, errorBuf: errorBuf)
                     )
                 )
             }
-            let uniffiForeignFuture = uniffiTraitInterfaceCallAsyncWithError(
+            uniffiTraitInterfaceCallAsyncWithError(
                 makeCall: makeCall,
                 handleSuccess: uniffiHandleSuccess,
                 handleError: uniffiHandleError,
-                lowerError: FfiConverterTypeFfiError_lower
+                lowerError: FfiConverterTypeFfiError_lower,
+                droppedCallback: uniffiOutDroppedCallback
             )
-            uniffiOutReturn.pointee = uniffiForeignFuture
         },
         executeBatch: { (
             uniffiHandle: UInt64,
             statements: RustBuffer,
             uniffiFutureCallback: @escaping UniffiForeignFutureCompleteVoid,
             uniffiCallbackData: UInt64,
-            uniffiOutReturn: UnsafeMutablePointer<UniffiForeignFuture>
+            uniffiOutDroppedCallback: UnsafeMutablePointer<UniffiForeignFutureDroppedCallbackStruct>
         ) in
             let makeCall = {
                 () async throws -> () in
@@ -1120,7 +1149,7 @@ fileprivate struct UniffiCallbackInterfaceFfiSqlExecutor {
             let uniffiHandleSuccess = { (returnValue: ()) in
                 uniffiFutureCallback(
                     uniffiCallbackData,
-                    UniffiForeignFutureStructVoid(
+                    UniffiForeignFutureResultVoid(
                         callStatus: RustCallStatus()
                     )
                 )
@@ -1128,24 +1157,18 @@ fileprivate struct UniffiCallbackInterfaceFfiSqlExecutor {
             let uniffiHandleError = { (statusCode, errorBuf) in
                 uniffiFutureCallback(
                     uniffiCallbackData,
-                    UniffiForeignFutureStructVoid(
+                    UniffiForeignFutureResultVoid(
                         callStatus: RustCallStatus(code: statusCode, errorBuf: errorBuf)
                     )
                 )
             }
-            let uniffiForeignFuture = uniffiTraitInterfaceCallAsyncWithError(
+            uniffiTraitInterfaceCallAsyncWithError(
                 makeCall: makeCall,
                 handleSuccess: uniffiHandleSuccess,
                 handleError: uniffiHandleError,
-                lowerError: FfiConverterTypeFfiError_lower
+                lowerError: FfiConverterTypeFfiError_lower,
+                droppedCallback: uniffiOutDroppedCallback
             )
-            uniffiOutReturn.pointee = uniffiForeignFuture
-        },
-        uniffiFree: { (uniffiHandle: UInt64) -> () in
-            let result = try? FfiConverterTypeFfiSqlExecutor.handleMap.remove(handle: uniffiHandle)
-            if result == nil {
-                print("Uniffi callback interface FfiSqlExecutor: handle missing in uniffiFree")
-            }
         }
     )]
 }
@@ -1154,42 +1177,43 @@ private func uniffiCallbackInitFfiSqlExecutor() {
     uniffi_taskchampion_ffi_fn_init_callback_vtable_ffisqlexecutor(UniffiCallbackInterfaceFfiSqlExecutor.vtable)
 }
 
-
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
 public struct FfiConverterTypeFfiSqlExecutor: FfiConverter {
     fileprivate static let handleMap = UniffiHandleMap<FfiSqlExecutor>()
 
-    typealias FfiType = UnsafeMutableRawPointer
+    typealias FfiType = UInt64
     typealias SwiftType = FfiSqlExecutor
 
-    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> FfiSqlExecutor {
-        return FfiSqlExecutorImpl(unsafeFromRawPointer: pointer)
+    public static func lift(_ handle: UInt64) throws -> FfiSqlExecutor {
+        if ((handle & 1) == 0) {
+            // Rust-generated handle, construct a new class that uses the handle to implement the
+            // interface
+            return FfiSqlExecutorImpl(unsafeFromHandle: handle)
+        } else {
+            // Swift-generated handle, get the object from the handle map
+            return try handleMap.remove(handle: handle)
+        }
     }
 
-    public static func lower(_ value: FfiSqlExecutor) -> UnsafeMutableRawPointer {
-        guard let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: handleMap.insert(obj: value))) else {
-            fatalError("Cast to UnsafeMutableRawPointer failed")
-        }
-        return ptr
+    public static func lower(_ value: FfiSqlExecutor) -> UInt64 {
+         if let rustImpl = value as? FfiSqlExecutorImpl {
+             // Rust-implemented object.  Clone the handle and return it
+            return rustImpl.uniffiCloneHandle()
+         } else {
+            // Swift object, generate a new vtable handle and return that.
+            return handleMap.insert(obj: value)
+         }
     }
 
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiSqlExecutor {
-        let v: UInt64 = try readInt(&buf)
-        // The Rust code won't compile if a pointer won't fit in a UInt64.
-        // We have to go via `UInt` because that's the thing that's the size of a pointer.
-        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
-        if (ptr == nil) {
-            throw UniffiInternalError.unexpectedNullPointer
-        }
-        return try lift(ptr!)
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
     }
 
     public static func write(_ value: FfiSqlExecutor, into buf: inout [UInt8]) {
-        // This fiddling is because `Int` is the thing that's the same size as a pointer.
-        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
-        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+        writeInt(&buf, lower(value))
     }
 }
 
@@ -1197,14 +1221,14 @@ public struct FfiConverterTypeFfiSqlExecutor: FfiConverter {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeFfiSqlExecutor_lift(_ pointer: UnsafeMutableRawPointer) throws -> FfiSqlExecutor {
-    return try FfiConverterTypeFfiSqlExecutor.lift(pointer)
+public func FfiConverterTypeFfiSqlExecutor_lift(_ handle: UInt64) throws -> FfiSqlExecutor {
+    return try FfiConverterTypeFfiSqlExecutor.lift(handle)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeFfiSqlExecutor_lower(_ value: FfiSqlExecutor) -> UnsafeMutableRawPointer {
+public func FfiConverterTypeFfiSqlExecutor_lower(_ value: FfiSqlExecutor) -> UInt64 {
     return FfiConverterTypeFfiSqlExecutor.lower(value)
 }
 
@@ -1214,7 +1238,7 @@ public func FfiConverterTypeFfiSqlExecutor_lower(_ value: FfiSqlExecutor) -> Uns
 /**
  * A single task annotation.
  */
-public struct FfiAnnotation {
+public struct FfiAnnotation: Equatable, Hashable {
     /**
      * Unix epoch seconds.
      */
@@ -1230,31 +1254,15 @@ public struct FfiAnnotation {
         self.entry = entry
         self.description = description
     }
+
+    
+
+    
 }
 
 #if compiler(>=6)
 extension FfiAnnotation: Sendable {}
 #endif
-
-
-extension FfiAnnotation: Equatable, Hashable {
-    public static func ==(lhs: FfiAnnotation, rhs: FfiAnnotation) -> Bool {
-        if lhs.entry != rhs.entry {
-            return false
-        }
-        if lhs.description != rhs.description {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(entry)
-        hasher.combine(description)
-    }
-}
-
-
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -1293,7 +1301,7 @@ public func FfiConverterTypeFfiAnnotation_lower(_ value: FfiAnnotation) -> RustB
 /**
  * A dependency edge: `from_uuid` depends on `to_uuid`.
  */
-public struct FfiDependencyEdge {
+public struct FfiDependencyEdge: Equatable, Hashable {
     /**
      * The task that has the dependency.
      */
@@ -1315,31 +1323,15 @@ public struct FfiDependencyEdge {
         self.fromUuid = fromUuid
         self.toUuid = toUuid
     }
+
+    
+
+    
 }
 
 #if compiler(>=6)
 extension FfiDependencyEdge: Sendable {}
 #endif
-
-
-extension FfiDependencyEdge: Equatable, Hashable {
-    public static func ==(lhs: FfiDependencyEdge, rhs: FfiDependencyEdge) -> Bool {
-        if lhs.fromUuid != rhs.fromUuid {
-            return false
-        }
-        if lhs.toUuid != rhs.toUuid {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(fromUuid)
-        hasher.combine(toUuid)
-    }
-}
-
-
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -1378,7 +1370,7 @@ public func FfiConverterTypeFfiDependencyEdge_lower(_ value: FfiDependencyEdge) 
 /**
  * A single SQL statement with parameters, for batched execution.
  */
-public struct FfiSqlStatement {
+public struct FfiSqlStatement: Equatable, Hashable {
     public var sql: String
     public var params: [FfiSqlParam]
 
@@ -1388,31 +1380,15 @@ public struct FfiSqlStatement {
         self.sql = sql
         self.params = params
     }
+
+    
+
+    
 }
 
 #if compiler(>=6)
 extension FfiSqlStatement: Sendable {}
 #endif
-
-
-extension FfiSqlStatement: Equatable, Hashable {
-    public static func ==(lhs: FfiSqlStatement, rhs: FfiSqlStatement) -> Bool {
-        if lhs.sql != rhs.sql {
-            return false
-        }
-        if lhs.params != rhs.params {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(sql)
-        hasher.combine(params)
-    }
-}
-
-
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -1451,7 +1427,7 @@ public func FfiConverterTypeFfiSqlStatement_lower(_ value: FfiSqlStatement) -> R
 /**
  * Flat representation of a task suitable for FFI transfer.
  */
-public struct FfiTask {
+public struct FfiTask: Equatable, Hashable {
     public var uuid: String
     public var status: FfiStatus
     public var description: String
@@ -1515,91 +1491,15 @@ public struct FfiTask {
         self.isBlocked = isBlocked
         self.isBlocking = isBlocking
     }
+
+    
+
+    
 }
 
 #if compiler(>=6)
 extension FfiTask: Sendable {}
 #endif
-
-
-extension FfiTask: Equatable, Hashable {
-    public static func ==(lhs: FfiTask, rhs: FfiTask) -> Bool {
-        if lhs.uuid != rhs.uuid {
-            return false
-        }
-        if lhs.status != rhs.status {
-            return false
-        }
-        if lhs.description != rhs.description {
-            return false
-        }
-        if lhs.priority != rhs.priority {
-            return false
-        }
-        if lhs.entry != rhs.entry {
-            return false
-        }
-        if lhs.modified != rhs.modified {
-            return false
-        }
-        if lhs.due != rhs.due {
-            return false
-        }
-        if lhs.wait != rhs.wait {
-            return false
-        }
-        if lhs.parent != rhs.parent {
-            return false
-        }
-        if lhs.position != rhs.position {
-            return false
-        }
-        if lhs.tags != rhs.tags {
-            return false
-        }
-        if lhs.annotations != rhs.annotations {
-            return false
-        }
-        if lhs.dependencies != rhs.dependencies {
-            return false
-        }
-        if lhs.isWaiting != rhs.isWaiting {
-            return false
-        }
-        if lhs.isActive != rhs.isActive {
-            return false
-        }
-        if lhs.isBlocked != rhs.isBlocked {
-            return false
-        }
-        if lhs.isBlocking != rhs.isBlocking {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(uuid)
-        hasher.combine(status)
-        hasher.combine(description)
-        hasher.combine(priority)
-        hasher.combine(entry)
-        hasher.combine(modified)
-        hasher.combine(due)
-        hasher.combine(wait)
-        hasher.combine(parent)
-        hasher.combine(position)
-        hasher.combine(tags)
-        hasher.combine(annotations)
-        hasher.combine(dependencies)
-        hasher.combine(isWaiting)
-        hasher.combine(isActive)
-        hasher.combine(isBlocked)
-        hasher.combine(isBlocking)
-    }
-}
-
-
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -1668,7 +1568,7 @@ public func FfiConverterTypeFfiTask_lower(_ value: FfiTask) -> RustBuffer {
 /**
  * A node in the task tree (parent/child hierarchy).
  */
-public struct FfiTreeNode {
+public struct FfiTreeNode: Equatable, Hashable {
     public var uuid: String
     /**
      * Direct child UUIDs.
@@ -1706,43 +1606,15 @@ public struct FfiTreeNode {
         self.position = position
         self.isPending = isPending
     }
+
+    
+
+    
 }
 
 #if compiler(>=6)
 extension FfiTreeNode: Sendable {}
 #endif
-
-
-extension FfiTreeNode: Equatable, Hashable {
-    public static func ==(lhs: FfiTreeNode, rhs: FfiTreeNode) -> Bool {
-        if lhs.uuid != rhs.uuid {
-            return false
-        }
-        if lhs.children != rhs.children {
-            return false
-        }
-        if lhs.parent != rhs.parent {
-            return false
-        }
-        if lhs.position != rhs.position {
-            return false
-        }
-        if lhs.isPending != rhs.isPending {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(uuid)
-        hasher.combine(children)
-        hasher.combine(parent)
-        hasher.combine(position)
-        hasher.combine(isPending)
-    }
-}
-
-
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -1791,7 +1663,7 @@ public func FfiConverterTypeFfiTreeNode_lower(_ value: FfiTreeNode) -> RustBuffe
  * Each carries enough context for the host to decide on UX (retry, show
  * message, refresh cache, etc.) without parsing strings.
  */
-public enum FfiError: Swift.Error {
+public enum FfiError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
 
     
     
@@ -1820,8 +1692,21 @@ public enum FfiError: Swift.Error {
      */
     case Internal(message: String
     )
+
+    
+
+    
+
+    
+    public var errorDescription: String? {
+        String(reflecting: self)
+    }
+    
 }
 
+#if compiler(>=6)
+extension FfiError: Sendable {}
+#endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -1906,34 +1791,23 @@ public func FfiConverterTypeFfiError_lower(_ value: FfiError) -> RustBuffer {
     return FfiConverterTypeFfiError.lower(value)
 }
 
-
-extension FfiError: Equatable, Hashable {}
-
-
-
-
-extension FfiError: Foundation.LocalizedError {
-    public var errorDescription: String? {
-        String(reflecting: self)
-    }
-}
-
-
-
-
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
  * SQL parameter for external storage queries.
  */
 
-public enum FfiSqlParam {
+public enum FfiSqlParam: Equatable, Hashable {
     
     case text(value: String
     )
     case null
-}
 
+
+
+
+
+}
 
 #if compiler(>=6)
 extension FfiSqlParam: Sendable {}
@@ -1990,20 +1864,13 @@ public func FfiConverterTypeFfiSqlParam_lower(_ value: FfiSqlParam) -> RustBuffe
 }
 
 
-extension FfiSqlParam: Equatable, Hashable {}
-
-
-
-
-
-
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
  * Task status, mirroring `taskchampion::Status`.
  */
 
-public enum FfiStatus {
+public enum FfiStatus: Equatable, Hashable {
     
     case pending
     case completed
@@ -2011,8 +1878,12 @@ public enum FfiStatus {
     case recurring
     case unknown(value: String
     )
-}
 
+
+
+
+
+}
 
 #if compiler(>=6)
 extension FfiStatus: Sendable {}
@@ -2087,13 +1958,6 @@ public func FfiConverterTypeFfiStatus_lower(_ value: FfiStatus) -> RustBuffer {
 }
 
 
-extension FfiStatus: Equatable, Hashable {}
-
-
-
-
-
-
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
@@ -2103,7 +1967,7 @@ extension FfiStatus: Equatable, Hashable {}
  * a single transaction with one undo point.
  */
 
-public enum TaskMutation {
+public enum TaskMutation: Equatable, Hashable {
     
     case setDescription(value: String
     )
@@ -2152,8 +2016,12 @@ public enum TaskMutation {
      * Soft-delete: sets status to `Deleted`.
      */
     case delete
-}
 
+
+
+
+
+}
 
 #if compiler(>=6)
 extension TaskMutation: Sendable {}
@@ -2331,13 +2199,6 @@ public func FfiConverterTypeTaskMutation_lift(_ buf: RustBuffer) throws -> TaskM
 public func FfiConverterTypeTaskMutation_lower(_ value: TaskMutation) -> RustBuffer {
     return FfiConverterTypeTaskMutation.lower(value)
 }
-
-
-extension TaskMutation: Equatable, Hashable {}
-
-
-
-
 
 
 #if swift(>=5.8)
@@ -2612,7 +2473,7 @@ fileprivate struct FfiConverterSequenceTypeTaskMutation: FfiConverterRustBuffer 
     }
 }
 private let UNIFFI_RUST_FUTURE_POLL_READY: Int8 = 0
-private let UNIFFI_RUST_FUTURE_POLL_MAYBE_READY: Int8 = 1
+private let UNIFFI_RUST_FUTURE_POLL_WAKE: Int8 = 1
 
 fileprivate let uniffiContinuationHandleMap = UniffiHandleMap<UnsafeContinuation<Int8, Never>>()
 
@@ -2636,7 +2497,9 @@ fileprivate func uniffiRustCallAsync<F, T>(
         pollResult = await withUnsafeContinuation {
             pollFunc(
                 rustFuture,
-                uniffiFutureContinuationCallback,
+                { handle, pollResult in
+                    uniffiFutureContinuationCallback(handle: handle, pollResult: pollResult)
+                },
                 uniffiContinuationHandleMap.insert(obj: $0)
             )
         }
@@ -2660,8 +2523,9 @@ fileprivate func uniffiFutureContinuationCallback(handle: UInt64, pollResult: In
 private func uniffiTraitInterfaceCallAsync<T>(
     makeCall: @escaping () async throws -> T,
     handleSuccess: @escaping (T) -> (),
-    handleError: @escaping (Int8, RustBuffer) -> ()
-) -> UniffiForeignFuture {
+    handleError: @escaping (Int8, RustBuffer) -> (),
+    droppedCallback: UnsafeMutablePointer<UniffiForeignFutureDroppedCallbackStruct>
+) {
     let task = Task {
         // Note: it's important we call either `handleSuccess` or `handleError` exactly once.  Each
         // call consumes an Arc reference, which means there should be no possibility of a double
@@ -2681,16 +2545,19 @@ private func uniffiTraitInterfaceCallAsync<T>(
         handleSuccess(callResult)
     }
     let handle = UNIFFI_FOREIGN_FUTURE_HANDLE_MAP.insert(obj: task)
-    return UniffiForeignFuture(handle: handle, free: uniffiForeignFutureFree)
-
+    droppedCallback.pointee = UniffiForeignFutureDroppedCallbackStruct(
+        handle: handle,
+        free: uniffiForeignFutureDroppedCallback
+    )
 }
 
 private func uniffiTraitInterfaceCallAsyncWithError<T, E>(
     makeCall: @escaping () async throws -> T,
     handleSuccess: @escaping (T) -> (),
     handleError: @escaping (Int8, RustBuffer) -> (),
-    lowerError: @escaping (E) -> RustBuffer
-) -> UniffiForeignFuture {
+    lowerError: @escaping (E) -> RustBuffer,
+    droppedCallback: UnsafeMutablePointer<UniffiForeignFutureDroppedCallbackStruct>
+) {
     let task = Task {
         // See the note in uniffiTraitInterfaceCallAsync for details on `handleSuccess` and
         // `handleError`.
@@ -2707,7 +2574,10 @@ private func uniffiTraitInterfaceCallAsyncWithError<T, E>(
         handleSuccess(callResult)
     }
     let handle = UNIFFI_FOREIGN_FUTURE_HANDLE_MAP.insert(obj: task)
-    return UniffiForeignFuture(handle: handle, free: uniffiForeignFutureFree)
+    droppedCallback.pointee = UniffiForeignFutureDroppedCallbackStruct(
+        handle: handle,
+        free: uniffiForeignFutureDroppedCallback
+    )
 }
 
 // Borrow the callback handle map implementation to store foreign future handles
@@ -2724,7 +2594,7 @@ fileprivate protocol UniffiForeignFutureTask {
 
 extension Task: UniffiForeignFutureTask {}
 
-private func uniffiForeignFutureFree(handle: UInt64) {
+private func uniffiForeignFutureDroppedCallback(handle: UInt64) {
     do {
         let task = try UNIFFI_FOREIGN_FUTURE_HANDLE_MAP.remove(handle: handle)
         // Set the cancellation flag on the task.  If it's still running, the code can check the
@@ -2732,7 +2602,7 @@ private func uniffiForeignFutureFree(handle: UInt64) {
         // a no-op.
         task.cancel()
     } catch {
-        print("uniffiForeignFutureFree: handle missing from handlemap")
+        print("uniffiForeignFutureDroppedCallback: handle missing from handlemap")
     }
 }
 
@@ -2762,49 +2632,49 @@ private enum InitializationResult {
 // the code inside is only computed once.
 private let initializationResult: InitializationResult = {
     // Get the bindings contract version from our ComponentInterface
-    let bindings_contract_version = 29
+    let bindings_contract_version = 30
     // Get the scaffolding contract version by calling the into the dylib
     let scaffolding_contract_version = ffi_taskchampion_ffi_uniffi_contract_version()
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_func_alltasktablessql() != 24864) {
+    if (uniffi_taskchampion_ffi_checksum_func_alltasktablessql() != 52128) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_method_ffisession_all_tasks() != 8745) {
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_all_tasks() != 57965) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_method_ffisession_create_task() != 34114) {
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_create_task() != 18352) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_method_ffisession_dependency_map() != 257) {
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_dependency_map() != 18621) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_method_ffisession_get_task() != 31389) {
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_get_task() != 45469) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_method_ffisession_mutate_task() != 49554) {
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_pending_tasks() != 10449) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_method_ffisession_pending_tasks() != 399) {
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_tree_map() != 45281) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_method_ffisession_tree_map() != 62092) {
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_undo() != 18653) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_method_ffisession_undo() != 36981) {
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_mutate_task() != 59757) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_method_ffisqlexecutor_query_one() != 21007) {
+    if (uniffi_taskchampion_ffi_checksum_method_ffisqlexecutor_query_one() != 60448) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_method_ffisqlexecutor_query_all() != 10281) {
+    if (uniffi_taskchampion_ffi_checksum_method_ffisqlexecutor_query_all() != 58880) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_method_ffisqlexecutor_execute_batch() != 44913) {
+    if (uniffi_taskchampion_ffi_checksum_method_ffisqlexecutor_execute_batch() != 6036) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_constructor_ffisession_new() != 24032) {
+    if (uniffi_taskchampion_ffi_checksum_constructor_ffisession_new() != 38331) {
         return InitializationResult.apiChecksumMismatch
     }
 
