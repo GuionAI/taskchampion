@@ -53,7 +53,10 @@ This produces:
    ```swift
    import TaskChampionFFI
 
-   // Inside a PowerSync writeTransaction:
-   let handle = Int64(Int(bitPattern: tx.pointer))
-   let tasks = try pendingTasks(dbHandle: handle, userId: userId)
+   // Create a session once at login/startup
+   let session = try FfiSession(executor: myExecutor, userId: userId)
+
+   // All task operations are async
+   let tasks = try await session.pendingTasks()
+   let created = try await session.createTask(uuid: UUID().uuidString, description: "New task")
    ```
