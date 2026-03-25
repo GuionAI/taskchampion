@@ -1,5 +1,6 @@
 //! Conversions between taskchampion types and FFI-friendly types.
 
+use async_trait::async_trait;
 use taskchampion::{Status, Task, TreeMap};
 use uuid::Uuid;
 
@@ -143,8 +144,9 @@ impl FfiSqlExecutorAdapter {
     }
 }
 
+#[async_trait]
 impl SqlExecutor for FfiSqlExecutorAdapter {
-    fn query_one(
+    async fn query_one(
         &self,
         sql: &str,
         params: &[SqlParam],
@@ -152,10 +154,11 @@ impl SqlExecutor for FfiSqlExecutorAdapter {
         let ffi_params: Vec<FfiSqlParam> = params.iter().map(core_param_to_ffi).collect();
         self.inner
             .query_one(sql.to_string(), ffi_params)
+            .await
             .map_err(ffi_error_to_core)
     }
 
-    fn query_all(
+    async fn query_all(
         &self,
         sql: &str,
         params: &[SqlParam],
@@ -163,16 +166,18 @@ impl SqlExecutor for FfiSqlExecutorAdapter {
         let ffi_params: Vec<FfiSqlParam> = params.iter().map(core_param_to_ffi).collect();
         self.inner
             .query_all(sql.to_string(), ffi_params)
+            .await
             .map_err(ffi_error_to_core)
     }
 
-    fn execute_batch(
+    async fn execute_batch(
         &self,
         statements: &[SqlStatement],
     ) -> std::result::Result<(), taskchampion::Error> {
         let ffi_stmts: Vec<FfiSqlStatement> = statements.iter().map(core_stmt_to_ffi).collect();
         self.inner
             .execute_batch(ffi_stmts)
+            .await
             .map_err(ffi_error_to_core)
     }
 }
