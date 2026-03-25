@@ -164,8 +164,7 @@ impl FfiSqlExecutor for MockFfiSqlExecutor {
 
 fn make_session() -> Arc<FfiSession> {
     let executor: Arc<dyn FfiSqlExecutor> = Arc::new(MockFfiSqlExecutor::new());
-    FfiSession::new(executor, "00000000-0000-0000-0000-000000000000".into())
-        .expect("valid user_id")
+    FfiSession::new(executor, "00000000-0000-0000-0000-000000000000".into()).expect("valid user_id")
 }
 
 // ---------------------------------------------------------------------------
@@ -380,10 +379,7 @@ async fn test_set_due_round_trip() {
     assert_eq!(task.due, Some(epoch), "due round-trip via set_value");
 
     session
-        .mutate_task(
-            uuid.clone(),
-            vec![TaskMutation::SetDue { epoch: None }],
-        )
+        .mutate_task(uuid.clone(), vec![TaskMutation::SetDue { epoch: None }])
         .await
         .expect("clear due");
 

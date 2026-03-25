@@ -36,10 +36,7 @@ impl FfiSession {
     /// Validates `user_id` as a UUID upfront. All subsequent methods use
     /// the parsed UUID without re-validation.
     #[uniffi::constructor]
-    pub fn new(
-        executor: Arc<dyn FfiSqlExecutor>,
-        user_id: String,
-    ) -> Result<Arc<Self>, FfiError> {
+    pub fn new(executor: Arc<dyn FfiSqlExecutor>, user_id: String) -> Result<Arc<Self>, FfiError> {
         let user_uuid = Uuid::parse_str(&user_id).map_err(|e| FfiError::Usage {
             message: format!("Invalid user_id: {e}"),
         })?;

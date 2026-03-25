@@ -383,7 +383,10 @@ impl StorageTxn for ExternalStorageTxn<'_> {
         // skipping any that have already been buffered for deletion in this
         // transaction (reads see committed state; buffered deletes are not yet
         // visible to the host DB).
-        let rows = self.executor.query_all(ALL_OPS_WITH_ID_DESC_SQL, &[]).await?;
+        let rows = self
+            .executor
+            .query_all(ALL_OPS_WITH_ID_DESC_SQL, &[])
+            .await?;
         let effective_last = rows.iter().find(|json| {
             parse_json_string_field(json, "id")
                 .map(|id| !self.pending_op_deletes.contains(&id))
