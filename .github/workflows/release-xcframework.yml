@@ -82,6 +82,10 @@ jobs:
           # but git checkout main would reset it to the old committed version.
           SWIFT_TMPFILE=$(mktemp)
           cp Sources/TaskChampionFFI/TaskChampionFFI.swift "$SWIFT_TMPFILE"
+          # Restore tracked file to clean state so git checkout main doesn't fail
+          # with "your local changes would be overwritten" — the tmpfile preserves
+          # the freshly-generated version for restore on the next step.
+          git checkout -- Sources/TaskChampionFFI/TaskChampionFFI.swift
           # Fetch and check out the current tip of main to avoid non-fast-forward rejection.
           # The Rust cross-compile takes ~10+ min; other commits may land on main during that time.
           git fetch origin main
