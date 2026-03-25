@@ -1786,15 +1786,38 @@ public func FfiConverterTypeFfiTreeNode_lower(_ value: FfiTreeNode) -> RustBuffe
 
 /**
  * Error type returned by all FFI functions.
+ *
+ * Variants are designed for programmatic matching on the Swift/Kotlin side.
+ * Each carries enough context for the host to decide on UX (retry, show
+ * message, refresh cache, etc.) without parsing strings.
  */
 public enum FfiError: Swift.Error {
 
     
     
-    case Database(message: String
+    /**
+     * The referenced task does not exist.
+     */
+    case TaskNotFound(uuid: String
     )
-    case Usage(message: String
+    /**
+     * A task with this UUID already exists (create collision).
+     */
+    case TaskAlreadyExists(uuid: String
     )
+    /**
+     * Caller-side validation error (bad UUID format, invalid tag, etc.).
+     */
+    case InvalidInput(message: String
+    )
+    /**
+     * Storage-layer error (SQL execution failure, connection issue).
+     */
+    case Storage(message: String
+    )
+    /**
+     * Unexpected internal error (bug, catch-all).
+     */
     case Internal(message: String
     )
 }
@@ -1813,13 +1836,19 @@ public struct FfiConverterTypeFfiError: FfiConverterRustBuffer {
         
 
         
-        case 1: return .Database(
+        case 1: return .TaskNotFound(
+            uuid: try FfiConverterString.read(from: &buf)
+            )
+        case 2: return .TaskAlreadyExists(
+            uuid: try FfiConverterString.read(from: &buf)
+            )
+        case 3: return .InvalidInput(
             message: try FfiConverterString.read(from: &buf)
             )
-        case 2: return .Usage(
+        case 4: return .Storage(
             message: try FfiConverterString.read(from: &buf)
             )
-        case 3: return .Internal(
+        case 5: return .Internal(
             message: try FfiConverterString.read(from: &buf)
             )
 
@@ -1834,18 +1863,28 @@ public struct FfiConverterTypeFfiError: FfiConverterRustBuffer {
 
         
         
-        case let .Database(message):
+        case let .TaskNotFound(uuid):
             writeInt(&buf, Int32(1))
+            FfiConverterString.write(uuid, into: &buf)
+            
+        
+        case let .TaskAlreadyExists(uuid):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(uuid, into: &buf)
+            
+        
+        case let .InvalidInput(message):
+            writeInt(&buf, Int32(3))
             FfiConverterString.write(message, into: &buf)
             
         
-        case let .Usage(message):
-            writeInt(&buf, Int32(2))
+        case let .Storage(message):
+            writeInt(&buf, Int32(4))
             FfiConverterString.write(message, into: &buf)
             
         
         case let .Internal(message):
-            writeInt(&buf, Int32(3))
+            writeInt(&buf, Int32(5))
             FfiConverterString.write(message, into: &buf)
             
         }
