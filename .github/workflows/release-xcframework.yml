@@ -70,13 +70,13 @@ jobs:
       - name: Commit updated Package.swift to main
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          RELEASE_URL: https://github.com/tta-lab/taskchampion/releases/download/${{ github.ref_name }}/TaskChampionFFIFFI.xcframework.zip
+          RELEASE_URL: https://github.com/GuionAI/taskchampion/releases/download/${{ github.ref_name }}/TaskChampionFFIFFI.xcframework.zip
           RELEASE_CHECKSUM: ${{ steps.checksum.outputs.checksum }}
         run: |
           git config user.name "guion-release-bot[bot]"
           git config user.email "guion-release-bot[bot]@users.noreply.github.com"
           # Use app token for push authentication (bypasses ruleset status checks)
-          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/tta-lab/taskchampion.git"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/GuionAI/taskchampion.git"
           # Fetch and check out the current tip of main to avoid non-fast-forward rejection.
           # The Rust cross-compile takes ~10+ min; other commits may land on main during that time.
           git fetch origin main
