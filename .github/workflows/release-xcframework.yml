@@ -80,14 +80,15 @@ jobs:
           # Preserve the freshly-generated Swift bindings before switching branches.
           # build_xcframework.sh writes Sources/TaskChampionFFI/TaskChampionFFI.swift,
           # but git checkout main would reset it to the old committed version.
-          cp Sources/TaskChampionFFI/TaskChampionFFI.swift /tmp/TaskChampionFFI.swift
+          SWIFT_TMPFILE=$(mktemp)
+          cp Sources/TaskChampionFFI/TaskChampionFFI.swift "$SWIFT_TMPFILE"
           # Fetch and check out the current tip of main to avoid non-fast-forward rejection.
           # The Rust cross-compile takes ~10+ min; other commits may land on main during that time.
           git fetch origin main
           git checkout main
           git pull --ff-only origin main
           # Restore the generated Swift bindings onto the freshly-fetched main.
-          cp /tmp/TaskChampionFFI.swift Sources/TaskChampionFFI/TaskChampionFFI.swift
+          cp "$SWIFT_TMPFILE" Sources/TaskChampionFFI/TaskChampionFFI.swift
           # Re-apply Package.swift patch on the freshly-fetched main
           python3 -c "
           import re, os, sys
