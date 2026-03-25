@@ -24,20 +24,20 @@ use crate::storage::{Storage, StorageTxn, TaskMap};
 
 /// Callback interface for host-side SQL execution.
 ///
-/// Implementors run SQL against their own database connection. This trait
-/// is intentionally sync — UniFFI callback interfaces are sync, and the
-/// async bridging happens at the `Storage` level.
+/// Implementors run SQL against their own database connection. Methods are
+/// async to support non-blocking host-side execution (e.g. Swift async/await).
+#[async_trait]
 pub trait SqlExecutor: Send + Sync {
     /// Execute a read query returning at most one row as a JSON object string.
     /// Returns `Ok(None)` if no rows match.
-    fn query_one(&self, sql: &str, params: &[SqlParam]) -> Result<Option<String>>;
+    async fn query_one(&self, sql: &str, params: &[SqlParam]) -> Result<Option<String>>;
 
     /// Execute a read query returning all matching rows as JSON object strings.
-    fn query_all(&self, sql: &str, params: &[SqlParam]) -> Result<Vec<String>>;
+    async fn query_all(&self, sql: &str, params: &[SqlParam]) -> Result<Vec<String>>;
 
     /// Execute a batch of write statements atomically.
     /// The host MUST wrap these in a transaction.
-    fn execute_batch(&self, statements: &[SqlStatement]) -> Result<()>;
+    async fn execute_batch(&self, statements: &[SqlStatement]) -> Result<()>;
 }
 
 // ── ExternalStorage ───────────────────────────────────────────────────────
@@ -99,7 +99,7 @@ struct ExternalStorageTxn<'a> {
 impl ExternalStorageTxn<'_> {
     /// Resolve a project name to its ID. Checks local cache first (for
     /// projects created in this uncommitted transaction), then queries the host.
-    fn resolve_project_id(&mut self, name: &str) -> Result<String> {
+    async fn resolve_project_id(&mut self, name: &str) -> Result<String> {
         // Check local cache first.
         if let Some(id) = self.project_cache.get(name) {
             return Ok(id.clone());
@@ -108,7 +108,8 @@ impl ExternalStorageTxn<'_> {
         // Query host.
         let row = self
             .executor
-            .query_one(PROJECT_LOOKUP_SQL, &[SqlParam::Text(name.to_string())])?;
+            .query_one(PROJECT_LOOKUP_SQL, &[SqlParam::Text(name.to_string())])
+            .await?;
 
         if let Some(json) = row {
             let id = parse_json_string_field(&json, "id")?;
@@ -160,11 +161,12 @@ impl ExternalStorageTxn<'_> {
     }
 
     /// Merge tags and annotations from the host DB into a TaskMap.
-    fn merge_tags_annotations(&self, task_id: &str, task_map: &mut TaskMap) -> Result<()> {
+    async fn merge_tags_annotations(&self, task_id: &str, task_map: &mut TaskMap) -> Result<()> {
         // Tags.
         let tag_rows = self
             .executor
-            .query_all(TAG_QUERY_SQL, &[SqlParam::Text(task_id.to_string())])?;
+            .query_all(TAG_QUERY_SQL, &[SqlParam::Text(task_id.to_string())])
+            .await?;
         for json in &tag_rows {
             let name = parse_json_string_field(json, "name")?;
             task_map.insert(format!("tag_{name}"), String::new());
@@ -173,7 +175,8 @@ impl ExternalStorageTxn<'_> {
         // Annotations.
         let ann_rows = self
             .executor
-            .query_all(ANNOTATION_QUERY_SQL, &[SqlParam::Text(task_id.to_string())])?;
+            .query_all(ANNOTATION_QUERY_SQL, &[SqlParam::Text(task_id.to_string())])
+            .await?;
         for json in &ann_rows {
             let entry_at_iso = parse_json_string_field(json, "entry_at")?;
             let description = parse_json_string_field(json, "description")?;
@@ -211,13 +214,15 @@ impl StorageTxn for ExternalStorageTxn<'_> {
         );
         let row = self
             .executor
-            .query_one(&sql, &[SqlParam::Text(uuid.to_string())])?;
+            .query_one(&sql, &[SqlParam::Text(uuid.to_string())])
+            .await?;
         match row {
             None => Ok(None),
             Some(json) => {
                 let raw = Self::parse_task_row(&json)?;
                 let (_, mut task_map) = raw_to_task(raw)?;
-                self.merge_tags_annotations(&uuid.to_string(), &mut task_map)?;
+                self.merge_tags_annotations(&uuid.to_string(), &mut task_map)
+                    .await?;
                 Ok(Some(task_map))
             }
         }
@@ -229,12 +234,13 @@ impl StorageTxn for ExternalStorageTxn<'_> {
              LEFT JOIN projects p ON t.project_id = p.id \
              WHERE t.status = 'pending'"
         );
-        let rows = self.executor.query_all(&sql, &[])?;
+        let rows = self.executor.query_all(&sql, &[]).await?;
         let mut tasks = Vec::new();
         for json in &rows {
             let raw = Self::parse_task_row(json)?;
             let (uuid, mut task_map) = raw_to_task(raw)?;
-            self.merge_tags_annotations(&uuid.to_string(), &mut task_map)?;
+            self.merge_tags_annotations(&uuid.to_string(), &mut task_map)
+                .await?;
             tasks.push((uuid, task_map));
         }
         Ok(tasks)
@@ -247,7 +253,8 @@ impl StorageTxn for ExternalStorageTxn<'_> {
         }
         let exists_json = self
             .executor
-            .query_one(TASK_EXISTS_SQL, &[SqlParam::Text(uuid.to_string())])?;
+            .query_one(TASK_EXISTS_SQL, &[SqlParam::Text(uuid.to_string())])
+            .await?;
         if parse_json_bool(&exists_json, "exists_flag")? {
             return Ok(false);
         }
@@ -265,7 +272,7 @@ impl StorageTxn for ExternalStorageTxn<'_> {
 
         // Resolve project (uses local cache for buffered projects).
         let project_id: Option<String> = match &prepared.project_name {
-            Some(name) => Some(self.resolve_project_id(name)?),
+            Some(name) => Some(self.resolve_project_id(name).await?),
             None => None,
         };
 
@@ -275,7 +282,8 @@ impl StorageTxn for ExternalStorageTxn<'_> {
         } else {
             let exists_json = self
                 .executor
-                .query_one(TASK_EXISTS_SQL, &[SqlParam::Text(uuid.to_string())])?;
+                .query_one(TASK_EXISTS_SQL, &[SqlParam::Text(uuid.to_string())])
+                .await?;
             parse_json_bool(&exists_json, "exists_flag")?
         };
 
@@ -299,7 +307,8 @@ impl StorageTxn for ExternalStorageTxn<'_> {
         } else {
             let exists_json = self
                 .executor
-                .query_one(TASK_EXISTS_SQL, &[SqlParam::Text(uuid.to_string())])?;
+                .query_one(TASK_EXISTS_SQL, &[SqlParam::Text(uuid.to_string())])
+                .await?;
             parse_json_bool(&exists_json, "exists_flag")?
         };
         if exists {
@@ -314,19 +323,20 @@ impl StorageTxn for ExternalStorageTxn<'_> {
             "SELECT {TASK_SELECT_COLS} FROM tc_tasks t \
              LEFT JOIN projects p ON t.project_id = p.id"
         );
-        let rows = self.executor.query_all(&sql, &[])?;
+        let rows = self.executor.query_all(&sql, &[]).await?;
         let mut tasks = Vec::new();
         for json in &rows {
             let raw = Self::parse_task_row(json)?;
             let (uuid, mut task_map) = raw_to_task(raw)?;
-            self.merge_tags_annotations(&uuid.to_string(), &mut task_map)?;
+            self.merge_tags_annotations(&uuid.to_string(), &mut task_map)
+                .await?;
             tasks.push((uuid, task_map));
         }
         Ok(tasks)
     }
 
     async fn all_task_uuids(&mut self) -> Result<Vec<Uuid>> {
-        let rows = self.executor.query_all(ALL_TASK_UUIDS_SQL, &[])?;
+        let rows = self.executor.query_all(ALL_TASK_UUIDS_SQL, &[]).await?;
         rows.iter()
             .map(|json| {
                 let id = parse_json_string_field(json, "id")?;
@@ -336,7 +346,7 @@ impl StorageTxn for ExternalStorageTxn<'_> {
     }
 
     async fn get_task_operations(&mut self, uuid: Uuid) -> Result<Vec<Operation>> {
-        let rows = self.executor.query_all(ALL_OPERATIONS_SQL, &[])?;
+        let rows = self.executor.query_all(ALL_OPERATIONS_SQL, &[]).await?;
         rows.iter()
             .map(|json| {
                 let data_str = parse_json_string_field(json, "data")?;
@@ -352,7 +362,7 @@ impl StorageTxn for ExternalStorageTxn<'_> {
     }
 
     async fn all_operations(&mut self) -> Result<Vec<Operation>> {
-        let rows = self.executor.query_all(ALL_OPERATIONS_SQL, &[])?;
+        let rows = self.executor.query_all(ALL_OPERATIONS_SQL, &[]).await?;
         rows.iter()
             .map(|json| {
                 let data_str = parse_json_string_field(json, "data")?;
@@ -373,7 +383,7 @@ impl StorageTxn for ExternalStorageTxn<'_> {
         // skipping any that have already been buffered for deletion in this
         // transaction (reads see committed state; buffered deletes are not yet
         // visible to the host DB).
-        let rows = self.executor.query_all(ALL_OPS_WITH_ID_DESC_SQL, &[])?;
+        let rows = self.executor.query_all(ALL_OPS_WITH_ID_DESC_SQL, &[]).await?;
         let effective_last = rows.iter().find(|json| {
             parse_json_string_field(json, "id")
                 .map(|id| !self.pending_op_deletes.contains(&id))
@@ -400,7 +410,8 @@ impl StorageTxn for ExternalStorageTxn<'_> {
     async fn commit(&mut self) -> Result<()> {
         if !self.write_buffer.is_empty() {
             self.executor
-                .execute_batch(&std::mem::take(&mut self.write_buffer))?;
+                .execute_batch(&std::mem::take(&mut self.write_buffer))
+                .await?;
         }
         Ok(())
     }
@@ -460,6 +471,7 @@ fn parse_json_bool(json: &Option<String>, field: &str) -> Result<bool> {
 mod test {
     use super::*;
     use crate::storage::test::storage_tests_no_sync;
+    use async_trait::async_trait;
     use std::sync::Mutex;
 
     /// Mock executor backed by an in-memory SQLite connection.
@@ -530,8 +542,9 @@ mod test {
         }
     }
 
+    #[async_trait]
     impl SqlExecutor for MockSqlExecutor {
-        fn query_one(&self, sql: &str, params: &[SqlParam]) -> Result<Option<String>> {
+        async fn query_one(&self, sql: &str, params: &[SqlParam]) -> Result<Option<String>> {
             let conn = self.conn.lock().unwrap();
             let mut stmt = conn
                 .prepare(sql)
@@ -547,7 +560,7 @@ mod test {
             }
         }
 
-        fn query_all(&self, sql: &str, params: &[SqlParam]) -> Result<Vec<String>> {
+        async fn query_all(&self, sql: &str, params: &[SqlParam]) -> Result<Vec<String>> {
             let conn = self.conn.lock().unwrap();
             let mut stmt = conn
                 .prepare(sql)
@@ -562,7 +575,7 @@ mod test {
                 .map_err(|e| Error::Database(format!("Row read failed: {e}")))
         }
 
-        fn execute_batch(&self, statements: &[SqlStatement]) -> Result<()> {
+        async fn execute_batch(&self, statements: &[SqlStatement]) -> Result<()> {
             let mut conn = self.conn.lock().unwrap();
             let txn = conn
                 .transaction()
