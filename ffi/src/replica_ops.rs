@@ -140,15 +140,17 @@ impl FfiSession {
             // Reject duplicate creates upfront — replica.create_task silently
             // returns the existing task, so we must guard here to surface the
             // structured error to Swift callers.
+            //
+            // TOCTOU note: this is a best-effort check. Under PowerSync's
+            // serialized single-writer model concurrent races are not possible,
+            // so the check→create window is safe in practice.
             if replica
                 .get_task(task_uuid)
                 .await
                 .map_err(FfiError::from)?
                 .is_some()
             {
-                return Err(FfiError::TaskAlreadyExists {
-                    uuid: uuid.clone(),
-                });
+                return Err(FfiError::TaskAlreadyExists { uuid: uuid.clone() });
             }
             let mut ops = Operations::new();
             ops.push(Operation::UndoPoint);

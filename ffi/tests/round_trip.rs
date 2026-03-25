@@ -480,10 +480,7 @@ async fn test_create_duplicate_returns_task_already_exists() {
         .await
         .expect("first create");
 
-    match session
-        .create_task(uuid.clone(), "Duplicate".into())
-        .await
-    {
+    match session.create_task(uuid.clone(), "Duplicate".into()).await {
         Ok(_) => panic!("duplicate create should have failed"),
         Err(err) => assert!(
             matches!(err, FfiError::TaskAlreadyExists { .. }),

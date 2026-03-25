@@ -26,9 +26,7 @@ impl FfiSession {
                 .get_task(task_uuid)
                 .await
                 .map_err(FfiError::from)?
-                .ok_or_else(|| FfiError::TaskNotFound {
-                    uuid: uuid.clone(),
-                })?;
+                .ok_or_else(|| FfiError::TaskNotFound { uuid: uuid.clone() })?;
 
             let mut ops = Operations::new();
             ops.push(Operation::UndoPoint);
@@ -89,21 +87,29 @@ fn apply_mutation(
             task.set_position(value, ops).map_err(FfiError::from)?;
         }
         TaskMutation::AddTag { tag } => {
-            let tag: Tag = tag.as_str().try_into().map_err(|e| FfiError::InvalidInput {
-                message: format!("Invalid tag: {e}"),
-            })?;
+            let tag: Tag = tag
+                .as_str()
+                .try_into()
+                .map_err(|e| FfiError::InvalidInput {
+                    message: format!("Invalid tag: {e}"),
+                })?;
             task.add_tag(&tag, ops).map_err(FfiError::from)?;
         }
         TaskMutation::RemoveTag { tag } => {
-            let tag: Tag = tag.as_str().try_into().map_err(|e| FfiError::InvalidInput {
-                message: format!("Invalid tag: {e}"),
-            })?;
+            let tag: Tag = tag
+                .as_str()
+                .try_into()
+                .map_err(|e| FfiError::InvalidInput {
+                    message: format!("Invalid tag: {e}"),
+                })?;
             task.remove_tag(&tag, ops).map_err(FfiError::from)?;
         }
         TaskMutation::AddAnnotation { entry, description } => {
             let ann = Annotation {
-                entry: DateTime::from_timestamp(entry, 0).ok_or_else(|| FfiError::InvalidInput {
-                    message: format!("Invalid epoch: {entry}"),
+                entry: DateTime::from_timestamp(entry, 0).ok_or_else(|| {
+                    FfiError::InvalidInput {
+                        message: format!("Invalid epoch: {entry}"),
+                    }
                 })?,
                 description,
             };
