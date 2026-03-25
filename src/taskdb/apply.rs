@@ -100,12 +100,12 @@ pub(super) async fn apply_op(txn: &mut dyn StorageTxn, op: &SyncOp) -> Result<()
         SyncOp::Create { uuid } => {
             // insert if the task does not already exist
             if !txn.create_task(*uuid).await? {
-                return Err(Error::Database(format!("Task {uuid} already exists")));
+                return Err(Error::TaskAlreadyExists(*uuid));
             }
         }
         SyncOp::Delete { ref uuid } => {
             if !txn.delete_task(*uuid).await? {
-                return Err(Error::Database(format!("Task {uuid} does not exist")));
+                return Err(Error::TaskNotFound(*uuid));
             }
         }
         SyncOp::Update {
@@ -122,7 +122,7 @@ pub(super) async fn apply_op(txn: &mut dyn StorageTxn, op: &SyncOp) -> Result<()
                 };
                 txn.set_task(*uuid, task).await?;
             } else {
-                return Err(Error::Database(format!("Task {uuid} does not exist")));
+                return Err(Error::TaskNotFound(*uuid));
             }
         }
     }
@@ -596,7 +596,7 @@ mod tests {
             let mut txn = db.storage.txn().await?;
             assert_eq!(
                 apply_op(txn.as_mut(), &op).await.err().unwrap().to_string(),
-                format!("Task Database Error: Task {} does not exist", uuid)
+                format!("Task not found: {}", uuid)
             );
             txn.commit().await?;
         }

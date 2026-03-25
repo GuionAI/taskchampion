@@ -364,9 +364,9 @@ uint64_t uniffi_taskchampion_ffi_fn_method_ffisqlexecutor_query_all(void*_Nonnul
 uint64_t uniffi_taskchampion_ffi_fn_method_ffisqlexecutor_execute_batch(void*_Nonnull ptr, RustBuffer statements
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_TASKCHAMPION_FFI_FN_FUNC_ALL_TASK_TABLES_SQL
-#define UNIFFI_FFIDEF_UNIFFI_TASKCHAMPION_FFI_FN_FUNC_ALL_TASK_TABLES_SQL
-RustBuffer uniffi_taskchampion_ffi_fn_func_all_task_tables_sql(RustCallStatus *_Nonnull out_status
+#ifndef UNIFFI_FFIDEF_UNIFFI_TASKCHAMPION_FFI_FN_FUNC_ALLTASKTABLESSQL
+#define UNIFFI_FFIDEF_UNIFFI_TASKCHAMPION_FFI_FN_FUNC_ALLTASKTABLESSQL
+RustBuffer uniffi_taskchampion_ffi_fn_func_alltasktablessql(RustCallStatus *_Nonnull out_status
     
 );
 #endif
@@ -650,9 +650,9 @@ void ffi_taskchampion_ffi_rust_future_free_void(uint64_t handle
 void ffi_taskchampion_ffi_rust_future_complete_void(uint64_t handle, RustCallStatus *_Nonnull out_status
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_TASKCHAMPION_FFI_CHECKSUM_FUNC_ALL_TASK_TABLES_SQL
-#define UNIFFI_FFIDEF_UNIFFI_TASKCHAMPION_FFI_CHECKSUM_FUNC_ALL_TASK_TABLES_SQL
-uint16_t uniffi_taskchampion_ffi_checksum_func_all_task_tables_sql(void
+#ifndef UNIFFI_FFIDEF_UNIFFI_TASKCHAMPION_FFI_CHECKSUM_FUNC_ALLTASKTABLESSQL
+#define UNIFFI_FFIDEF_UNIFFI_TASKCHAMPION_FFI_CHECKSUM_FUNC_ALLTASKTABLESSQL
+uint16_t uniffi_taskchampion_ffi_checksum_func_alltasktablessql(void
     
 );
 #endif

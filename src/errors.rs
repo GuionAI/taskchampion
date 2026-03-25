@@ -11,6 +11,12 @@ pub enum Error {
     /// A usage error
     #[error("Usage Error: {0}")]
     Usage(String),
+    /// A referenced task was not found
+    #[error("Task not found: {0}")]
+    TaskNotFound(uuid::Uuid),
+    /// A task already exists with this UUID
+    #[error("Task already exists: {0}")]
+    TaskAlreadyExists(uuid::Uuid),
     /// A general error.
     #[error(transparent)]
     Other(#[from] anyhow::Error),

@@ -23,6 +23,7 @@ use crate::types::{FfiDependencyEdge, FfiError, FfiSqlExecutor, FfiTask, FfiTree
 /// Construct once at login/startup; all task operations are async methods
 /// on this object. Each method creates an ephemeral [`Replica`] — no
 /// persistent state is held between calls, making concurrent use safe.
+// TODO: rename to TCSession when UniFFI supports #[uniffi(name)] on Object types
 #[derive(uniffi::Object)]
 pub struct FfiSession {
     executor: Arc<dyn FfiSqlExecutor>,
@@ -37,7 +38,7 @@ impl FfiSession {
     /// the parsed UUID without re-validation.
     #[uniffi::constructor]
     pub fn new(executor: Arc<dyn FfiSqlExecutor>, user_id: String) -> Result<Arc<Self>, FfiError> {
-        let user_uuid = Uuid::parse_str(&user_id).map_err(|e| FfiError::Usage {
+        let user_uuid = Uuid::parse_str(&user_id).map_err(|e| FfiError::InvalidInput {
             message: format!("Invalid user_id: {e}"),
         })?;
         Ok(Arc::new(Self {
@@ -136,6 +137,21 @@ impl FfiSession {
     ) -> Result<FfiTask, FfiError> {
         self.with_replica(|mut replica| async move {
             let task_uuid = parse_uuid(&uuid)?;
+            // Reject duplicate creates upfront — replica.create_task silently
+            // returns the existing task, so we must guard here to surface the
+            // structured error to Swift callers.
+            //
+            // TOCTOU note: this is a best-effort check. Under PowerSync's
+            // serialized single-writer model concurrent races are not possible,
+            // so the check→create window is safe in practice.
+            if replica
+                .get_task(task_uuid)
+                .await
+                .map_err(FfiError::from)?
+                .is_some()
+            {
+                return Err(FfiError::TaskAlreadyExists { uuid: uuid.clone() });
+            }
             let mut ops = Operations::new();
             ops.push(Operation::UndoPoint);
             let mut task = replica
@@ -191,7 +207,7 @@ impl FfiSession {
 // ---------------------------------------------------------------------------
 
 pub(crate) fn parse_uuid(s: &str) -> Result<Uuid, FfiError> {
-    Uuid::parse_str(s).map_err(|e| FfiError::Usage {
+    Uuid::parse_str(s).map_err(|e| FfiError::InvalidInput {
         message: format!("Invalid UUID: {e}"),
     })
 }

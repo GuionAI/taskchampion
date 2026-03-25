@@ -1,4 +1,5 @@
 /// Task status, mirroring `taskchampion::Status`.
+// TODO: rename to TCStatus when UniFFI supports #[uniffi(name)] on derive macros
 #[derive(uniffi::Enum)]
 pub enum FfiStatus {
     Pending,
@@ -9,6 +10,7 @@ pub enum FfiStatus {
 }
 
 /// A single task annotation.
+// TODO: rename to TCAnnotation when UniFFI supports #[uniffi(name)] on derive macros
 #[derive(uniffi::Record)]
 pub struct FfiAnnotation {
     /// Unix epoch seconds.
@@ -17,6 +19,7 @@ pub struct FfiAnnotation {
 }
 
 /// Flat representation of a task suitable for FFI transfer.
+// TODO: rename to TCTask when UniFFI supports #[uniffi(name)] on derive macros
 #[derive(uniffi::Record)]
 pub struct FfiTask {
     pub uuid: String,
@@ -43,6 +46,7 @@ pub struct FfiTask {
 }
 
 /// A node in the task tree (parent/child hierarchy).
+// TODO: rename to TCTreeNode when UniFFI supports #[uniffi(name)] on derive macros
 #[derive(uniffi::Record)]
 pub struct FfiTreeNode {
     pub uuid: String,
@@ -58,6 +62,7 @@ pub struct FfiTreeNode {
 }
 
 /// A dependency edge: `from_uuid` depends on `to_uuid`.
+// TODO: rename to TCDependencyEdge when UniFFI supports #[uniffi(name)] on derive macros
 #[derive(uniffi::Record)]
 pub struct FfiDependencyEdge {
     /// The task that has the dependency.
@@ -70,6 +75,7 @@ pub struct FfiDependencyEdge {
 ///
 /// Pass a `Vec<TaskMutation>` to `mutate_task` — all mutations are applied in
 /// a single transaction with one undo point.
+// TODO: rename to TCMutation when UniFFI supports #[uniffi(name)] on derive macros
 #[derive(uniffi::Enum)]
 pub enum TaskMutation {
     SetDescription {
@@ -127,18 +133,32 @@ pub enum TaskMutation {
 }
 
 /// Error type returned by all FFI functions.
+///
+/// Variants are designed for programmatic matching on the Swift/Kotlin side.
+/// Each carries enough context for the host to decide on UX (retry, show
+/// message, refresh cache, etc.) without parsing strings.
+// TODO: rename to TCError when UniFFI supports #[uniffi(name)] on derive macros
 #[derive(Debug, uniffi::Error)]
 pub enum FfiError {
-    Database { message: String },
-    Usage { message: String },
+    /// The referenced task does not exist.
+    TaskNotFound { uuid: String },
+    /// A task with this UUID already exists (create collision).
+    TaskAlreadyExists { uuid: String },
+    /// Caller-side validation error (bad UUID format, invalid tag, etc.).
+    InvalidInput { message: String },
+    /// Storage-layer error (SQL execution failure, connection issue).
+    Storage { message: String },
+    /// Unexpected internal error (bug, catch-all).
     Internal { message: String },
 }
 
 impl std::fmt::Display for FfiError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            FfiError::Database { message } => write!(f, "Database error: {message}"),
-            FfiError::Usage { message } => write!(f, "Usage error: {message}"),
+            FfiError::TaskNotFound { uuid } => write!(f, "Task not found: {uuid}"),
+            FfiError::TaskAlreadyExists { uuid } => write!(f, "Task already exists: {uuid}"),
+            FfiError::InvalidInput { message } => write!(f, "Invalid input: {message}"),
+            FfiError::Storage { message } => write!(f, "Storage error: {message}"),
             FfiError::Internal { message } => write!(f, "Internal error: {message}"),
         }
     }
@@ -149,6 +169,7 @@ impl std::error::Error for FfiError {}
 // ── External Storage FFI types ───────────────────────────────────────
 
 /// SQL parameter for external storage queries.
+// TODO: rename to TCSqlParam when UniFFI supports #[uniffi(name)] on derive macros
 #[derive(uniffi::Enum, Clone)]
 pub enum FfiSqlParam {
     Text { value: String },
@@ -156,6 +177,7 @@ pub enum FfiSqlParam {
 }
 
 /// A single SQL statement with parameters, for batched execution.
+// TODO: rename to TCSqlStatement when UniFFI supports #[uniffi(name)] on derive macros
 #[derive(uniffi::Record, Clone)]
 pub struct FfiSqlStatement {
     pub sql: String,
@@ -167,6 +189,7 @@ pub struct FfiSqlStatement {
 /// The host (Swift/Kotlin) implements this trait with native async/await.
 /// TaskChampion calls these methods to read/write task data through the
 /// host's database connection.
+// TODO: rename to TCStorageExecutor when UniFFI supports name attr on callback interfaces
 #[uniffi::export(with_foreign)]
 #[async_trait::async_trait]
 pub trait FfiSqlExecutor: Send + Sync {
