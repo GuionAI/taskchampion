@@ -228,3 +228,126 @@ fn ffi_error_to_core(e: FfiError) -> taskchampion::Error {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::FfiError;
+
+    // --- Core → FFI direction ---
+
+    #[test]
+    fn core_task_not_found_to_ffi() {
+        let uuid = Uuid::parse_str("12345678-1234-1234-1234-123456789abc").unwrap();
+        let core_err = taskchampion::Error::TaskNotFound(uuid);
+        let ffi_err = FfiError::from(core_err);
+        match ffi_err {
+            FfiError::TaskNotFound { uuid: u } => {
+                assert_eq!(u, "12345678-1234-1234-1234-123456789abc");
+            }
+            other => panic!("Expected TaskNotFound, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn core_task_already_exists_to_ffi() {
+        let uuid = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").unwrap();
+        let core_err = taskchampion::Error::TaskAlreadyExists(uuid);
+        let ffi_err = FfiError::from(core_err);
+        match ffi_err {
+            FfiError::TaskAlreadyExists { uuid: u } => {
+                assert_eq!(u, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+            }
+            other => panic!("Expected TaskAlreadyExists, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn core_database_to_ffi_storage() {
+        let core_err = taskchampion::Error::Database("SQL failed".into());
+        let ffi_err = FfiError::from(core_err);
+        match ffi_err {
+            FfiError::Storage { message } => assert_eq!(message, "SQL failed"),
+            other => panic!("Expected Storage, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn core_usage_to_ffi_invalid_input() {
+        let core_err = taskchampion::Error::Usage("bad value".into());
+        let ffi_err = FfiError::from(core_err);
+        match ffi_err {
+            FfiError::InvalidInput { message } => assert_eq!(message, "bad value"),
+            other => panic!("Expected InvalidInput, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn core_other_to_ffi_internal() {
+        let core_err = taskchampion::Error::Other(anyhow::anyhow!("unexpected"));
+        let ffi_err = FfiError::from(core_err);
+        match ffi_err {
+            FfiError::Internal { message } => assert_eq!(message, "unexpected"),
+            other => panic!("Expected Internal, got: {other:?}"),
+        }
+    }
+
+    // --- FFI → Core direction (roundtrip) ---
+
+    #[test]
+    fn ffi_task_not_found_roundtrips() {
+        let uuid_str = "12345678-1234-1234-1234-123456789abc";
+        let ffi_err = FfiError::TaskNotFound {
+            uuid: uuid_str.to_string(),
+        };
+        let core_err = ffi_error_to_core(ffi_err);
+        match core_err {
+            taskchampion::Error::TaskNotFound(u) => {
+                assert_eq!(u.to_string(), uuid_str);
+            }
+            other => panic!("Expected TaskNotFound, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ffi_task_already_exists_roundtrips() {
+        let uuid_str = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+        let ffi_err = FfiError::TaskAlreadyExists {
+            uuid: uuid_str.to_string(),
+        };
+        let core_err = ffi_error_to_core(ffi_err);
+        match core_err {
+            taskchampion::Error::TaskAlreadyExists(u) => {
+                assert_eq!(u.to_string(), uuid_str);
+            }
+            other => panic!("Expected TaskAlreadyExists, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ffi_storage_to_core_database() {
+        let ffi_err = FfiError::Storage {
+            message: "connection lost".into(),
+        };
+        let core_err = ffi_error_to_core(ffi_err);
+        match core_err {
+            taskchampion::Error::Database(msg) => assert_eq!(msg, "connection lost"),
+            other => panic!("Expected Database, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ffi_task_not_found_invalid_uuid_falls_back() {
+        let ffi_err = FfiError::TaskNotFound {
+            uuid: "not-a-uuid".into(),
+        };
+        let core_err = ffi_error_to_core(ffi_err);
+        // Invalid UUID can't construct TaskNotFound(Uuid), falls back to Database
+        match core_err {
+            taskchampion::Error::Database(msg) => {
+                assert!(msg.contains("not-a-uuid"));
+            }
+            other => panic!("Expected Database fallback, got: {other:?}"),
+        }
+    }
+}
