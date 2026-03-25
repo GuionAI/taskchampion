@@ -23,6 +23,7 @@ use crate::types::{FfiDependencyEdge, FfiError, FfiSqlExecutor, FfiTask, FfiTree
 /// Construct once at login/startup; all task operations are async methods
 /// on this object. Each method creates an ephemeral [`Replica`] — no
 /// persistent state is held between calls, making concurrent use safe.
+// TODO: rename to TCSession when UniFFI supports #[uniffi(name)] on Object types
 #[derive(uniffi::Object)]
 pub struct FfiSession {
     executor: Arc<dyn FfiSqlExecutor>,

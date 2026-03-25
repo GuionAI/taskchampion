@@ -2748,7 +2748,7 @@ public func uniffiForeignFutureHandleCountTaskchampionFfi() -> Int {
  */
 public func allTaskTablesSql() -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_taskchampion_ffi_fn_func_all_task_tables_sql($0
+    uniffi_taskchampion_ffi_fn_func_alltasktablessql($0
     )
 })
 }
@@ -2768,7 +2768,7 @@ private let initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_func_all_task_tables_sql() != 42720) {
+    if (uniffi_taskchampion_ffi_checksum_func_alltasktablessql() != 24864) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_all_tasks() != 8745) {

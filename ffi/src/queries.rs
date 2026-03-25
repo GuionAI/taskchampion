@@ -8,7 +8,7 @@
 ///
 /// Pass this to `db.watch()` so PowerSync re-runs your query whenever any
 /// task, tag, annotation, or project row changes.
-#[uniffi::export]
+#[uniffi::export(name = "allTaskTablesSql")]
 pub fn all_task_tables_sql() -> String {
     "SELECT t.id, t.data, t.status, t.description, t.priority, \
             t.parent_id, t.position, \
