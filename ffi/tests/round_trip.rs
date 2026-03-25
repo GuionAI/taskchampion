@@ -5,8 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
 use taskchampion_ffi::{
-    replica_ops::{all_tasks, create_task, get_task, pending_tasks, undo},
-    task_ops::mutate_task,
+    replica_ops::FfiSession,
     types::{FfiError, FfiSqlExecutor, FfiSqlParam, FfiSqlStatement, FfiStatus, TaskMutation},
 };
 use uuid::Uuid;
@@ -92,8 +91,13 @@ impl MockFfiSqlExecutor {
     }
 }
 
+#[async_trait::async_trait]
 impl FfiSqlExecutor for MockFfiSqlExecutor {
-    fn query_one(&self, sql: String, params: Vec<FfiSqlParam>) -> Result<Option<String>, FfiError> {
+    async fn query_one(
+        &self,
+        sql: String,
+        params: Vec<FfiSqlParam>,
+    ) -> Result<Option<String>, FfiError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(&sql).map_err(|e| FfiError::Database {
             message: format!("Prepare failed: {e}"),
@@ -111,7 +115,11 @@ impl FfiSqlExecutor for MockFfiSqlExecutor {
         }
     }
 
-    fn query_all(&self, sql: String, params: Vec<FfiSqlParam>) -> Result<Vec<String>, FfiError> {
+    async fn query_all(
+        &self,
+        sql: String,
+        params: Vec<FfiSqlParam>,
+    ) -> Result<Vec<String>, FfiError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(&sql).map_err(|e| FfiError::Database {
             message: format!("Prepare failed: {e}"),
@@ -130,7 +138,7 @@ impl FfiSqlExecutor for MockFfiSqlExecutor {
             })
     }
 
-    fn execute_batch(&self, statements: Vec<FfiSqlStatement>) -> Result<(), FfiError> {
+    async fn execute_batch(&self, statements: Vec<FfiSqlStatement>) -> Result<(), FfiError> {
         let mut conn = self.conn.lock().unwrap();
         let txn = conn.transaction().map_err(|e| FfiError::Database {
             message: format!("Begin txn failed: {e}"),
@@ -154,235 +162,314 @@ impl FfiSqlExecutor for MockFfiSqlExecutor {
 // Helper
 // ---------------------------------------------------------------------------
 
-fn make_executor() -> Arc<dyn FfiSqlExecutor> {
-    Arc::new(MockFfiSqlExecutor::new())
+fn make_session() -> Arc<FfiSession> {
+    let executor: Arc<dyn FfiSqlExecutor> = Arc::new(MockFfiSqlExecutor::new());
+    FfiSession::new(executor, "00000000-0000-0000-0000-000000000000".into())
+        .expect("valid user_id")
 }
-
-const USER_ID: &str = "00000000-0000-0000-0000-000000000000";
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-#[test]
-fn test_create_and_read() {
-    let exec = make_executor();
+#[tokio::test]
+async fn test_create_and_read() {
+    let session = make_session();
     let uuid = Uuid::new_v4().to_string();
 
-    let task = create_task(
-        Arc::clone(&exec),
-        USER_ID.into(),
-        uuid.clone(),
-        "Hello FFI".into(),
-    )
-    .expect("create_task");
+    let task = session
+        .create_task(uuid.clone(), "Hello FFI".into())
+        .await
+        .expect("create_task");
     assert_eq!(task.description, "Hello FFI");
     assert!(matches!(task.status, FfiStatus::Pending));
 
-    let fetched = get_task(Arc::clone(&exec), USER_ID.into(), uuid.clone())
+    let fetched = session
+        .get_task(uuid.clone())
+        .await
         .expect("get_task")
         .expect("task should exist");
     assert_eq!(fetched.uuid, uuid);
     assert_eq!(fetched.description, "Hello FFI");
 }
 
-#[test]
-fn test_mutate_description() {
-    let exec = make_executor();
+#[tokio::test]
+async fn test_mutate_description() {
+    let session = make_session();
     let uuid = Uuid::new_v4().to_string();
 
-    create_task(
-        Arc::clone(&exec),
-        USER_ID.into(),
-        uuid.clone(),
-        "Original".into(),
-    )
-    .expect("create");
+    session
+        .create_task(uuid.clone(), "Original".into())
+        .await
+        .expect("create");
 
-    let updated = mutate_task(
-        Arc::clone(&exec),
-        USER_ID.into(),
-        uuid.clone(),
-        vec![TaskMutation::SetDescription {
-            value: "Updated".into(),
-        }],
-    )
-    .expect("mutate")
-    .expect("task still exists");
+    let updated = session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetDescription {
+                value: "Updated".into(),
+            }],
+        )
+        .await
+        .expect("mutate")
+        .expect("task still exists");
 
     assert_eq!(updated.description, "Updated");
 }
 
-#[test]
-fn test_pending_tasks() {
-    let exec = make_executor();
+#[tokio::test]
+async fn test_pending_tasks() {
+    let session = make_session();
 
     let uuid1 = Uuid::new_v4().to_string();
     let uuid2 = Uuid::new_v4().to_string();
 
-    create_task(
-        Arc::clone(&exec),
-        USER_ID.into(),
-        uuid1.clone(),
-        "Task 1".into(),
-    )
-    .expect("create 1");
-    create_task(
-        Arc::clone(&exec),
-        USER_ID.into(),
-        uuid2.clone(),
-        "Task 2".into(),
-    )
-    .expect("create 2");
+    session
+        .create_task(uuid1.clone(), "Task 1".into())
+        .await
+        .expect("create 1");
+    session
+        .create_task(uuid2.clone(), "Task 2".into())
+        .await
+        .expect("create 2");
 
-    let pending = pending_tasks(Arc::clone(&exec), USER_ID.into()).expect("pending_tasks");
+    let pending = session.pending_tasks().await.expect("pending_tasks");
     let descs: Vec<&str> = pending.iter().map(|t| t.description.as_str()).collect();
     assert!(descs.contains(&"Task 1"), "Task 1 should be pending");
     assert!(descs.contains(&"Task 2"), "Task 2 should be pending");
 }
 
-#[test]
-fn test_all_tasks_includes_completed() {
-    let exec = make_executor();
-    let uuid = Uuid::new_v4().to_string();
+#[tokio::test]
+async fn test_all_tasks_includes_completed() {
+    let session = make_session();
+    let uuid1 = Uuid::new_v4().to_string();
+    let uuid2 = Uuid::new_v4().to_string();
 
-    create_task(
-        Arc::clone(&exec),
-        USER_ID.into(),
-        uuid.clone(),
-        "Complete me".into(),
-    )
-    .expect("create");
-    mutate_task(
-        Arc::clone(&exec),
-        USER_ID.into(),
-        uuid.clone(),
-        vec![TaskMutation::Done],
-    )
-    .expect("done");
+    session
+        .create_task(uuid1.clone(), "Task one".into())
+        .await
+        .expect("create 1");
+    session
+        .create_task(uuid2.clone(), "Complete me".into())
+        .await
+        .expect("create 2");
+    session
+        .mutate_task(uuid2.clone(), vec![TaskMutation::Done])
+        .await
+        .expect("done");
 
-    let all = all_tasks(Arc::clone(&exec), USER_ID.into()).expect("all_tasks");
-    let task = all
+    let all = session.all_tasks().await.expect("all_tasks");
+    assert!(all.len() >= 2, "should have at least 2 tasks");
+
+    let task1 = all
         .iter()
-        .find(|t| t.uuid == uuid)
-        .expect("task in all_tasks");
-    assert!(matches!(task.status, FfiStatus::Completed));
+        .find(|t| t.uuid == uuid1)
+        .expect("task1 in all_tasks");
+    assert!(matches!(task1.status, FfiStatus::Pending));
+
+    let task2 = all
+        .iter()
+        .find(|t| t.uuid == uuid2)
+        .expect("task2 in all_tasks");
+    assert!(matches!(task2.status, FfiStatus::Completed));
 }
 
-#[test]
-fn test_undo_reverses_last_mutation() {
-    let exec = make_executor();
+#[tokio::test]
+async fn test_undo_reverses_last_mutation() {
+    let session = make_session();
     let uuid = Uuid::new_v4().to_string();
 
-    create_task(
-        Arc::clone(&exec),
-        USER_ID.into(),
-        uuid.clone(),
-        "Original".into(),
-    )
-    .expect("create");
+    session
+        .create_task(uuid.clone(), "Original".into())
+        .await
+        .expect("create");
 
-    mutate_task(
-        Arc::clone(&exec),
-        USER_ID.into(),
-        uuid.clone(),
-        vec![TaskMutation::SetDescription {
-            value: "Changed".into(),
-        }],
-    )
-    .expect("mutate");
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetDescription {
+                value: "Changed".into(),
+            }],
+        )
+        .await
+        .expect("mutate");
 
-    let task = get_task(Arc::clone(&exec), USER_ID.into(), uuid.clone())
+    let task = session
+        .get_task(uuid.clone())
+        .await
         .expect("get_task ok")
         .expect("task exists");
     assert_eq!(task.description, "Changed");
 
-    let undone = undo(Arc::clone(&exec), USER_ID.into()).expect("undo must not error");
+    let undone = session.undo().await.expect("undo must not error");
     assert!(undone, "undo should return true after mutation");
 
-    let task = get_task(Arc::clone(&exec), USER_ID.into(), uuid.clone())
+    let task = session
+        .get_task(uuid.clone())
+        .await
         .expect("get_task ok")
         .expect("task exists after undo");
     assert_eq!(task.description, "Original");
 }
 
-#[test]
-fn test_add_and_remove_tag() {
-    let exec = make_executor();
+#[tokio::test]
+async fn test_add_and_remove_tag() {
+    let session = make_session();
     let uuid = Uuid::new_v4().to_string();
 
-    create_task(
-        Arc::clone(&exec),
-        USER_ID.into(),
-        uuid.clone(),
-        "Tag test".into(),
-    )
-    .expect("create");
+    session
+        .create_task(uuid.clone(), "Tag test".into())
+        .await
+        .expect("create");
 
-    mutate_task(
-        Arc::clone(&exec),
-        USER_ID.into(),
-        uuid.clone(),
-        vec![TaskMutation::AddTag { tag: "work".into() }],
-    )
-    .expect("add tag");
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::AddTag { tag: "work".into() }],
+        )
+        .await
+        .expect("add tag");
 
-    let with_tag = get_task(Arc::clone(&exec), USER_ID.into(), uuid.clone())
+    let with_tag = session
+        .get_task(uuid.clone())
+        .await
         .expect("get")
         .expect("exists");
     assert!(with_tag.tags.contains(&"work".to_string()));
 
-    mutate_task(
-        Arc::clone(&exec),
-        USER_ID.into(),
-        uuid.clone(),
-        vec![TaskMutation::RemoveTag { tag: "work".into() }],
-    )
-    .expect("remove tag");
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::RemoveTag { tag: "work".into() }],
+        )
+        .await
+        .expect("remove tag");
 
-    let without_tag = get_task(Arc::clone(&exec), USER_ID.into(), uuid.clone())
+    let without_tag = session
+        .get_task(uuid.clone())
+        .await
         .expect("get")
         .expect("exists");
     assert!(!without_tag.tags.contains(&"work".to_string()));
 }
 
-#[test]
-fn test_set_due_round_trip() {
-    let exec = make_executor();
+#[tokio::test]
+async fn test_set_due_round_trip() {
+    let session = make_session();
     let uuid = Uuid::new_v4().to_string();
     let epoch: i64 = 1_700_000_000;
 
-    create_task(
-        Arc::clone(&exec),
-        USER_ID.into(),
-        uuid.clone(),
-        "Due test".into(),
-    )
-    .expect("create");
+    session
+        .create_task(uuid.clone(), "Due test".into())
+        .await
+        .expect("create");
 
-    mutate_task(
-        Arc::clone(&exec),
-        USER_ID.into(),
-        uuid.clone(),
-        vec![TaskMutation::SetDue { epoch: Some(epoch) }],
-    )
-    .expect("set due");
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetDue { epoch: Some(epoch) }],
+        )
+        .await
+        .expect("set due");
 
-    let task = get_task(Arc::clone(&exec), USER_ID.into(), uuid.clone())
+    let task = session
+        .get_task(uuid.clone())
+        .await
         .expect("get")
         .expect("exists");
     assert_eq!(task.due, Some(epoch), "due round-trip via set_value");
 
-    mutate_task(
-        Arc::clone(&exec),
-        USER_ID.into(),
-        uuid.clone(),
-        vec![TaskMutation::SetDue { epoch: None }],
-    )
-    .expect("clear due");
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetDue { epoch: None }],
+        )
+        .await
+        .expect("clear due");
 
-    let cleared = get_task(Arc::clone(&exec), USER_ID.into(), uuid)
+    let cleared = session
+        .get_task(uuid)
+        .await
         .expect("get after clear")
         .expect("exists after clear");
     assert_eq!(cleared.due, None, "due should be None after clearing");
+}
+
+#[test]
+fn test_session_rejects_invalid_user_id() {
+    let executor: Arc<dyn FfiSqlExecutor> = Arc::new(MockFfiSqlExecutor::new());
+    let result = FfiSession::new(executor, "not-a-uuid".into());
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_tree_map_parent_child() {
+    let session = make_session();
+    let parent_uuid = Uuid::new_v4().to_string();
+    let child_uuid = Uuid::new_v4().to_string();
+
+    session
+        .create_task(parent_uuid.clone(), "Parent".into())
+        .await
+        .expect("create parent");
+    session
+        .create_task(child_uuid.clone(), "Child".into())
+        .await
+        .expect("create child");
+    session
+        .mutate_task(
+            child_uuid.clone(),
+            vec![TaskMutation::SetParent {
+                uuid: Some(parent_uuid.clone()),
+            }],
+        )
+        .await
+        .expect("set parent");
+
+    let nodes = session.tree_map().await.expect("tree_map");
+    let parent_node = nodes
+        .iter()
+        .find(|n| n.uuid == parent_uuid)
+        .expect("parent in tree");
+    assert!(
+        parent_node.children.contains(&child_uuid),
+        "child in parent's children"
+    );
+
+    let child_node = nodes
+        .iter()
+        .find(|n| n.uuid == child_uuid)
+        .expect("child in tree");
+    assert_eq!(child_node.parent.as_deref(), Some(parent_uuid.as_str()));
+}
+
+#[tokio::test]
+async fn test_dependency_map_edge() {
+    let session = make_session();
+    let task_a = Uuid::new_v4().to_string();
+    let task_b = Uuid::new_v4().to_string();
+
+    session
+        .create_task(task_a.clone(), "Task A".into())
+        .await
+        .expect("create A");
+    session
+        .create_task(task_b.clone(), "Task B".into())
+        .await
+        .expect("create B");
+    session
+        .mutate_task(
+            task_a.clone(),
+            vec![TaskMutation::AddDependency {
+                uuid: task_b.clone(),
+            }],
+        )
+        .await
+        .expect("add dep");
+
+    let edges = session.dependency_map().await.expect("dependency_map");
+    let edge = edges
+        .iter()
+        .find(|e| e.from_uuid == task_a && e.to_uuid == task_b);
+    assert!(edge.is_some(), "dependency edge A→B should exist");
 }
