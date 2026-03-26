@@ -3,7 +3,6 @@ use crate::storage::send_wrapper::Wrapper;
 use crate::storage::{Storage, StorageTxn};
 use async_trait::async_trait;
 use std::path::Path;
-use uuid::Uuid;
 
 mod extension;
 mod inner;
@@ -18,15 +17,15 @@ use inner::PowerSyncStorageInner;
 pub struct PowerSyncStorage(Wrapper);
 
 impl PowerSyncStorage {
-    /// Open a PowerSync-managed database at `db_path` for the given `user_id`.
+    /// Open a PowerSync-managed database at `db_path`.
     ///
     /// The `tc_tasks` and `tc_operations` views must already exist (created by
     /// PowerSync from its schema definition). Local-only tables (`tc_sync_meta`)
     /// are created automatically.
-    pub async fn new(db_path: &Path, user_id: Uuid) -> Result<Self> {
+    pub async fn new(db_path: &Path) -> Result<Self> {
         let path = db_path.to_path_buf();
         Ok(Self(
-            Wrapper::new(async move || PowerSyncStorageInner::new(&path, user_id)).await?,
+            Wrapper::new(async move || PowerSyncStorageInner::new(&path)).await?,
         ))
     }
 
@@ -457,20 +456,18 @@ mod test {
         // Insert two rows for the same tag name directly (simulating sync conflict).
         // The "newer" row is inserted first to ensure ordering is by created_at, not insertion order.
         storage.conn.execute(
-            "INSERT INTO tc_tag_colors (id, user_id, name, color, created_at) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO tc_tag_colors (id, name, color, created_at) VALUES (?, ?, ?, ?)",
             rusqlite::params![
                 Uuid::new_v4().to_string(),
-                Uuid::nil().to_string(),
                 "work",
                 "#00ff00",
                 "2026-03-26 12:00:00.000"
             ],
         )?;
         storage.conn.execute(
-            "INSERT INTO tc_tag_colors (id, user_id, name, color, created_at) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO tc_tag_colors (id, name, color, created_at) VALUES (?, ?, ?, ?)",
             rusqlite::params![
                 Uuid::new_v4().to_string(),
-                Uuid::nil().to_string(),
                 "work",
                 "#ff0000",
                 "2026-03-25 12:00:00.000"

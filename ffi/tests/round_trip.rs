@@ -25,28 +25,28 @@ impl MockFfiSqlExecutor {
         let conn = Connection::open_in_memory().expect("in-memory connection");
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS tc_tasks (
-                id TEXT PRIMARY KEY, user_id TEXT,
+                id TEXT PRIMARY KEY,
                 data TEXT NOT NULL DEFAULT '{}', entry_at TEXT, status TEXT,
                 description TEXT, priority TEXT, modified_at TEXT,
                 due_at TEXT, scheduled_at TEXT, start_at TEXT, end_at TEXT,
                 wait_at TEXT, parent_id TEXT, position TEXT, project_id TEXT
             );
             CREATE TABLE IF NOT EXISTS tc_operations (
-                id TEXT PRIMARY KEY, user_id TEXT,
+                id TEXT PRIMARY KEY,
                 data TEXT NOT NULL,
                 created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
             );
             CREATE TABLE IF NOT EXISTS projects (
-                id TEXT PRIMARY KEY, name TEXT, user_id TEXT,
+                id TEXT PRIMARY KEY, name TEXT,
                 created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
             );
             CREATE TABLE IF NOT EXISTS tc_tags (
                 id TEXT PRIMARY KEY, task_id TEXT NOT NULL,
-                user_id TEXT, name TEXT NOT NULL, UNIQUE (task_id, name)
+                name TEXT NOT NULL, UNIQUE (task_id, name)
             );
             CREATE TABLE IF NOT EXISTS tc_annotations (
                 id TEXT PRIMARY KEY, task_id TEXT NOT NULL,
-                user_id TEXT, entry_at TEXT NOT NULL, description TEXT NOT NULL
+                entry_at TEXT NOT NULL, description TEXT NOT NULL
             );",
         )
         .expect("create tables");
@@ -164,7 +164,7 @@ impl FfiSqlExecutor for MockFfiSqlExecutor {
 
 fn make_session() -> Arc<FfiSession> {
     let executor: Arc<dyn FfiSqlExecutor> = Arc::new(MockFfiSqlExecutor::new());
-    FfiSession::new(executor, "00000000-0000-0000-0000-000000000000".into()).expect("valid user_id")
+    FfiSession::new(executor)
 }
 
 // ---------------------------------------------------------------------------
@@ -389,13 +389,6 @@ async fn test_set_due_round_trip() {
         .expect("get after clear")
         .expect("exists after clear");
     assert_eq!(cleared.due, None, "due should be None after clearing");
-}
-
-#[test]
-fn test_session_rejects_invalid_user_id() {
-    let executor: Arc<dyn FfiSqlExecutor> = Arc::new(MockFfiSqlExecutor::new());
-    let result = FfiSession::new(executor, "not-a-uuid".into());
-    assert!(result.is_err());
 }
 
 #[tokio::test]

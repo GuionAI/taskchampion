@@ -44,12 +44,11 @@ pub trait SqlExecutor: Send + Sync {
 
 pub struct ExternalStorage {
     executor: Box<dyn SqlExecutor>,
-    user_id: Uuid,
 }
 
 impl ExternalStorage {
-    pub fn new(executor: Box<dyn SqlExecutor>, user_id: Uuid) -> Self {
-        Self { executor, user_id }
+    pub fn new(executor: Box<dyn SqlExecutor>) -> Self {
+        Self { executor }
     }
 }
 
@@ -58,7 +57,6 @@ impl Storage for ExternalStorage {
     async fn txn<'a>(&'a mut self) -> Result<Box<dyn StorageTxn + Send + 'a>> {
         Ok(Box::new(ExternalStorageTxn {
             executor: &*self.executor,
-            user_id: self.user_id,
             write_buffer: Vec::new(),
             project_cache: HashMap::new(),
             pending_creates: HashSet::new(),
@@ -73,7 +71,6 @@ impl Storage for ExternalStorage {
 
 struct ExternalStorageTxn<'a> {
     executor: &'a dyn SqlExecutor,
-    user_id: Uuid,
     write_buffer: Vec<SqlStatement>,
     /// Cache project_name → project_id for buffered inserts within this txn.
     project_cache: HashMap<String, String>,
@@ -126,8 +123,7 @@ impl ExternalStorageTxn<'_> {
 
         // Not found — generate ID, buffer INSERT, cache it.
         let new_id = Uuid::new_v4();
-        self.write_buffer
-            .push(insert_project_stmt(&new_id, name, &self.user_id));
+        self.write_buffer.push(insert_project_stmt(&new_id, name));
         let new_id_str = new_id.to_string();
         self.project_cache
             .insert(name.to_string(), new_id_str.clone());
@@ -265,8 +261,7 @@ impl StorageTxn for ExternalStorageTxn<'_> {
         if parse_json_bool(&exists_json, "exists_flag")? {
             return Ok(false);
         }
-        self.write_buffer
-            .push(create_task_stmt(&uuid, &self.user_id));
+        self.write_buffer.push(create_task_stmt(&uuid));
         self.pending_creates.insert(uuid);
         Ok(true)
     }
@@ -298,7 +293,6 @@ impl StorageTxn for ExternalStorageTxn<'_> {
         self.write_buffer.extend(set_task_stmts(
             &uuid,
             &prepared,
-            &self.user_id,
             exists,
             project_id.as_deref(),
         )?);
@@ -380,8 +374,7 @@ impl StorageTxn for ExternalStorageTxn<'_> {
     }
 
     async fn add_operation(&mut self, op: Operation) -> Result<()> {
-        self.write_buffer
-            .push(add_operation_stmt(&op, &self.user_id)?);
+        self.write_buffer.push(add_operation_stmt(&op)?);
         Ok(())
     }
 
@@ -436,12 +429,8 @@ impl StorageTxn for ExternalStorageTxn<'_> {
         // for the same tag within the same txn would find no existing row and
         // push a duplicate INSERT.
         if let Some(existing_id) = self.pending_tag_color_ids.get(&name).cloned() {
-            self.write_buffer.push(set_tag_color_stmt(
-                &name,
-                &color,
-                &self.user_id,
-                Some(&existing_id),
-            ));
+            self.write_buffer
+                .push(set_tag_color_stmt(&name, &color, Some(&existing_id)));
             return Ok(());
         }
 
@@ -453,13 +442,20 @@ impl StorageTxn for ExternalStorageTxn<'_> {
             .map(|json| parse_json_string_field(&json, "id"))
             .transpose()?;
 
-        let stmt = set_tag_color_stmt(&name, &color, &self.user_id, existing_id.as_deref());
+        let stmt = set_tag_color_stmt(&name, &color, existing_id.as_deref());
 
         // Track new INSERTs so subsequent calls in this txn can UPDATE the same row.
         if existing_id.is_none() {
             // Extract the generated ID from the INSERT params (always the first param).
-            if let Some(crate::storage::sql_ops::SqlParam::Text(id)) = stmt.params.first() {
-                self.pending_tag_color_ids.insert(name, id.clone());
+            match stmt.params.first() {
+                Some(crate::storage::sql_ops::SqlParam::Text(id)) => {
+                    self.pending_tag_color_ids.insert(name, id.clone());
+                }
+                _ => {
+                    return Err(Error::Database(
+                        "set_tag_color INSERT: expected Text id as first param".into(),
+                    ));
+                }
             }
         }
 
@@ -546,32 +542,31 @@ mod test {
             let conn = rusqlite::Connection::open_in_memory().unwrap();
             conn.execute_batch(
                 "CREATE TABLE IF NOT EXISTS tc_tasks (
-                    id TEXT PRIMARY KEY, user_id TEXT,
+                    id TEXT PRIMARY KEY,
                     data TEXT NOT NULL DEFAULT '{}', entry_at TEXT, status TEXT,
                     description TEXT, priority TEXT, modified_at TEXT,
                     due_at TEXT, scheduled_at TEXT, start_at TEXT, end_at TEXT,
                     wait_at TEXT, parent_id TEXT, position TEXT, project_id TEXT
                 );
                 CREATE TABLE IF NOT EXISTS tc_operations (
-                    id TEXT PRIMARY KEY, user_id TEXT,
+                    id TEXT PRIMARY KEY,
                     data TEXT NOT NULL,
                     created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
                 );
                 CREATE TABLE IF NOT EXISTS projects (
-                    id TEXT PRIMARY KEY, name TEXT, user_id TEXT,
+                    id TEXT PRIMARY KEY, name TEXT,
                     created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
                 );
                 CREATE TABLE IF NOT EXISTS tc_tags (
                     id TEXT PRIMARY KEY, task_id TEXT NOT NULL,
-                    user_id TEXT, name TEXT NOT NULL, UNIQUE (task_id, name)
+                    name TEXT NOT NULL, UNIQUE (task_id, name)
                 );
                 CREATE TABLE IF NOT EXISTS tc_annotations (
                     id TEXT PRIMARY KEY, task_id TEXT NOT NULL,
-                    user_id TEXT, entry_at TEXT NOT NULL, description TEXT NOT NULL
+                    entry_at TEXT NOT NULL, description TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS tc_tag_colors (
                     id TEXT PRIMARY KEY,
-                    user_id TEXT,
                     name TEXT NOT NULL,
                     color TEXT NOT NULL,
                     created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
@@ -660,7 +655,7 @@ mod test {
     }
 
     async fn storage() -> ExternalStorage {
-        ExternalStorage::new(Box::new(MockSqlExecutor::new()), Uuid::nil())
+        ExternalStorage::new(Box::new(MockSqlExecutor::new()))
     }
 
     // Run the shared test suite.

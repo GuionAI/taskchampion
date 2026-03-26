@@ -66,12 +66,11 @@ fn execute_sql_stmt(t: &rusqlite::Transaction, stmt: &SqlStatement) -> Result<()
 
 pub(super) struct PowerSyncStorageInner {
     pub(super) conn: Connection,
-    user_id: Uuid,
 }
 
 impl PowerSyncStorageInner {
     /// Open an existing PowerSync-managed database file and create local-only tables.
-    pub(super) fn new(db_path: &Path, user_id: Uuid) -> Result<Self> {
+    pub(super) fn new(db_path: &Path) -> Result<Self> {
         // Register the PowerSync extension as a SQLite auto-extension (once per process).
         init_powersync_extension()?;
 
@@ -118,7 +117,7 @@ impl PowerSyncStorageInner {
         // views; sync state (working-set, base_version, operations_sync) is unused since
         // PowerSync handles replication externally via flicknote-sync.
 
-        Ok(Self { conn, user_id })
+        Ok(Self { conn })
     }
 
     /// Create an in-memory database with all required tables for testing.
@@ -129,7 +128,6 @@ impl PowerSyncStorageInner {
             "
             CREATE TABLE IF NOT EXISTS tc_tasks (
                 id TEXT PRIMARY KEY,
-                user_id TEXT,
                 data TEXT NOT NULL DEFAULT '{}',
                 entry_at TEXT,
                 status TEXT,
@@ -147,33 +145,28 @@ impl PowerSyncStorageInner {
             );
             CREATE TABLE IF NOT EXISTS tc_operations (
                 id TEXT PRIMARY KEY,
-                user_id TEXT,
                 data TEXT NOT NULL,
                 created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
             );
             CREATE TABLE IF NOT EXISTS projects (
                 id TEXT PRIMARY KEY,
                 name TEXT,
-                user_id TEXT,
                 created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
             );
             CREATE TABLE IF NOT EXISTS tc_tags (
                 id TEXT PRIMARY KEY,
                 task_id TEXT NOT NULL,
-                user_id TEXT,
                 name TEXT NOT NULL,
                 UNIQUE (task_id, name)
             );
             CREATE TABLE IF NOT EXISTS tc_annotations (
                 id TEXT PRIMARY KEY,
                 task_id TEXT NOT NULL,
-                user_id TEXT,
                 entry_at TEXT NOT NULL,
                 description TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS tc_tag_colors (
                 id TEXT PRIMARY KEY,
-                user_id TEXT,
                 name TEXT NOT NULL,
                 color TEXT NOT NULL,
                 created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
@@ -181,10 +174,7 @@ impl PowerSyncStorageInner {
         ",
         )
         .context("Creating PowerSync test tables")?;
-        Ok(Self {
-            conn,
-            user_id: Uuid::nil(),
-        })
+        Ok(Self { conn })
     }
 }
 
@@ -194,16 +184,12 @@ impl WrappedStorage for PowerSyncStorageInner {
         let txn = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        Ok(Box::new(PowerSyncTxn {
-            txn: Some(txn),
-            user_id: self.user_id,
-        }))
+        Ok(Box::new(PowerSyncTxn { txn: Some(txn) }))
     }
 }
 
 pub(super) struct PowerSyncTxn<'t> {
     txn: Option<rusqlite::Transaction<'t>>,
-    user_id: Uuid,
 }
 
 impl<'t> PowerSyncTxn<'t> {
@@ -231,8 +217,8 @@ impl<'t> PowerSyncTxn<'t> {
         // so we can't rely on t.changes() to detect INSERT OR IGNORE behavior.
         let new_id = Uuid::new_v4().to_string();
         t.execute(
-            "INSERT OR IGNORE INTO projects (id, name, user_id) VALUES (?, ?, ?)",
-            params![&new_id, name, &self.user_id.to_string()],
+            "INSERT OR IGNORE INTO projects (id, name) VALUES (?, ?)",
+            params![&new_id, name],
         )?;
 
         // Re-query to get the authoritative ID — either the one we just inserted
@@ -323,7 +309,7 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
         if count > 0 {
             return Ok(false);
         }
-        execute_sql_stmt(t, &create_task_stmt(&uuid, &self.user_id))?;
+        execute_sql_stmt(t, &create_task_stmt(&uuid))?;
         Ok(true)
     }
 
@@ -346,13 +332,7 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
             .context("Set task existence check")?;
 
         // Generate and execute statements.
-        let stmts = set_task_stmts(
-            &uuid,
-            &prepared,
-            &self.user_id,
-            exists,
-            project_id.as_deref(),
-        )?;
+        let stmts = set_task_stmts(&uuid, &prepared, exists, project_id.as_deref())?;
         for stmt in &stmts {
             execute_sql_stmt(t, stmt)?;
         }
@@ -429,7 +409,7 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
 
     async fn add_operation(&mut self, op: Operation) -> Result<()> {
         let t = self.get_txn()?;
-        execute_sql_stmt(t, &add_operation_stmt(&op, &self.user_id)?)?;
+        execute_sql_stmt(t, &add_operation_stmt(&op)?)?;
         Ok(())
     }
 
@@ -471,7 +451,7 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
             .query_row(TAG_COLOR_READ_SQL, [&name], |row| row.get::<_, String>(0))
             .optional()
             .context("Check existing tag color")?;
-        let stmt = set_tag_color_stmt(&name, &color, &self.user_id, existing_id.as_deref());
+        let stmt = set_tag_color_stmt(&name, &color, existing_id.as_deref());
         execute_sql_stmt(t, &stmt)?;
         Ok(())
     }

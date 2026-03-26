@@ -150,13 +150,11 @@ fn opt(v: &Option<String>) -> SqlParam {
 pub(crate) fn set_task_stmts(
     uuid: &Uuid,
     prepared: &PreparedTask,
-    user_id: &Uuid,
     exists: bool,
     project_id: Option<&str>,
 ) -> Result<Vec<SqlStatement>> {
     let mut stmts = Vec::new();
     let uuid_str = uuid.to_string();
-    let user_id_str = user_id.to_string();
     let project_param = project_id
         .map(|s| SqlParam::Text(s.to_string()))
         .unwrap_or(SqlParam::Null);
@@ -164,13 +162,12 @@ pub(crate) fn set_task_stmts(
     if exists {
         stmts.push(SqlStatement {
             sql: "UPDATE tc_tasks SET \
-                  user_id = ?, data = ?, status = ?, description = ?, priority = ?, \
+                  data = ?, status = ?, description = ?, priority = ?, \
                   entry_at = ?, modified_at = ?, due_at = ?, scheduled_at = ?, \
                   start_at = ?, end_at = ?, wait_at = ?, parent_id = ?, position = ?, project_id = ? \
                   WHERE id = ?"
                 .into(),
             params: vec![
-                SqlParam::Text(user_id_str.clone()),
                 SqlParam::Text(prepared.data_json.clone()),
                 opt(&prepared.status),
                 opt(&prepared.description),
@@ -191,14 +188,13 @@ pub(crate) fn set_task_stmts(
     } else {
         stmts.push(SqlStatement {
             sql: "INSERT INTO tc_tasks \
-                  (id, user_id, data, status, description, priority, \
+                  (id, data, status, description, priority, \
                    entry_at, modified_at, due_at, scheduled_at, start_at, end_at, wait_at, \
                    parent_id, position, project_id) \
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 .into(),
             params: vec![
                 SqlParam::Text(uuid_str.clone()),
-                SqlParam::Text(user_id_str.clone()),
                 SqlParam::Text(prepared.data_json.clone()),
                 opt(&prepared.status),
                 opt(&prepared.description),
@@ -224,11 +220,10 @@ pub(crate) fn set_task_stmts(
     });
     for tag_name in &prepared.tag_names {
         stmts.push(SqlStatement {
-            sql: "INSERT INTO tc_tags (id, task_id, user_id, name) VALUES (?, ?, ?, ?)".into(),
+            sql: "INSERT INTO tc_tags (id, task_id, name) VALUES (?, ?, ?)".into(),
             params: vec![
                 SqlParam::Text(Uuid::now_v7().to_string()),
                 SqlParam::Text(uuid_str.clone()),
-                SqlParam::Text(user_id_str.clone()),
                 SqlParam::Text(tag_name.clone()),
             ],
         });
@@ -248,13 +243,12 @@ pub(crate) fn set_task_stmts(
                 ))
             })?;
         stmts.push(SqlStatement {
-            sql: "INSERT INTO tc_annotations (id, task_id, user_id, entry_at, description) \
-                  VALUES (?, ?, ?, ?, ?)"
+            sql: "INSERT INTO tc_annotations (id, task_id, entry_at, description) \
+                  VALUES (?, ?, ?, ?)"
                 .into(),
             params: vec![
                 SqlParam::Text(Uuid::now_v7().to_string()),
                 SqlParam::Text(uuid_str.clone()),
-                SqlParam::Text(user_id_str.clone()),
                 SqlParam::Text(entry_at),
                 SqlParam::Text(description.clone()),
             ],
@@ -265,13 +259,10 @@ pub(crate) fn set_task_stmts(
 }
 
 /// Generate SQL statement for create_task (empty task).
-pub(crate) fn create_task_stmt(uuid: &Uuid, user_id: &Uuid) -> SqlStatement {
+pub(crate) fn create_task_stmt(uuid: &Uuid) -> SqlStatement {
     SqlStatement {
-        sql: "INSERT INTO tc_tasks (id, user_id, data) VALUES (?, ?, '{}')".into(),
-        params: vec![
-            SqlParam::Text(uuid.to_string()),
-            SqlParam::Text(user_id.to_string()),
-        ],
+        sql: "INSERT INTO tc_tasks (id, data) VALUES (?, '{}')".into(),
+        params: vec![SqlParam::Text(uuid.to_string())],
     }
 }
 
@@ -295,7 +286,7 @@ pub(crate) fn delete_task_stmts(uuid: &Uuid) -> Vec<SqlStatement> {
 }
 
 /// Generate SQL statement for add_operation.
-pub(crate) fn add_operation_stmt(op: &Operation, user_id: &Uuid) -> Result<SqlStatement> {
+pub(crate) fn add_operation_stmt(op: &Operation) -> Result<SqlStatement> {
     let created_at = match op {
         Operation::Update { timestamp, .. } => {
             timestamp.format("%Y-%m-%d %H:%M:%S%.3f").to_string()
@@ -305,10 +296,9 @@ pub(crate) fn add_operation_stmt(op: &Operation, user_id: &Uuid) -> Result<SqlSt
     let data_str = serde_json::to_string(op)
         .map_err(|e| Error::Database(format!("Failed to serialize operation: {e}")))?;
     Ok(SqlStatement {
-        sql: "INSERT INTO tc_operations (id, user_id, data, created_at) VALUES (?, ?, ?, ?)".into(),
+        sql: "INSERT INTO tc_operations (id, data, created_at) VALUES (?, ?, ?)".into(),
         params: vec![
             SqlParam::Text(Uuid::now_v7().to_string()),
-            SqlParam::Text(user_id.to_string()),
             SqlParam::Text(data_str),
             SqlParam::Text(created_at),
         ],
@@ -329,7 +319,6 @@ pub(crate) fn remove_operation_stmt(id: &str) -> SqlStatement {
 pub(crate) fn set_tag_color_stmt(
     name: &str,
     color: &str,
-    user_id: &Uuid,
     existing_id: Option<&str>,
 ) -> SqlStatement {
     match existing_id {
@@ -341,10 +330,9 @@ pub(crate) fn set_tag_color_stmt(
             ],
         },
         None => SqlStatement {
-            sql: "INSERT INTO tc_tag_colors (id, user_id, name, color) VALUES (?, ?, ?, ?)".into(),
+            sql: "INSERT INTO tc_tag_colors (id, name, color) VALUES (?, ?, ?)".into(),
             params: vec![
                 SqlParam::Text(Uuid::now_v7().to_string()),
-                SqlParam::Text(user_id.to_string()),
                 SqlParam::Text(name.to_string()),
                 SqlParam::Text(color.to_string()),
             ],
@@ -354,13 +342,12 @@ pub(crate) fn set_tag_color_stmt(
 
 /// Generate SQL statement for inserting a new project.
 #[cfg(feature = "storage-external")]
-pub(crate) fn insert_project_stmt(id: &Uuid, name: &str, user_id: &Uuid) -> SqlStatement {
+pub(crate) fn insert_project_stmt(id: &Uuid, name: &str) -> SqlStatement {
     SqlStatement {
-        sql: "INSERT OR IGNORE INTO projects (id, name, user_id) VALUES (?, ?, ?)".into(),
+        sql: "INSERT OR IGNORE INTO projects (id, name) VALUES (?, ?)".into(),
         params: vec![
             SqlParam::Text(id.to_string()),
             SqlParam::Text(name.to_string()),
-            SqlParam::Text(user_id.to_string()),
         ],
     }
 }
