@@ -507,9 +507,9 @@ fileprivate struct FfiConverterString: FfiConverter {
 
 
 /**
- * Holds the executor and user identity for a TaskChampion session.
+ * Holds the executor for a TaskChampion session.
  *
- * Construct once at login/startup; all task operations are async methods
+ * Construct once at startup; all task operations are async methods
  * on this object. Each method creates an ephemeral [`Replica`] — no
  * persistent state is held between calls, making concurrent use safe.
  */
@@ -581,9 +581,9 @@ public protocol FfiSessionProtocol: AnyObject, Sendable {
     
 }
 /**
- * Holds the executor and user identity for a TaskChampion session.
+ * Holds the executor for a TaskChampion session.
  *
- * Construct once at login/startup; all task operations are async methods
+ * Construct once at startup; all task operations are async methods
  * on this object. Each method creates an ephemeral [`Replica`] — no
  * persistent state is held between calls, making concurrent use safe.
  */
@@ -628,16 +628,12 @@ open class FfiSession: FfiSessionProtocol, @unchecked Sendable {
     }
     /**
      * Create a new session.
-     *
-     * Validates `user_id` as a UUID upfront. All subsequent methods use
-     * the parsed UUID without re-validation.
      */
-public convenience init(executor: FfiSqlExecutor, userId: String)throws  {
+public convenience init(executor: FfiSqlExecutor) {
     let handle =
-        try rustCallWithError(FfiConverterTypeFfiError_lift) {
+        try! rustCall() {
     uniffi_taskchampion_ffi_fn_constructor_ffisession_new(
-        FfiConverterTypeFfiSqlExecutor_lower(executor),
-        FfiConverterString.lower(userId),$0
+        FfiConverterTypeFfiSqlExecutor_lower(executor),$0
     )
 }
     self.init(unsafeFromHandle: handle)
@@ -2753,7 +2749,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_taskchampion_ffi_checksum_method_ffisqlexecutor_execute_batch() != 6036) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_constructor_ffisession_new() != 38331) {
+    if (uniffi_taskchampion_ffi_checksum_constructor_ffisession_new() != 13705) {
         return InitializationResult.apiChecksumMismatch
     }
 
