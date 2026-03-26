@@ -14,8 +14,8 @@ use super::row_reader::{query_task_rows, read_raw_task_row};
 use crate::storage::columns::{raw_to_task, TASK_SELECT_COLS};
 use crate::storage::sql_ops::{
     add_operation_stmt, create_task_stmt, delete_task_stmts, prepare_task, remove_operation_stmt,
-    set_task_stmts, SqlStatement, ALL_OPERATIONS_SQL, ALL_TASK_UUIDS_SQL, LAST_OPERATION_SQL,
-    TASK_EXISTS_SQL,
+    set_tag_color_stmt, set_task_stmts, SqlStatement, ALL_OPERATIONS_SQL, ALL_TASK_UUIDS_SQL,
+    LAST_OPERATION_SQL, TAG_COLOR_READ_SQL, TASK_EXISTS_SQL,
 };
 
 /// Query tc_tags and tc_annotations for the given task UUID and inject them
@@ -170,6 +170,13 @@ impl PowerSyncStorageInner {
                 user_id TEXT,
                 entry_at TEXT NOT NULL,
                 description TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS tc_tag_colors (
+                id TEXT PRIMARY KEY,
+                user_id TEXT,
+                name TEXT NOT NULL,
+                color TEXT NOT NULL,
+                created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
             );
         ",
         )
@@ -446,6 +453,25 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
         }
 
         execute_sql_stmt(t, &remove_operation_stmt(&last_id))?;
+        Ok(())
+    }
+
+    async fn get_tag_color(&mut self, name: String) -> Result<Option<String>> {
+        let t = self.get_txn()?;
+        t.query_row(TAG_COLOR_READ_SQL, [&name], |row| row.get::<_, String>(1))
+            .optional()
+            .context("Get tag color")
+            .map_err(Into::into)
+    }
+
+    async fn set_tag_color(&mut self, name: String, color: String) -> Result<()> {
+        let t = self.get_txn()?;
+        let existing_id: Option<String> = t
+            .query_row(TAG_COLOR_READ_SQL, [&name], |row| row.get::<_, String>(0))
+            .optional()
+            .context("Check existing tag color")?;
+        let stmt = set_tag_color_stmt(&name, &color, &self.user_id, existing_id.as_deref());
+        execute_sql_stmt(t, &stmt)?;
         Ok(())
     }
 
