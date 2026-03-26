@@ -458,10 +458,11 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
 
     async fn get_tag_color(&mut self, name: String) -> Result<Option<String>> {
         let t = self.get_txn()?;
-        t.query_row(TAG_COLOR_READ_SQL, [&name], |row| row.get::<_, String>(1))
+        let color = t
+            .query_row(TAG_COLOR_READ_SQL, [&name], |row| row.get::<_, String>(1))
             .optional()
-            .context("Get tag color")
-            .map_err(Into::into)
+            .context("Get tag color")?;
+        Ok(color)
     }
 
     async fn set_tag_color(&mut self, name: String, color: String) -> Result<()> {
