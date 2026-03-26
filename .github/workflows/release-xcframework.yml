@@ -1,9 +1,12 @@
 name: Release XCFramework
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag (e.g. v3.0.2-guion.19)"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -13,6 +16,13 @@ jobs:
     runs-on: macos-latest
 
     steps:
+      - name: Validate version format
+        run: |
+          if [[ ! "${{ inputs.version }}" =~ ^v[0-9] ]]; then
+            echo "ERROR: version must start with 'v' followed by a number (e.g. v3.0.2-guion.19)" >&2
+            exit 1
+          fi
+
       - name: Generate release bot token
         id: app-token
         uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
@@ -23,6 +33,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           token: ${{ steps.app-token.outputs.token }}
+          ref: main
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1 (stable)
@@ -59,24 +70,13 @@ jobs:
           fi
           echo "checksum=${CHECKSUM}" >> "$GITHUB_OUTPUT"
 
-      - name: Create GitHub Release and upload XCFramework zip
-        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
-        with:
-          generate_release_notes: true
-          files: TaskChampionFFIFFI.xcframework.zip
-
-      - name: Commit updated Package.swift to main
+      # Update Package.swift and commit BEFORE tagging — so the tag
+      # includes the correct URL + checksum. No more chicken-and-egg.
+      - name: Update Package.swift with release URL and checksum
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          RELEASE_URL: https://github.com/GuionAI/taskchampion/releases/download/${{ github.ref_name }}/TaskChampionFFIFFI.xcframework.zip
+          RELEASE_URL: https://github.com/GuionAI/taskchampion/releases/download/${{ inputs.version }}/TaskChampionFFIFFI.xcframework.zip
           RELEASE_CHECKSUM: ${{ steps.checksum.outputs.checksum }}
         run: |
-          git config user.name "guion-release-bot[bot]"
-          git config user.email "guion-release-bot[bot]@users.noreply.github.com"
-          git fetch origin main
-          git checkout main
-          git pull --ff-only origin main
-
           python3 -c "
           import re, os, sys
 
@@ -90,8 +90,6 @@ jobs:
           with open('Package.swift', 'r') as f:
               content = f.read()
 
-          original = content
-
           content, url_count = re.subn(r'url: \"[^\"]*\"', f'url: \"{url}\"', content)
           content, checksum_count = re.subn(r'checksum: \"[^\"]*\"', f'checksum: \"{checksum}\"', content)
 
@@ -99,14 +97,26 @@ jobs:
               print(f'ERROR: expected exactly 1 substitution each, got url={url_count} checksum={checksum_count}', file=sys.stderr)
               sys.exit(1)
 
-          if content == original:
-              print('Package.swift already points to this release — no update needed')
-              sys.exit(0)
-
           with open('Package.swift', 'w') as f:
               f.write(content)
           "
+
+      - name: Commit Package.swift, tag, and push
+        run: |
+          git config user.name "guion-release-bot[bot]"
+          git config user.email "guion-release-bot[bot]@users.noreply.github.com"
           git add Package.swift
-          git diff --cached --quiet && { echo "Package.swift already up to date — nothing to commit"; exit 0; }
-          git commit -m "chore(spm): update Package.swift for ${{ github.ref_name }} release"
-          git push origin main
+          git diff --cached --quiet && { echo "Package.swift unchanged — skipping commit"; } || {
+            git commit -m "chore(spm): update Package.swift for ${{ inputs.version }} release"
+          }
+          git tag "${{ inputs.version }}"
+          git push origin main --tags
+
+      - name: Create GitHub Release and upload XCFramework zip
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          gh release create "${{ inputs.version }}" \
+            TaskChampionFFIFFI.xcframework.zip \
+            --generate-notes \
+            --title "${{ inputs.version }}"
