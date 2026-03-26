@@ -61,6 +61,14 @@ impl WrappedStorageTxn for Box<dyn StorageTxn + Send + '_> {
         self.as_mut().is_empty().await
     }
 
+    async fn get_tag_color(&mut self, name: String) -> Result<Option<String>> {
+        self.as_mut().get_tag_color(name).await
+    }
+
+    async fn set_tag_color(&mut self, name: String, color: String) -> Result<()> {
+        self.as_mut().set_tag_color(name, color).await
+    }
+
     async fn commit(&mut self) -> Result<()> {
         self.as_mut().commit().await
     }

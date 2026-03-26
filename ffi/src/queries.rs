@@ -20,3 +20,12 @@ pub fn all_task_tables_sql() -> String {
      LEFT JOIN projects p ON p.id = t.project_id"
         .to_string()
 }
+
+/// SQL that covers the tag colors table.
+///
+/// Pass this to `db.watch()` so PowerSync re-runs your query whenever a
+/// `tc_tag_colors` row changes (e.g. color set on another device via sync).
+#[uniffi::export(name = "tagColorTablesSql")]
+pub fn tag_color_tables_sql() -> String {
+    "SELECT id, name, color FROM tc_tag_colors".to_string()
+}

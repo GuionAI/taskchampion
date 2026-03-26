@@ -14,9 +14,9 @@ use crate::operation::Operation;
 use crate::storage::columns::{raw_to_task, RawTaskRow, TASK_SELECT_COLS};
 use crate::storage::sql_ops::{
     add_operation_stmt, create_task_stmt, delete_task_stmts, insert_project_stmt, prepare_task,
-    remove_operation_stmt, set_task_stmts, SqlParam, SqlStatement, ALL_OPERATIONS_SQL,
-    ALL_OPS_WITH_ID_DESC_SQL, ALL_TASK_UUIDS_SQL, ANNOTATION_QUERY_SQL, PROJECT_LOOKUP_SQL,
-    TAG_QUERY_SQL, TASK_EXISTS_SQL,
+    remove_operation_stmt, set_tag_color_stmt, set_task_stmts, SqlParam, SqlStatement,
+    ALL_OPERATIONS_SQL, ALL_OPS_WITH_ID_DESC_SQL, ALL_TASK_UUIDS_SQL, ANNOTATION_QUERY_SQL,
+    PROJECT_LOOKUP_SQL, TAG_COLOR_READ_SQL, TAG_QUERY_SQL, TASK_EXISTS_SQL,
 };
 use crate::storage::{Storage, StorageTxn, TaskMap};
 
@@ -64,6 +64,7 @@ impl Storage for ExternalStorage {
             pending_creates: HashSet::new(),
             pending_op_deletes: HashSet::new(),
             task_write_cache: HashMap::new(),
+            pending_tag_color_ids: HashMap::new(),
         }))
     }
 }
@@ -94,6 +95,12 @@ struct ExternalStorageTxn<'a> {
     /// cached state here we provide read-your-writes semantics within a
     /// single transaction.
     task_write_cache: HashMap<Uuid, TaskMap>,
+    /// Track tag_name → row_id for tag color INSERTs buffered in this transaction.
+    /// Prevents double-INSERT when `set_tag_color` is called twice for the same
+    /// tag name in one transaction: the second call updates the same row instead
+    /// of inserting a duplicate (reads see committed state only, so the first
+    /// buffered INSERT is invisible to subsequent reads within the same txn).
+    pending_tag_color_ids: HashMap<String, String>,
 }
 
 impl ExternalStorageTxn<'_> {
@@ -410,6 +417,56 @@ impl StorageTxn for ExternalStorageTxn<'_> {
         Ok(())
     }
 
+    async fn get_tag_color(&mut self, name: String) -> Result<Option<String>> {
+        let row = self
+            .executor
+            .query_one(TAG_COLOR_READ_SQL, &[SqlParam::Text(name.clone())])
+            .await?;
+        match row {
+            Some(json) => parse_json_string_field(&json, "color")
+                .map_err(|e| Error::Database(format!("Tag {:?}: {e}", name)))
+                .map(Some),
+            None => Ok(None),
+        }
+    }
+
+    async fn set_tag_color(&mut self, name: String, color: String) -> Result<()> {
+        // Check if we already buffered an INSERT for this tag in this transaction.
+        // Reads see committed DB state only, so without this cache a second call
+        // for the same tag within the same txn would find no existing row and
+        // push a duplicate INSERT.
+        if let Some(existing_id) = self.pending_tag_color_ids.get(&name).cloned() {
+            self.write_buffer.push(set_tag_color_stmt(
+                &name,
+                &color,
+                &self.user_id,
+                Some(&existing_id),
+            ));
+            return Ok(());
+        }
+
+        // No in-txn insert — check committed DB state.
+        let existing_id = self
+            .executor
+            .query_one(TAG_COLOR_READ_SQL, &[SqlParam::Text(name.clone())])
+            .await?
+            .map(|json| parse_json_string_field(&json, "id"))
+            .transpose()?;
+
+        let stmt = set_tag_color_stmt(&name, &color, &self.user_id, existing_id.as_deref());
+
+        // Track new INSERTs so subsequent calls in this txn can UPDATE the same row.
+        if existing_id.is_none() {
+            // Extract the generated ID from the INSERT params (always the first param).
+            if let Some(crate::storage::sql_ops::SqlParam::Text(id)) = stmt.params.first() {
+                self.pending_tag_color_ids.insert(name, id.clone());
+            }
+        }
+
+        self.write_buffer.push(stmt);
+        Ok(())
+    }
+
     async fn commit(&mut self) -> Result<()> {
         if !self.write_buffer.is_empty() {
             self.executor
@@ -511,6 +568,13 @@ mod test {
                 CREATE TABLE IF NOT EXISTS tc_annotations (
                     id TEXT PRIMARY KEY, task_id TEXT NOT NULL,
                     user_id TEXT, entry_at TEXT NOT NULL, description TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS tc_tag_colors (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT,
+                    name TEXT NOT NULL,
+                    color TEXT NOT NULL,
+                    created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
                 );",
             )
             .unwrap();
@@ -775,6 +839,78 @@ mod test {
         assert!(
             result.unwrap_err().to_string().contains("No operations"),
             "error message should mention empty log"
+        );
+    }
+
+    /// Verify tag color round-trip through ExternalStorage.
+    #[tokio::test]
+    async fn test_external_tag_color_round_trip() {
+        let mut storage = storage().await;
+
+        let mut txn = storage.txn().await.unwrap();
+        assert_eq!(txn.get_tag_color("urgent".into()).await.unwrap(), None);
+        txn.set_tag_color("urgent".into(), "#ff0000".into())
+            .await
+            .unwrap();
+        txn.commit().await.unwrap();
+        drop(txn);
+
+        let mut txn = storage.txn().await.unwrap();
+        assert_eq!(
+            txn.get_tag_color("urgent".into()).await.unwrap(),
+            Some("#ff0000".into())
+        );
+    }
+
+    /// Verify that calling set_tag_color twice in the same transaction does not
+    /// produce duplicate rows — the second call updates the buffered INSERT's row.
+    #[tokio::test]
+    async fn test_external_tag_color_double_write_in_txn() {
+        let mut storage = storage().await;
+
+        let mut txn = storage.txn().await.unwrap();
+        // Two calls in the same transaction for the same tag.
+        txn.set_tag_color("urgent".into(), "#ff0000".into())
+            .await
+            .unwrap();
+        txn.set_tag_color("urgent".into(), "#00ff00".into())
+            .await
+            .unwrap();
+        txn.commit().await.unwrap();
+        drop(txn);
+
+        // Only the latest color should be visible; no duplicate rows.
+        let mut txn = storage.txn().await.unwrap();
+        assert_eq!(
+            txn.get_tag_color("urgent".into()).await.unwrap(),
+            Some("#00ff00".into()),
+            "second set_tag_color in same txn should win"
+        );
+    }
+
+    /// Verify that set_tag_color updates existing color in ExternalStorage.
+    #[tokio::test]
+    async fn test_external_tag_color_update() {
+        let mut storage = storage().await;
+
+        let mut txn = storage.txn().await.unwrap();
+        txn.set_tag_color("urgent".into(), "#ff0000".into())
+            .await
+            .unwrap();
+        txn.commit().await.unwrap();
+        drop(txn);
+
+        let mut txn = storage.txn().await.unwrap();
+        txn.set_tag_color("urgent".into(), "#00ff00".into())
+            .await
+            .unwrap();
+        txn.commit().await.unwrap();
+        drop(txn);
+
+        let mut txn = storage.txn().await.unwrap();
+        assert_eq!(
+            txn.get_tag_color("urgent".into()).await.unwrap(),
+            Some("#00ff00".into())
         );
     }
 

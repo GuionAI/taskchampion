@@ -323,6 +323,35 @@ pub(crate) fn remove_operation_stmt(id: &str) -> SqlStatement {
     }
 }
 
+/// Generate a SQL statement for setting a tag color.
+///
+/// If `existing_id` is `Some`, updates the existing row. Otherwise, inserts a new row.
+pub(crate) fn set_tag_color_stmt(
+    name: &str,
+    color: &str,
+    user_id: &Uuid,
+    existing_id: Option<&str>,
+) -> SqlStatement {
+    match existing_id {
+        Some(id) => SqlStatement {
+            sql: "UPDATE tc_tag_colors SET color = ? WHERE id = ?".into(),
+            params: vec![
+                SqlParam::Text(color.to_string()),
+                SqlParam::Text(id.to_string()),
+            ],
+        },
+        None => SqlStatement {
+            sql: "INSERT INTO tc_tag_colors (id, user_id, name, color) VALUES (?, ?, ?, ?)".into(),
+            params: vec![
+                SqlParam::Text(Uuid::now_v7().to_string()),
+                SqlParam::Text(user_id.to_string()),
+                SqlParam::Text(name.to_string()),
+                SqlParam::Text(color.to_string()),
+            ],
+        },
+    }
+}
+
 /// Generate SQL statement for inserting a new project.
 #[cfg(feature = "storage-external")]
 pub(crate) fn insert_project_stmt(id: &Uuid, name: &str, user_id: &Uuid) -> SqlStatement {
@@ -355,3 +384,5 @@ pub(crate) const TAG_QUERY_SQL: &str = "SELECT name FROM tc_tags WHERE task_id =
 #[cfg(feature = "storage-external")]
 pub(crate) const ANNOTATION_QUERY_SQL: &str =
     "SELECT entry_at, description FROM tc_annotations WHERE task_id = ?";
+pub(crate) const TAG_COLOR_READ_SQL: &str =
+    "SELECT id, color FROM tc_tag_colors WHERE name = ? ORDER BY created_at ASC LIMIT 1";

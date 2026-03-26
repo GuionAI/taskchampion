@@ -62,6 +62,16 @@ macro_rules! storage_tests_no_sync {
         async fn task_operations() -> $crate::errors::Result<()> {
             $crate::storage::test::task_operations($storage).await
         }
+
+        #[tokio::test]
+        async fn tag_color_round_trip() -> $crate::errors::Result<()> {
+            $crate::storage::test::tag_color_round_trip($storage).await
+        }
+
+        #[tokio::test]
+        async fn tag_color_update() -> $crate::errors::Result<()> {
+            $crate::storage::test::tag_color_update($storage).await
+        }
     };
 }
 pub(crate) use storage_tests_no_sync;
@@ -232,6 +242,54 @@ pub(super) async fn all_tasks_and_uuids(mut storage: impl Storage) -> Result<()>
         exp.sort();
 
         assert_eq!(uuids, exp);
+    }
+    Ok(())
+}
+
+pub(super) async fn tag_color_round_trip(mut storage: impl Storage) -> Result<()> {
+    {
+        let mut txn = storage.txn().await?;
+        // No color set yet.
+        assert_eq!(txn.get_tag_color("work".into()).await?, None);
+
+        // Set two different tag colors.
+        txn.set_tag_color("work".into(), "#ff0000".into()).await?;
+        txn.set_tag_color("home".into(), "#00ff00".into()).await?;
+        txn.commit().await?;
+    }
+    {
+        // Read back — verify isolation between tags.
+        let mut txn = storage.txn().await?;
+        assert_eq!(
+            txn.get_tag_color("work".into()).await?,
+            Some("#ff0000".into())
+        );
+        assert_eq!(
+            txn.get_tag_color("home".into()).await?,
+            Some("#00ff00".into())
+        );
+        assert_eq!(txn.get_tag_color("nonexistent".into()).await?, None);
+    }
+    Ok(())
+}
+
+pub(super) async fn tag_color_update(mut storage: impl Storage) -> Result<()> {
+    {
+        let mut txn = storage.txn().await?;
+        txn.set_tag_color("work".into(), "#ff0000".into()).await?;
+        txn.commit().await?;
+    }
+    {
+        let mut txn = storage.txn().await?;
+        txn.set_tag_color("work".into(), "#00ff00".into()).await?;
+        txn.commit().await?;
+    }
+    {
+        let mut txn = storage.txn().await?;
+        assert_eq!(
+            txn.get_tag_color("work".into()).await?,
+            Some("#00ff00".into())
+        );
     }
     Ok(())
 }

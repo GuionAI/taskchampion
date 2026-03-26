@@ -157,6 +157,22 @@ impl<S: Storage> Replica<S> {
         Ok(res)
     }
 
+    /// Get the color for a tag by name.
+    ///
+    /// Returns `None` if no color has been set for this tag. When sync produces
+    /// duplicate rows, the oldest row wins (by `created_at`).
+    pub async fn get_tag_color(&mut self, name: String) -> Result<Option<String>> {
+        self.taskdb.get_tag_color(name).await
+    }
+
+    /// Set the color for a tag by name.
+    ///
+    /// If a color already exists for this tag, it is updated. Otherwise a new
+    /// row is inserted with a v7 UUID.
+    pub async fn set_tag_color(&mut self, name: String, color: String) -> Result<()> {
+        self.taskdb.set_tag_color(name, color).await
+    }
+
     /// Get the dependency map for all pending tasks.
     ///
     /// A task dependency is recognized when a task in the working set depends on a task with
