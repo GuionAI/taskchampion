@@ -814,6 +814,52 @@ mod test {
         );
     }
 
+    /// Verify tag color round-trip through ExternalStorage.
+    #[tokio::test]
+    async fn test_external_tag_color_round_trip() {
+        let mut storage = storage().await;
+
+        let mut txn = storage.txn().await.unwrap();
+        assert_eq!(txn.get_tag_color("urgent".into()).await.unwrap(), None);
+        txn.set_tag_color("urgent".into(), "#ff0000".into())
+            .await
+            .unwrap();
+        txn.commit().await.unwrap();
+        drop(txn);
+
+        let mut txn = storage.txn().await.unwrap();
+        assert_eq!(
+            txn.get_tag_color("urgent".into()).await.unwrap(),
+            Some("#ff0000".into())
+        );
+    }
+
+    /// Verify that set_tag_color updates existing color in ExternalStorage.
+    #[tokio::test]
+    async fn test_external_tag_color_update() {
+        let mut storage = storage().await;
+
+        let mut txn = storage.txn().await.unwrap();
+        txn.set_tag_color("urgent".into(), "#ff0000".into())
+            .await
+            .unwrap();
+        txn.commit().await.unwrap();
+        drop(txn);
+
+        let mut txn = storage.txn().await.unwrap();
+        txn.set_tag_color("urgent".into(), "#00ff00".into())
+            .await
+            .unwrap();
+        txn.commit().await.unwrap();
+        drop(txn);
+
+        let mut txn = storage.txn().await.unwrap();
+        assert_eq!(
+            txn.get_tag_color("urgent".into()).await.unwrap(),
+            Some("#00ff00".into())
+        );
+    }
+
     /// Verify remove_operation errors when the last op doesn't match.
     #[tokio::test]
     async fn test_external_remove_operation_mismatch() {

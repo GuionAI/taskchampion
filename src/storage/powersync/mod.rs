@@ -53,6 +53,7 @@ mod test {
     use crate::storage::send_wrapper::{WrappedStorage, WrappedStorageTxn};
     use crate::storage::TaskMap;
     use inner::PowerSyncStorageInner;
+    use uuid::Uuid;
 
     async fn storage() -> Result<PowerSyncStorage> {
         PowerSyncStorage::new_for_test().await
@@ -441,6 +442,47 @@ mod test {
         assert!(
             msg.contains("epoch suffix is not an integer"),
             "unexpected error message: {msg}"
+        );
+        txn.commit().await?;
+        Ok(())
+    }
+
+    /// Verify oldest-row-wins: when sync produces duplicate rows for the same
+    /// tag name, get_tag_color returns the color from the row with the earliest
+    /// created_at timestamp (not by UUID, since iOS generates non-v7 UUIDs).
+    #[tokio::test]
+    async fn test_tag_color_oldest_wins() -> Result<()> {
+        let mut storage = PowerSyncStorageInner::new_for_test()?;
+
+        // Insert two rows for the same tag name directly (simulating sync conflict).
+        // The "newer" row is inserted first to ensure ordering is by created_at, not insertion order.
+        storage.conn.execute(
+            "INSERT INTO tc_tag_colors (id, user_id, name, color, created_at) VALUES (?, ?, ?, ?, ?)",
+            rusqlite::params![
+                Uuid::new_v4().to_string(),
+                Uuid::nil().to_string(),
+                "work",
+                "#00ff00",
+                "2026-03-26 12:00:00.000"
+            ],
+        )?;
+        storage.conn.execute(
+            "INSERT INTO tc_tag_colors (id, user_id, name, color, created_at) VALUES (?, ?, ?, ?, ?)",
+            rusqlite::params![
+                Uuid::new_v4().to_string(),
+                Uuid::nil().to_string(),
+                "work",
+                "#ff0000",
+                "2026-03-25 12:00:00.000"
+            ],
+        )?;
+
+        let mut txn = storage.txn().await?;
+        let color = txn.get_tag_color("work".into()).await?;
+        assert_eq!(
+            color,
+            Some("#ff0000".into()),
+            "should return oldest row's color (earlier created_at)"
         );
         txn.commit().await?;
         Ok(())
