@@ -181,6 +181,29 @@ impl FfiSession {
         .await
     }
 
+    /// Get the color associated with a tag name.
+    ///
+    /// Returns `None` if no color has been set for this tag.
+    pub async fn get_tag_color(&self, name: String) -> Result<Option<String>, FfiError> {
+        self.with_replica(|mut replica| async move {
+            replica.get_tag_color(name).await.map_err(FfiError::from)
+        })
+        .await
+    }
+
+    /// Set the color for a tag name.
+    ///
+    /// If a color already exists for this tag, it is updated.
+    pub async fn set_tag_color(&self, name: String, color: String) -> Result<(), FfiError> {
+        self.with_replica(|mut replica| async move {
+            replica
+                .set_tag_color(name, color)
+                .await
+                .map_err(FfiError::from)
+        })
+        .await
+    }
+
     /// Atomically undo the last operation group.
     ///
     /// Returns `true` if an undo was performed, `false` if there is nothing to undo.
