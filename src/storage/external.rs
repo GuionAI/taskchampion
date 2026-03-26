@@ -14,9 +14,9 @@ use crate::operation::Operation;
 use crate::storage::columns::{raw_to_task, RawTaskRow, TASK_SELECT_COLS};
 use crate::storage::sql_ops::{
     add_operation_stmt, create_task_stmt, delete_task_stmts, insert_project_stmt, prepare_task,
-    remove_operation_stmt, set_task_stmts, SqlParam, SqlStatement, ALL_OPERATIONS_SQL,
-    ALL_OPS_WITH_ID_DESC_SQL, ALL_TASK_UUIDS_SQL, ANNOTATION_QUERY_SQL, PROJECT_LOOKUP_SQL,
-    TAG_QUERY_SQL, TASK_EXISTS_SQL,
+    remove_operation_stmt, set_tag_color_stmt, set_task_stmts, SqlParam, SqlStatement,
+    ALL_OPERATIONS_SQL, ALL_OPS_WITH_ID_DESC_SQL, ALL_TASK_UUIDS_SQL, ANNOTATION_QUERY_SQL,
+    PROJECT_LOOKUP_SQL, TAG_COLOR_READ_SQL, TAG_QUERY_SQL, TASK_EXISTS_SQL,
 };
 use crate::storage::{Storage, StorageTxn, TaskMap};
 
@@ -410,6 +410,35 @@ impl StorageTxn for ExternalStorageTxn<'_> {
         Ok(())
     }
 
+    async fn get_tag_color(&mut self, name: String) -> Result<Option<String>> {
+        let row = self
+            .executor
+            .query_one(TAG_COLOR_READ_SQL, &[SqlParam::Text(name)])
+            .await?;
+        match row {
+            Some(json) => Ok(Some(parse_json_string_field(&json, "color")?)),
+            None => Ok(None),
+        }
+    }
+
+    async fn set_tag_color(&mut self, name: String, color: String) -> Result<()> {
+        // Note: reads go to committed DB state; this buffered write won't be
+        // visible to get_tag_color until commit(). Acceptable for current usage.
+        let existing_id = self
+            .executor
+            .query_one(TAG_COLOR_READ_SQL, &[SqlParam::Text(name.clone())])
+            .await?
+            .map(|json| parse_json_string_field(&json, "id"))
+            .transpose()?;
+        self.write_buffer.push(set_tag_color_stmt(
+            &name,
+            &color,
+            &self.user_id,
+            existing_id.as_deref(),
+        ));
+        Ok(())
+    }
+
     async fn commit(&mut self) -> Result<()> {
         if !self.write_buffer.is_empty() {
             self.executor
@@ -511,6 +540,13 @@ mod test {
                 CREATE TABLE IF NOT EXISTS tc_annotations (
                     id TEXT PRIMARY KEY, task_id TEXT NOT NULL,
                     user_id TEXT, entry_at TEXT NOT NULL, description TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS tc_tag_colors (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT,
+                    name TEXT NOT NULL,
+                    color TEXT NOT NULL,
+                    created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
                 );",
             )
             .unwrap();
