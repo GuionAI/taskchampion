@@ -31,11 +31,12 @@ jobs:
 
       - name: Determine version
         id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          INPUT_VERSION="${{ inputs.version }}"
           if [ -n "$INPUT_VERSION" ]; then
-            if [[ ! "$INPUT_VERSION" =~ ^v[0-9] ]]; then
-              echo "ERROR: version must start with 'v' followed by a number" >&2
+            if [[ ! "$INPUT_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+              echo "ERROR: version must match vMAJOR.MINOR.PATCH[-suffix] (e.g. v3.0.2-guion.19)" >&2
               exit 1
             fi
             echo "tag=${INPUT_VERSION}" >> "$GITHUB_OUTPUT"
@@ -69,8 +70,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-release-
 
-      - name: Build XCFramework
+      - name: Build XCFramework and generate Swift bindings
+        timeout-minutes: 30
         run: ./scripts/build_xcframework.sh
+
+      - name: Validate Swift bindings were generated
+        run: |
+          [ -s Sources/TaskChampionFFI/TaskChampionFFI.swift ] || {
+            echo "ERROR: Swift bindings file is missing or empty" >&2; exit 1
+          }
 
       - name: Zip XCFramework
         run: |
@@ -108,6 +116,8 @@ jobs:
           with open('Package.swift', 'r') as f:
               content = f.read()
 
+          original = content
+
           content, url_count = re.subn(r'url: \"[^\"]*\"', f'url: \"{url}\"', content)
           content, checksum_count = re.subn(r'checksum: \"[^\"]*\"', f'checksum: \"{checksum}\"', content)
 
@@ -115,26 +125,36 @@ jobs:
               print(f'ERROR: expected exactly 1 substitution each, got url={url_count} checksum={checksum_count}', file=sys.stderr)
               sys.exit(1)
 
+          if content == original:
+              print('Package.swift already up to date — no changes needed')
+              sys.exit(0)
+
           with open('Package.swift', 'w') as f:
               f.write(content)
           "
 
-      - name: Commit Package.swift and Swift bindings, tag, and push
+      - name: Commit Package.swift and Swift bindings and push
+        env:
+          VERSION_TAG: ${{ steps.version.outputs.tag }}
         run: |
           git config user.name "guion-release-bot[bot]"
           git config user.email "guion-release-bot[bot]@users.noreply.github.com"
           git add Package.swift Sources/TaskChampionFFI/TaskChampionFFI.swift
           git diff --cached --quiet && { echo "No changes — skipping commit"; } || {
-            git commit -m "chore(spm): update Package.swift and Swift bindings for ${{ steps.version.outputs.tag }} release"
+            git commit -m "chore(spm): update Package.swift and Swift bindings for ${VERSION_TAG} release"
           }
-          git tag "${{ steps.version.outputs.tag }}"
-          git push origin main --tags
+          git push origin main
 
+      # gh release create owns the tag via --target main, making the tag
+      # atomic with the release. If this step fails, no tag exists and the
+      # workflow is safely re-runnable.
       - name: Create GitHub Release and upload XCFramework zip
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          VERSION_TAG: ${{ steps.version.outputs.tag }}
         run: |
-          gh release create "${{ steps.version.outputs.tag }}" \
+          gh release create "$VERSION_TAG" \
             TaskChampionFFIFFI.xcframework.zip \
+            --target main \
             --generate-notes \
-            --title "${{ steps.version.outputs.tag }}"
+            --title "$VERSION_TAG"
