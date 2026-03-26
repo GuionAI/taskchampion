@@ -101,13 +101,13 @@ jobs:
               f.write(content)
           "
 
-      - name: Commit Package.swift, tag, and push
+      - name: Commit Package.swift and Swift bindings, tag, and push
         run: |
           git config user.name "guion-release-bot[bot]"
           git config user.email "guion-release-bot[bot]@users.noreply.github.com"
-          git add Package.swift
-          git diff --cached --quiet && { echo "Package.swift unchanged — skipping commit"; } || {
-            git commit -m "chore(spm): update Package.swift for ${{ inputs.version }} release"
+          git add Package.swift Sources/TaskChampionFFI/TaskChampionFFI.swift
+          git diff --cached --quiet && { echo "No changes — skipping commit"; } || {
+            git commit -m "chore(spm): update Package.swift and Swift bindings for ${{ inputs.version }} release"
           }
           git tag "${{ inputs.version }}"
           git push origin main --tags
