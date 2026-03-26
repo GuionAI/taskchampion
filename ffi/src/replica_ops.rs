@@ -18,33 +18,23 @@ use crate::types::{FfiDependencyEdge, FfiError, FfiSqlExecutor, FfiTask, FfiTree
 // TCSession (FfiSession)
 // ---------------------------------------------------------------------------
 
-/// Holds the executor and user identity for a TaskChampion session.
+/// Holds the executor for a TaskChampion session.
 ///
-/// Construct once at login/startup; all task operations are async methods
+/// Construct once at startup; all task operations are async methods
 /// on this object. Each method creates an ephemeral [`Replica`] — no
 /// persistent state is held between calls, making concurrent use safe.
 // TODO: rename to TCSession when UniFFI supports #[uniffi(name)] on Object types
 #[derive(uniffi::Object)]
 pub struct FfiSession {
     executor: Arc<dyn FfiSqlExecutor>,
-    user_id: Uuid,
 }
 
 #[uniffi::export]
 impl FfiSession {
     /// Create a new session.
-    ///
-    /// Validates `user_id` as a UUID upfront. All subsequent methods use
-    /// the parsed UUID without re-validation.
     #[uniffi::constructor]
-    pub fn new(executor: Arc<dyn FfiSqlExecutor>, user_id: String) -> Result<Arc<Self>, FfiError> {
-        let user_uuid = Uuid::parse_str(&user_id).map_err(|e| FfiError::InvalidInput {
-            message: format!("Invalid user_id: {e}"),
-        })?;
-        Ok(Arc::new(Self {
-            executor,
-            user_id: user_uuid,
-        }))
+    pub fn new(executor: Arc<dyn FfiSqlExecutor>) -> Arc<Self> {
+        Arc::new(Self { executor })
     }
 }
 
@@ -56,7 +46,7 @@ impl FfiSession {
         Fut: std::future::Future<Output = Result<T, FfiError>>,
     {
         let adapter = FfiSqlExecutorAdapter::new(Arc::clone(&self.executor));
-        let storage = ExternalStorage::new(Box::new(adapter), self.user_id);
+        let storage = ExternalStorage::new(Box::new(adapter));
         let replica = Replica::new(storage);
         f(replica).await
     }

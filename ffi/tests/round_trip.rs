@@ -164,7 +164,7 @@ impl FfiSqlExecutor for MockFfiSqlExecutor {
 
 fn make_session() -> Arc<FfiSession> {
     let executor: Arc<dyn FfiSqlExecutor> = Arc::new(MockFfiSqlExecutor::new());
-    FfiSession::new(executor, "00000000-0000-0000-0000-000000000000".into()).expect("valid user_id")
+    FfiSession::new(executor)
 }
 
 // ---------------------------------------------------------------------------
@@ -389,13 +389,6 @@ async fn test_set_due_round_trip() {
         .expect("get after clear")
         .expect("exists after clear");
     assert_eq!(cleared.due, None, "due should be None after clearing");
-}
-
-#[test]
-fn test_session_rejects_invalid_user_id() {
-    let executor: Arc<dyn FfiSqlExecutor> = Arc::new(MockFfiSqlExecutor::new());
-    let result = FfiSession::new(executor, "not-a-uuid".into());
-    assert!(result.is_err());
 }
 
 #[tokio::test]
