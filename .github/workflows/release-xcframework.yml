@@ -11,6 +11,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-xcframework
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: macos-latest
@@ -27,6 +31,7 @@ jobs:
         with:
           token: ${{ steps.app-token.outputs.token }}
           ref: main
+          fetch-depth: 0
           fetch-tags: true
 
       - name: Determine version
@@ -35,7 +40,7 @@ jobs:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
           if [ -n "$INPUT_VERSION" ]; then
-            if [[ ! "$INPUT_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            if [[ ! "$INPUT_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9._-]+)?$ ]]; then
               echo "ERROR: version must match vMAJOR.MINOR.PATCH[-suffix] (e.g. v3.0.2-guion.19)" >&2
               exit 1
             fi
@@ -49,6 +54,10 @@ jobs:
             fi
             PREFIX="${LATEST%.*}"
             NUM="${LATEST##*.}"
+            if ! [[ "$NUM" =~ ^[0-9]+$ ]]; then
+              echo "ERROR: latest tag '${LATEST}' has non-numeric suffix '${NUM}' — cannot auto-bump" >&2
+              exit 1
+            fi
             NEXT="$((NUM + 1))"
             echo "tag=${PREFIX}.${NEXT}" >> "$GITHUB_OUTPUT"
             echo "Auto-bumped: ${LATEST} → ${PREFIX}.${NEXT}"
