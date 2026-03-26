@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version tag (e.g. v3.0.2-guion.19)"
-        required: true
+        description: "Version tag (e.g. v3.0.2-guion.19). Leave empty to auto-bump."
+        required: false
         type: string
 
 permissions:
@@ -16,13 +16,6 @@ jobs:
     runs-on: macos-latest
 
     steps:
-      - name: Validate version format
-        run: |
-          if [[ ! "${{ inputs.version }}" =~ ^v[0-9] ]]; then
-            echo "ERROR: version must start with 'v' followed by a number (e.g. v3.0.2-guion.19)" >&2
-            exit 1
-          fi
-
       - name: Generate release bot token
         id: app-token
         uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3.0.0
@@ -34,6 +27,31 @@ jobs:
         with:
           token: ${{ steps.app-token.outputs.token }}
           ref: main
+          fetch-tags: true
+
+      - name: Determine version
+        id: version
+        run: |
+          INPUT_VERSION="${{ inputs.version }}"
+          if [ -n "$INPUT_VERSION" ]; then
+            if [[ ! "$INPUT_VERSION" =~ ^v[0-9] ]]; then
+              echo "ERROR: version must start with 'v' followed by a number" >&2
+              exit 1
+            fi
+            echo "tag=${INPUT_VERSION}" >> "$GITHUB_OUTPUT"
+          else
+            # Auto-bump: find latest v*-guion.* tag and increment
+            LATEST=$(git tag --list 'v*-guion.*' --sort=-v:refname | head -1)
+            if [ -z "$LATEST" ]; then
+              echo "ERROR: no existing v*-guion.* tags found — provide version manually" >&2
+              exit 1
+            fi
+            PREFIX="${LATEST%.*}"
+            NUM="${LATEST##*.}"
+            NEXT="$((NUM + 1))"
+            echo "tag=${PREFIX}.${NEXT}" >> "$GITHUB_OUTPUT"
+            echo "Auto-bumped: ${LATEST} → ${PREFIX}.${NEXT}"
+          fi
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1 (stable)
@@ -74,7 +92,7 @@ jobs:
       # includes the correct URL + checksum. No more chicken-and-egg.
       - name: Update Package.swift with release URL and checksum
         env:
-          RELEASE_URL: https://github.com/GuionAI/taskchampion/releases/download/${{ inputs.version }}/TaskChampionFFIFFI.xcframework.zip
+          RELEASE_URL: https://github.com/GuionAI/taskchampion/releases/download/${{ steps.version.outputs.tag }}/TaskChampionFFIFFI.xcframework.zip
           RELEASE_CHECKSUM: ${{ steps.checksum.outputs.checksum }}
         run: |
           python3 -c "
@@ -107,16 +125,16 @@ jobs:
           git config user.email "guion-release-bot[bot]@users.noreply.github.com"
           git add Package.swift Sources/TaskChampionFFI/TaskChampionFFI.swift
           git diff --cached --quiet && { echo "No changes — skipping commit"; } || {
-            git commit -m "chore(spm): update Package.swift and Swift bindings for ${{ inputs.version }} release"
+            git commit -m "chore(spm): update Package.swift and Swift bindings for ${{ steps.version.outputs.tag }} release"
           }
-          git tag "${{ inputs.version }}"
+          git tag "${{ steps.version.outputs.tag }}"
           git push origin main --tags
 
       - name: Create GitHub Release and upload XCFramework zip
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          gh release create "${{ inputs.version }}" \
+          gh release create "${{ steps.version.outputs.tag }}" \
             TaskChampionFFIFFI.xcframework.zip \
             --generate-notes \
-            --title "${{ inputs.version }}"
+            --title "${{ steps.version.outputs.tag }}"
