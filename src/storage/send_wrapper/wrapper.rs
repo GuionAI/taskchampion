@@ -211,4 +211,13 @@ impl StorageTxn for WrapperTxn {
     async fn is_empty(&mut self) -> Result<bool> {
         self.call(TxnMessage::IsEmpty).await
     }
+
+    async fn get_tag_color(&mut self, name: String) -> Result<Option<String>> {
+        self.call(|tx| TxnMessage::GetTagColor(name, tx)).await
+    }
+
+    async fn set_tag_color(&mut self, name: String, color: String) -> Result<()> {
+        self.call(|tx| TxnMessage::SetTagColor(name, color, tx))
+            .await
+    }
 }

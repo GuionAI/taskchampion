@@ -28,6 +28,8 @@ pub(super) enum TxnMessage {
     AddOperation(Operation, oneshot::Sender<Result<()>>),
     RemoveOperation(Operation, oneshot::Sender<Result<()>>),
     IsEmpty(oneshot::Sender<Result<bool>>),
+    GetTagColor(String, oneshot::Sender<Result<Option<String>>>),
+    SetTagColor(String, String, oneshot::Sender<Result<()>>),
 }
 
 /// State owned by the dedicated thread. It handles the various channels and
@@ -113,6 +115,12 @@ impl<S: WrappedStorage> ActorImpl<S> {
                 }
                 TxnMessage::IsEmpty(resp) => {
                     let _ = resp.send(txn.is_empty().await);
+                }
+                TxnMessage::GetTagColor(name, resp) => {
+                    let _ = resp.send(txn.get_tag_color(name).await);
+                }
+                TxnMessage::SetTagColor(name, color, resp) => {
+                    let _ = resp.send(txn.set_tag_color(name, color).await);
                 }
             };
         }
