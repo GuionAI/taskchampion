@@ -533,6 +533,13 @@ public protocol FfiSessionProtocol: AnyObject, Sendable {
     func dependencyMap() async throws  -> [FfiDependencyEdge]
     
     /**
+     * Get the color associated with a tag name.
+     *
+     * Returns `None` if no color has been set for this tag.
+     */
+    func getTagColor(name: String) async throws  -> String?
+    
+    /**
      * Fetch a single task by UUID. Returns `None` if not found.
      */
     func getTask(uuid: String) async throws  -> FfiTask?
@@ -541,6 +548,13 @@ public protocol FfiSessionProtocol: AnyObject, Sendable {
      * Return pending tasks only.
      */
     func pendingTasks() async throws  -> [FfiTask]
+    
+    /**
+     * Set the color for a tag name.
+     *
+     * If a color already exists for this tag, it is updated.
+     */
+    func setTagColor(name: String, color: String) async throws 
     
     /**
      * Return the task tree as a flat list of [`FfiTreeNode`]s.
@@ -704,6 +718,28 @@ open func dependencyMap()async throws  -> [FfiDependencyEdge]  {
 }
     
     /**
+     * Get the color associated with a tag name.
+     *
+     * Returns `None` if no color has been set for this tag.
+     */
+open func getTagColor(name: String)async throws  -> String?  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_taskchampion_ffi_fn_method_ffisession_get_tag_color(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(name)
+                )
+            },
+            pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterOptionString.lift,
+            errorHandler: FfiConverterTypeFfiError_lift
+        )
+}
+    
+    /**
      * Fetch a single task by UUID. Returns `None` if not found.
      */
 open func getTask(uuid: String)async throws  -> FfiTask?  {
@@ -739,6 +775,28 @@ open func pendingTasks()async throws  -> [FfiTask]  {
             completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
             liftFunc: FfiConverterSequenceTypeFfiTask.lift,
+            errorHandler: FfiConverterTypeFfiError_lift
+        )
+}
+    
+    /**
+     * Set the color for a tag name.
+     *
+     * If a color already exists for this tag, it is updated.
+     */
+open func setTagColor(name: String, color: String)async throws   {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_taskchampion_ffi_fn_method_ffisession_set_tag_color(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(name),FfiConverterString.lower(color)
+                )
+            },
+            pollFunc: ffi_taskchampion_ffi_rust_future_poll_void,
+            completeFunc: ffi_taskchampion_ffi_rust_future_complete_void,
+            freeFunc: ffi_taskchampion_ffi_rust_future_free_void,
+            liftFunc: { $0 },
             errorHandler: FfiConverterTypeFfiError_lift
         )
 }
@@ -2622,6 +2680,18 @@ public func allTaskTablesSql() -> String  {
     )
 })
 }
+/**
+ * SQL that covers the tag colors table.
+ *
+ * Pass this to `db.watch()` so PowerSync re-runs your query whenever a
+ * `tc_tag_colors` row changes (e.g. color set on another device via sync).
+ */
+public func tagColorTablesSql() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_taskchampion_ffi_fn_func_tagcolortablessql($0
+    )
+})
+}
 
 private enum InitializationResult {
     case ok
@@ -2641,6 +2711,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_taskchampion_ffi_checksum_func_alltasktablessql() != 52128) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_taskchampion_ffi_checksum_func_tagcolortablessql() != 36535) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_all_tasks() != 57965) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -2650,10 +2723,16 @@ private let initializationResult: InitializationResult = {
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_dependency_map() != 18621) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_get_tag_color() != 63735) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_get_task() != 45469) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_pending_tasks() != 10449) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_set_tag_color() != 50403) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_tree_map() != 45281) {
