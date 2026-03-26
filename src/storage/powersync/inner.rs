@@ -128,7 +128,6 @@ impl PowerSyncStorageInner {
             "
             CREATE TABLE IF NOT EXISTS tc_tasks (
                 id TEXT PRIMARY KEY,
-                user_id TEXT,
                 data TEXT NOT NULL DEFAULT '{}',
                 entry_at TEXT,
                 status TEXT,
@@ -146,33 +145,28 @@ impl PowerSyncStorageInner {
             );
             CREATE TABLE IF NOT EXISTS tc_operations (
                 id TEXT PRIMARY KEY,
-                user_id TEXT,
                 data TEXT NOT NULL,
                 created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
             );
             CREATE TABLE IF NOT EXISTS projects (
                 id TEXT PRIMARY KEY,
                 name TEXT,
-                user_id TEXT,
                 created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
             );
             CREATE TABLE IF NOT EXISTS tc_tags (
                 id TEXT PRIMARY KEY,
                 task_id TEXT NOT NULL,
-                user_id TEXT,
                 name TEXT NOT NULL,
                 UNIQUE (task_id, name)
             );
             CREATE TABLE IF NOT EXISTS tc_annotations (
                 id TEXT PRIMARY KEY,
                 task_id TEXT NOT NULL,
-                user_id TEXT,
                 entry_at TEXT NOT NULL,
                 description TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS tc_tag_colors (
                 id TEXT PRIMARY KEY,
-                user_id TEXT,
                 name TEXT NOT NULL,
                 color TEXT NOT NULL,
                 created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
