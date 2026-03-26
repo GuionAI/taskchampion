@@ -111,6 +111,19 @@ impl<S: Storage> TaskDb<S> {
         undo::commit_reversed_operations(txn.as_mut(), undo_ops).await
     }
 
+    /// Get the color for a tag by name.
+    pub(crate) async fn get_tag_color(&mut self, name: String) -> Result<Option<String>> {
+        let mut txn = self.storage.txn().await?;
+        txn.get_tag_color(name).await
+    }
+
+    /// Set the color for a tag by name, committing immediately.
+    pub(crate) async fn set_tag_color(&mut self, name: String, color: String) -> Result<()> {
+        let mut txn = self.storage.txn().await?;
+        txn.set_tag_color(name, color).await?;
+        txn.commit().await
+    }
+
     // functions for supporting tests
 
     #[cfg(test)]
