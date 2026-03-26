@@ -123,8 +123,7 @@ impl ExternalStorageTxn<'_> {
 
         // Not found — generate ID, buffer INSERT, cache it.
         let new_id = Uuid::new_v4();
-        self.write_buffer
-            .push(insert_project_stmt(&new_id, name));
+        self.write_buffer.push(insert_project_stmt(&new_id, name));
         let new_id_str = new_id.to_string();
         self.project_cache
             .insert(name.to_string(), new_id_str.clone());
@@ -291,8 +290,12 @@ impl StorageTxn for ExternalStorageTxn<'_> {
         };
 
         // Buffer write statements.
-        self.write_buffer
-            .extend(set_task_stmts(&uuid, &prepared, exists, project_id.as_deref())?);
+        self.write_buffer.extend(set_task_stmts(
+            &uuid,
+            &prepared,
+            exists,
+            project_id.as_deref(),
+        )?);
         Ok(())
     }
 
