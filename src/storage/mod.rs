@@ -103,6 +103,14 @@ pub trait StorageTxn: Send {
     /// `add_operation` this only affects the list of operations.
     async fn remove_operation(&mut self, op: Operation) -> Result<()>;
 
+    /// Get the color for a tag by name. Returns the color of the oldest row
+    /// if duplicates exist (conflict resolution: oldest wins via `created_at` ordering).
+    async fn get_tag_color(&mut self, name: String) -> Result<Option<String>>;
+
+    /// Set the color for a tag by name. If a row already exists for this tag name,
+    /// updates it. Otherwise, inserts a new row with a v7 UUID.
+    async fn set_tag_color(&mut self, name: String, color: String) -> Result<()>;
+
     /// Check whether this storage is entirely empty
     #[allow(clippy::wrong_self_convention)] // mut is required here for storage access
     async fn is_empty(&mut self) -> Result<bool> {
