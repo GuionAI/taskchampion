@@ -47,6 +47,11 @@ impl MockFfiSqlExecutor {
             CREATE TABLE IF NOT EXISTS tc_annotations (
                 id TEXT PRIMARY KEY, task_id TEXT NOT NULL,
                 entry_at TEXT NOT NULL, description TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS tc_tag_colors (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL,
+                color TEXT NOT NULL,
+                created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
             );",
         )
         .expect("create tables");
@@ -480,4 +485,68 @@ async fn test_create_duplicate_returns_task_already_exists() {
             "Expected TaskAlreadyExists, got: {err:?}"
         ),
     }
+}
+
+#[tokio::test]
+async fn test_get_all_tags() {
+    let session = make_session();
+
+    // Empty — no tasks yet.
+    let tags = session.get_all_tags().await.unwrap();
+    assert!(tags.is_empty());
+
+    // Create two tasks with overlapping tags.
+    let uuid1 = Uuid::new_v4().to_string();
+    session
+        .create_task(uuid1.clone(), "Task 1".into())
+        .await
+        .unwrap();
+    session
+        .mutate_task(
+            uuid1.clone(),
+            vec![
+                TaskMutation::AddTag { tag: "work".into() },
+                TaskMutation::AddTag {
+                    tag: "urgent".into(),
+                },
+            ],
+        )
+        .await
+        .unwrap();
+
+    let uuid2 = Uuid::new_v4().to_string();
+    session
+        .create_task(uuid2.clone(), "Task 2".into())
+        .await
+        .unwrap();
+    session
+        .mutate_task(
+            uuid2.clone(),
+            vec![
+                TaskMutation::AddTag { tag: "work".into() },
+                TaskMutation::AddTag { tag: "home".into() },
+            ],
+        )
+        .await
+        .unwrap();
+
+    let tags = session.get_all_tags().await.unwrap();
+    assert_eq!(tags, vec!["home", "urgent", "work"]);
+}
+
+#[tokio::test]
+async fn test_get_tag_color_returns_empty_string() {
+    let session = make_session();
+
+    // No color set — FFI returns empty string.
+    let color = session.get_tag_color("work".into()).await.unwrap();
+    assert_eq!(color, "");
+
+    // Set and read back.
+    session
+        .set_tag_color("work".into(), "#ff0000".into())
+        .await
+        .unwrap();
+    let color = session.get_tag_color("work".into()).await.unwrap();
+    assert_eq!(color, "#ff0000");
 }

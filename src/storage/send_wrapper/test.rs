@@ -69,6 +69,10 @@ impl WrappedStorageTxn for Box<dyn StorageTxn + Send + '_> {
         self.as_mut().set_tag_color(name, color).await
     }
 
+    async fn get_all_tags(&mut self) -> Result<Vec<String>> {
+        self.as_mut().get_all_tags().await
+    }
+
     async fn commit(&mut self) -> Result<()> {
         self.as_mut().commit().await
     }

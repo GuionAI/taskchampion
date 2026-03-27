@@ -222,6 +222,6 @@ impl StorageTxn for WrapperTxn {
     }
 
     async fn get_all_tags(&mut self) -> Result<Vec<String>> {
-        self.call(|tx| TxnMessage::GetAllTags(tx)).await
+        self.call(TxnMessage::GetAllTags).await
     }
 }
