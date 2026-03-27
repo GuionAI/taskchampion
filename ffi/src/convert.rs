@@ -135,7 +135,7 @@ fn collect_tree(tm: &TreeMap, parent: Option<Uuid>, uuids: &[Uuid], nodes: &mut 
 // FfiSqlExecutor → SqlExecutor adapter
 // ---------------------------------------------------------------------------
 
-use crate::types::{FfiSqlExecutor, FfiSqlParam, FfiSqlStatement};
+use crate::types::{FfiSqlExecutor, FfiSqlParam, FfiSqlRow, FfiSqlStatement, FfiSqlValue};
 use std::sync::Arc;
 use taskchampion::{SqlExecutor, SqlParam, SqlStatement};
 
@@ -160,10 +160,15 @@ impl SqlExecutor for FfiSqlExecutorAdapter {
         params: &[SqlParam],
     ) -> std::result::Result<Option<String>, taskchampion::Error> {
         let ffi_params: Vec<FfiSqlParam> = params.iter().map(core_param_to_ffi).collect();
-        self.inner
+        let row = self
+            .inner
             .query_one(sql.to_string(), ffi_params)
             .await
-            .map_err(ffi_error_to_core)
+            .map_err(ffi_error_to_core)?;
+        match row {
+            Some(r) => Ok(Some(row_to_json(&r)?)),
+            None => Ok(None),
+        }
     }
 
     async fn query_all(
@@ -172,10 +177,12 @@ impl SqlExecutor for FfiSqlExecutorAdapter {
         params: &[SqlParam],
     ) -> std::result::Result<Vec<String>, taskchampion::Error> {
         let ffi_params: Vec<FfiSqlParam> = params.iter().map(core_param_to_ffi).collect();
-        self.inner
+        let rows = self
+            .inner
             .query_all(sql.to_string(), ffi_params)
             .await
-            .map_err(ffi_error_to_core)
+            .map_err(ffi_error_to_core)?;
+        rows.iter().map(|r| row_to_json(r)).collect()
     }
 
     async fn execute_batch(
@@ -202,6 +209,28 @@ fn core_stmt_to_ffi(stmt: &SqlStatement) -> FfiSqlStatement {
         sql: stmt.sql.clone(),
         params: stmt.params.iter().map(core_param_to_ffi).collect(),
     }
+}
+
+/// Convert an [`FfiSqlRow`] to a JSON object string.
+///
+/// This is the single point of JSON serialization for SQL results.
+/// Types are preserved exactly: Text→String, Integer→Number, Real→Number, Null→null.
+/// No heuristic coercion — the host provides typed values and Rust serializes them.
+fn row_to_json(row: &FfiSqlRow) -> std::result::Result<String, taskchampion::Error> {
+    let mut map = serde_json::Map::new();
+    for (name, value) in row.columns.iter().zip(row.values.iter()) {
+        let json_val = match value {
+            FfiSqlValue::Text { value } => serde_json::Value::String(value.clone()),
+            FfiSqlValue::Integer { value } => serde_json::Value::Number((*value).into()),
+            FfiSqlValue::Real { value } => serde_json::Number::from_f64(*value)
+                .map(serde_json::Value::Number)
+                .unwrap_or(serde_json::Value::Null),
+            FfiSqlValue::Null => serde_json::Value::Null,
+        };
+        map.insert(name.clone(), json_val);
+    }
+    serde_json::to_string(&serde_json::Value::Object(map))
+        .map_err(|e| taskchampion::Error::Database(format!("JSON encoding failed: {e}")))
 }
 
 /// Convert FFI errors back to core errors.
@@ -232,7 +261,7 @@ fn ffi_error_to_core(e: FfiError) -> taskchampion::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::FfiError;
+    use crate::types::{FfiError, FfiSqlRow, FfiSqlValue};
 
     // --- Core → FFI direction ---
 
@@ -349,5 +378,40 @@ mod tests {
             }
             other => panic!("Expected Database fallback, got: {other:?}"),
         }
+    }
+
+    #[test]
+    fn row_to_json_preserves_types() {
+        let row = FfiSqlRow {
+            columns: vec!["name".into(), "count".into(), "ratio".into(), "extra".into()],
+            values: vec![
+                FfiSqlValue::Text { value: "80".into() }, // numeric string stays string
+                FfiSqlValue::Integer { value: 42 },
+                FfiSqlValue::Real { value: 3.14 },
+                FfiSqlValue::Null,
+            ],
+        };
+        let json = row_to_json(&row).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let obj = v.as_object().unwrap();
+
+        // Text value "80" must remain a JSON string, not a number
+        assert_eq!(obj.get("name"), Some(&serde_json::Value::String("80".into())));
+        // Integer must be a JSON number
+        assert_eq!(obj.get("count"), Some(&serde_json::json!(42)));
+        // Real must be a JSON number
+        assert_eq!(obj.get("ratio"), Some(&serde_json::json!(3.14)));
+        // Null
+        assert_eq!(obj.get("extra"), Some(&serde_json::Value::Null));
+    }
+
+    #[test]
+    fn row_to_json_empty_row() {
+        let row = FfiSqlRow {
+            columns: vec![],
+            values: vec![],
+        };
+        let json = row_to_json(&row).unwrap();
+        assert_eq!(json, "{}");
     }
 }
