@@ -124,6 +124,12 @@ impl<S: Storage> TaskDb<S> {
         txn.commit().await
     }
 
+    /// Get all unique tag names across all tasks.
+    pub(crate) async fn get_all_tags(&mut self) -> Result<Vec<String>> {
+        let mut txn = self.storage.txn().await?;
+        txn.get_all_tags().await
+    }
+
     // functions for supporting tests
 
     #[cfg(test)]

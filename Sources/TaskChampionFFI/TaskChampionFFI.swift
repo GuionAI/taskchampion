@@ -533,11 +533,16 @@ public protocol FfiSessionProtocol: AnyObject, Sendable {
     func dependencyMap() async throws  -> [FfiDependencyEdge]
     
     /**
+     * Get all unique tag names across all tasks, sorted alphabetically.
+     */
+    func getAllTags() async throws  -> [String]
+    
+    /**
      * Get the color associated with a tag name.
      *
-     * Returns `None` if no color has been set for this tag.
+     * Returns an empty string if no color has been set for this tag.
      */
-    func getTagColor(name: String) async throws  -> String?
+    func getTagColor(name: String) async throws  -> String
     
     /**
      * Fetch a single task by UUID. Returns `None` if not found.
@@ -714,11 +719,31 @@ open func dependencyMap()async throws  -> [FfiDependencyEdge]  {
 }
     
     /**
+     * Get all unique tag names across all tasks, sorted alphabetically.
+     */
+open func getAllTags()async throws  -> [String]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_taskchampion_ffi_fn_method_ffisession_get_all_tags(
+                    self.uniffiCloneHandle()
+                    
+                )
+            },
+            pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceString.lift,
+            errorHandler: FfiConverterTypeFfiError_lift
+        )
+}
+    
+    /**
      * Get the color associated with a tag name.
      *
-     * Returns `None` if no color has been set for this tag.
+     * Returns an empty string if no color has been set for this tag.
      */
-open func getTagColor(name: String)async throws  -> String?  {
+open func getTagColor(name: String)async throws  -> String  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
@@ -730,7 +755,7 @@ open func getTagColor(name: String)async throws  -> String?  {
             pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
             completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterOptionString.lift,
+            liftFunc: FfiConverterString.lift,
             errorHandler: FfiConverterTypeFfiError_lift
         )
 }
@@ -2719,7 +2744,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_dependency_map() != 18621) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_method_ffisession_get_tag_color() != 63735) {
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_get_all_tags() != 42592) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_get_tag_color() != 38804) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_get_task() != 45469) {

@@ -173,10 +173,14 @@ impl FfiSession {
 
     /// Get the color associated with a tag name.
     ///
-    /// Returns `None` if no color has been set for this tag.
-    pub async fn get_tag_color(&self, name: String) -> Result<Option<String>, FfiError> {
+    /// Returns an empty string if no color has been set for this tag.
+    pub async fn get_tag_color(&self, name: String) -> Result<String, FfiError> {
         self.with_replica(|mut replica| async move {
-            replica.get_tag_color(name).await.map_err(FfiError::from)
+            replica
+                .get_tag_color(name)
+                .await
+                .map(|opt| opt.unwrap_or_default())
+                .map_err(FfiError::from)
         })
         .await
     }
@@ -190,6 +194,14 @@ impl FfiSession {
                 .set_tag_color(name, color)
                 .await
                 .map_err(FfiError::from)
+        })
+        .await
+    }
+
+    /// Get all unique tag names across all tasks, sorted alphabetically.
+    pub async fn get_all_tags(&self) -> Result<Vec<String>, FfiError> {
+        self.with_replica(|mut replica| async move {
+            replica.get_all_tags().await.map_err(FfiError::from)
         })
         .await
     }
