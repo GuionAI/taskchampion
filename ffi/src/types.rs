@@ -184,6 +184,36 @@ pub struct FfiSqlStatement {
     pub params: Vec<FfiSqlParam>,
 }
 
+/// A single value from a SQL result row.
+///
+/// Maps to SQLite's native storage classes. The host (Swift/Kotlin)
+/// populates these using typed cursor accessors — no string coercion needed.
+// TODO: rename to TCSqlValue when UniFFI supports #[uniffi(name)] on derive macros
+#[derive(uniffi::Enum, Clone)]
+pub enum FfiSqlValue {
+    /// Text (SQLite TEXT).
+    Text { value: String },
+    /// Integer (SQLite INTEGER).
+    Integer { value: i64 },
+    /// Floating-point (SQLite REAL).
+    Real { value: f64 },
+    /// NULL.
+    Null,
+}
+
+/// A single row from a SQL result set.
+///
+/// Column names and values are parallel arrays — `values[i]` corresponds
+/// to `columns[i]`.
+// TODO: rename to TCSqlRow when UniFFI supports #[uniffi(name)] on derive macros
+#[derive(uniffi::Record, Clone)]
+pub struct FfiSqlRow {
+    /// Column names in SELECT order.
+    pub columns: Vec<String>,
+    /// Values in the same order as `columns`.
+    pub values: Vec<FfiSqlValue>,
+}
+
 /// Callback interface for host-side SQL execution.
 ///
 /// The host (Swift/Kotlin) implements this trait with native async/await.
@@ -193,20 +223,20 @@ pub struct FfiSqlStatement {
 #[uniffi::export(with_foreign)]
 #[async_trait::async_trait]
 pub trait FfiSqlExecutor: Send + Sync {
-    /// Execute a read query returning at most one row as a JSON object string.
+    /// Execute a read query returning at most one row as typed columns.
     /// Returns `None` if no rows match.
     async fn query_one(
         &self,
         sql: String,
         params: Vec<FfiSqlParam>,
-    ) -> Result<Option<String>, FfiError>;
+    ) -> Result<Option<FfiSqlRow>, FfiError>;
 
-    /// Execute a read query returning all matching rows as JSON object strings.
+    /// Execute a read query returning all matching rows as typed columns.
     async fn query_all(
         &self,
         sql: String,
         params: Vec<FfiSqlParam>,
-    ) -> Result<Vec<String>, FfiError>;
+    ) -> Result<Vec<FfiSqlRow>, FfiError>;
 
     /// Execute a batch of write statements atomically.
     /// The host MUST wrap these in a transaction.
