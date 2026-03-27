@@ -182,7 +182,7 @@ impl SqlExecutor for FfiSqlExecutorAdapter {
             .query_all(sql.to_string(), ffi_params)
             .await
             .map_err(ffi_error_to_core)?;
-        rows.iter().map(|r| row_to_json(r)).collect()
+        rows.iter().map(row_to_json).collect()
     }
 
     async fn execute_batch(
