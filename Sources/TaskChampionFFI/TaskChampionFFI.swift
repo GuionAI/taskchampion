@@ -2693,7 +2693,7 @@ public func uniffiForeignFutureHandleCountTaskchampionFfi() -> Int {
  * SQL that covers all task-related tables.
  *
  * Pass this to `db.watch()` so PowerSync re-runs your query whenever any
- * task, tag, annotation, or project row changes.
+ * task or project row changes.
  */
 public func allTaskTablesSql() -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
@@ -2729,7 +2729,7 @@ private let initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_func_alltasktablessql() != 52128) {
+    if (uniffi_taskchampion_ffi_checksum_func_alltasktablessql() != 45498) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_func_tagcolortablessql() != 36535) {
