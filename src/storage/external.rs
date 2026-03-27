@@ -484,7 +484,14 @@ fn parse_json_bool(json: &Option<String>, field: &str) -> Result<bool> {
         Some(serde_json::Value::Number(n)) => Ok(n.as_i64().unwrap_or(0) != 0),
         Some(serde_json::Value::String(s)) => {
             // PowerSync returns integers as text — coerce string to number.
-            Ok(s.parse::<i64>().unwrap_or(0) != 0)
+            // Non-numeric strings are a bug upstream; surface as Err.
+            s.parse::<i64>()
+                .map(|n| n != 0)
+                .map_err(|_| {
+                    Error::Database(format!(
+                        "Field {field:?} must be a boolean/number, got string: {s:?}"
+                    ))
+                })
         }
         Some(other) => Err(Error::Database(format!(
             "Field {field:?} must be a boolean/number, got: {other}"
@@ -880,13 +887,19 @@ mod test {
         // PowerSync returns integers as text strings
         assert!(!parse_json_bool(&Some(r#"{"f": "0"}"#.into()), "f").unwrap());
         assert!(parse_json_bool(&Some(r#"{"f": "1"}"#.into()), "f").unwrap());
-        // Native types still work
+        // Negative string integer: non-zero → true
+        assert!(parse_json_bool(&Some(r#"{"f": "-1"}"#.into()), "f").unwrap());
+        // Non-numeric string → Err (not silent false)
+        assert!(parse_json_bool(&Some(r#"{"f": "abc"}"#.into()), "f").is_err());
+        // Native bool/number types still work
         assert!(!parse_json_bool(&Some(r#"{"f": 0}"#.into()), "f").unwrap());
         assert!(parse_json_bool(&Some(r#"{"f": 1}"#.into()), "f").unwrap());
         assert!(parse_json_bool(&Some(r#"{"f": true}"#.into()), "f").unwrap());
         assert!(!parse_json_bool(&Some(r#"{"f": false}"#.into()), "f").unwrap());
-        // Non-numeric string → false (0)
-        assert!(!parse_json_bool(&Some(r#"{"f": "abc"}"#.into()), "f").unwrap());
+        // Missing field → Err
+        assert!(parse_json_bool(&Some(r#"{"other": 1}"#.into()), "f").is_err());
+        // None input → Ok(false) early return
+        assert!(!parse_json_bool(&None, "f").unwrap());
     }
 
     /// Verify remove_operation errors when the last op doesn't match.
