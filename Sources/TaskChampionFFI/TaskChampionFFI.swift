@@ -441,6 +441,22 @@ fileprivate struct FfiConverterInt64: FfiConverterPrimitive {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterDouble: FfiConverterPrimitive {
+    typealias FfiType = Double
+    typealias SwiftType = Double
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Double {
+        return try lift(readDouble(&buf))
+    }
+
+    public static func write(_ value: Double, into buf: inout [UInt8]) {
+        writeDouble(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterBool : FfiConverter {
     typealias FfiType = Int8
     typealias SwiftType = Bool
@@ -950,15 +966,15 @@ public func FfiConverterTypeFfiSession_lower(_ value: FfiSession) -> UInt64 {
 public protocol FfiSqlExecutor: AnyObject, Sendable {
     
     /**
-     * Execute a read query returning at most one row as a JSON object string.
+     * Execute a read query returning at most one row as typed columns.
      * Returns `None` if no rows match.
      */
-    func queryOne(sql: String, params: [FfiSqlParam]) async throws  -> String?
+    func queryOne(sql: String, params: [FfiSqlParam]) async throws  -> FfiSqlRow?
     
     /**
-     * Execute a read query returning all matching rows as JSON object strings.
+     * Execute a read query returning all matching rows as typed columns.
      */
-    func queryAll(sql: String, params: [FfiSqlParam]) async throws  -> [String]
+    func queryAll(sql: String, params: [FfiSqlParam]) async throws  -> [FfiSqlRow]
     
     /**
      * Execute a batch of write statements atomically.
@@ -1028,10 +1044,10 @@ open class FfiSqlExecutorImpl: FfiSqlExecutor, @unchecked Sendable {
 
     
     /**
-     * Execute a read query returning at most one row as a JSON object string.
+     * Execute a read query returning at most one row as typed columns.
      * Returns `None` if no rows match.
      */
-open func queryOne(sql: String, params: [FfiSqlParam])async throws  -> String?  {
+open func queryOne(sql: String, params: [FfiSqlParam])async throws  -> FfiSqlRow?  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
@@ -1043,15 +1059,15 @@ open func queryOne(sql: String, params: [FfiSqlParam])async throws  -> String?  
             pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
             completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterOptionString.lift,
+            liftFunc: FfiConverterOptionTypeFfiSqlRow.lift,
             errorHandler: FfiConverterTypeFfiError_lift
         )
 }
     
     /**
-     * Execute a read query returning all matching rows as JSON object strings.
+     * Execute a read query returning all matching rows as typed columns.
      */
-open func queryAll(sql: String, params: [FfiSqlParam])async throws  -> [String]  {
+open func queryAll(sql: String, params: [FfiSqlParam])async throws  -> [FfiSqlRow]  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
@@ -1063,7 +1079,7 @@ open func queryAll(sql: String, params: [FfiSqlParam])async throws  -> [String] 
             pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
             completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterSequenceString.lift,
+            liftFunc: FfiConverterSequenceTypeFfiSqlRow.lift,
             errorHandler: FfiConverterTypeFfiError_lift
         )
 }
@@ -1127,7 +1143,7 @@ fileprivate struct UniffiCallbackInterfaceFfiSqlExecutor {
             uniffiOutDroppedCallback: UnsafeMutablePointer<UniffiForeignFutureDroppedCallbackStruct>
         ) in
             let makeCall = {
-                () async throws -> String? in
+                () async throws -> FfiSqlRow? in
                 guard let uniffiObj = try? FfiConverterTypeFfiSqlExecutor.handleMap.get(handle: uniffiHandle) else {
                     throw UniffiInternalError.unexpectedStaleHandle
                 }
@@ -1137,11 +1153,11 @@ fileprivate struct UniffiCallbackInterfaceFfiSqlExecutor {
                 )
             }
 
-            let uniffiHandleSuccess = { (returnValue: String?) in
+            let uniffiHandleSuccess = { (returnValue: FfiSqlRow?) in
                 uniffiFutureCallback(
                     uniffiCallbackData,
                     UniffiForeignFutureResultRustBuffer(
-                        returnValue: FfiConverterOptionString.lower(returnValue),
+                        returnValue: FfiConverterOptionTypeFfiSqlRow.lower(returnValue),
                         callStatus: RustCallStatus()
                     )
                 )
@@ -1172,7 +1188,7 @@ fileprivate struct UniffiCallbackInterfaceFfiSqlExecutor {
             uniffiOutDroppedCallback: UnsafeMutablePointer<UniffiForeignFutureDroppedCallbackStruct>
         ) in
             let makeCall = {
-                () async throws -> [String] in
+                () async throws -> [FfiSqlRow] in
                 guard let uniffiObj = try? FfiConverterTypeFfiSqlExecutor.handleMap.get(handle: uniffiHandle) else {
                     throw UniffiInternalError.unexpectedStaleHandle
                 }
@@ -1182,11 +1198,11 @@ fileprivate struct UniffiCallbackInterfaceFfiSqlExecutor {
                 )
             }
 
-            let uniffiHandleSuccess = { (returnValue: [String]) in
+            let uniffiHandleSuccess = { (returnValue: [FfiSqlRow]) in
                 uniffiFutureCallback(
                     uniffiCallbackData,
                     UniffiForeignFutureResultRustBuffer(
-                        returnValue: FfiConverterSequenceString.lower(returnValue),
+                        returnValue: FfiConverterSequenceTypeFfiSqlRow.lower(returnValue),
                         callStatus: RustCallStatus()
                     )
                 )
@@ -1443,6 +1459,78 @@ public func FfiConverterTypeFfiDependencyEdge_lift(_ buf: RustBuffer) throws -> 
 #endif
 public func FfiConverterTypeFfiDependencyEdge_lower(_ value: FfiDependencyEdge) -> RustBuffer {
     return FfiConverterTypeFfiDependencyEdge.lower(value)
+}
+
+
+/**
+ * A single row from a SQL result set.
+ *
+ * Column names and values are parallel arrays — `values[i]` corresponds
+ * to `columns[i]`.
+ */
+public struct FfiSqlRow: Equatable, Hashable {
+    /**
+     * Column names in SELECT order.
+     */
+    public var columns: [String]
+    /**
+     * Values in the same order as `columns`.
+     */
+    public var values: [FfiSqlValue]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Column names in SELECT order.
+         */columns: [String], 
+        /**
+         * Values in the same order as `columns`.
+         */values: [FfiSqlValue]) {
+        self.columns = columns
+        self.values = values
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension FfiSqlRow: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiSqlRow: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiSqlRow {
+        return
+            try FfiSqlRow(
+                columns: FfiConverterSequenceString.read(from: &buf), 
+                values: FfiConverterSequenceTypeFfiSqlValue.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FfiSqlRow, into buf: inout [UInt8]) {
+        FfiConverterSequenceString.write(value.columns, into: &buf)
+        FfiConverterSequenceTypeFfiSqlValue.write(value.values, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiSqlRow_lift(_ buf: RustBuffer) throws -> FfiSqlRow {
+    return try FfiConverterTypeFfiSqlRow.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiSqlRow_lower(_ value: FfiSqlRow) -> RustBuffer {
+    return FfiConverterTypeFfiSqlRow.lower(value)
 }
 
 
@@ -1946,6 +2034,114 @@ public func FfiConverterTypeFfiSqlParam_lower(_ value: FfiSqlParam) -> RustBuffe
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
+ * A single value from a SQL result row.
+ *
+ * Maps to SQLite's native storage classes. The host (Swift/Kotlin)
+ * populates these using typed cursor accessors — no string coercion needed.
+ */
+
+public enum FfiSqlValue: Equatable, Hashable {
+    
+    /**
+     * Text (SQLite TEXT).
+     */
+    case text(value: String
+    )
+    /**
+     * Integer (SQLite INTEGER).
+     */
+    case integer(value: Int64
+    )
+    /**
+     * Floating-point (SQLite REAL).
+     */
+    case real(value: Double
+    )
+    /**
+     * NULL.
+     */
+    case null
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension FfiSqlValue: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiSqlValue: FfiConverterRustBuffer {
+    typealias SwiftType = FfiSqlValue
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiSqlValue {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .text(value: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 2: return .integer(value: try FfiConverterInt64.read(from: &buf)
+        )
+        
+        case 3: return .real(value: try FfiConverterDouble.read(from: &buf)
+        )
+        
+        case 4: return .null
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: FfiSqlValue, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .text(value):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(value, into: &buf)
+            
+        
+        case let .integer(value):
+            writeInt(&buf, Int32(2))
+            FfiConverterInt64.write(value, into: &buf)
+            
+        
+        case let .real(value):
+            writeInt(&buf, Int32(3))
+            FfiConverterDouble.write(value, into: &buf)
+            
+        
+        case .null:
+            writeInt(&buf, Int32(4))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiSqlValue_lift(_ buf: RustBuffer) throws -> FfiSqlValue {
+    return try FfiConverterTypeFfiSqlValue.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiSqlValue_lower(_ value: FfiSqlValue) -> RustBuffer {
+    return FfiConverterTypeFfiSqlValue.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
  * Task status, mirroring `taskchampion::Status`.
  */
 
@@ -2331,6 +2527,30 @@ fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeFfiSqlRow: FfiConverterRustBuffer {
+    typealias SwiftType = FfiSqlRow?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeFfiSqlRow.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeFfiSqlRow.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeFfiTask: FfiConverterRustBuffer {
     typealias SwiftType = FfiTask?
 
@@ -2422,6 +2642,31 @@ fileprivate struct FfiConverterSequenceTypeFfiDependencyEdge: FfiConverterRustBu
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeFfiDependencyEdge.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeFfiSqlRow: FfiConverterRustBuffer {
+    typealias SwiftType = [FfiSqlRow]
+
+    public static func write(_ value: [FfiSqlRow], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeFfiSqlRow.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiSqlRow] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [FfiSqlRow]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeFfiSqlRow.read(from: &buf))
         }
         return seq
     }
@@ -2522,6 +2767,31 @@ fileprivate struct FfiConverterSequenceTypeFfiSqlParam: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeFfiSqlParam.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeFfiSqlValue: FfiConverterRustBuffer {
+    typealias SwiftType = [FfiSqlValue]
+
+    public static func write(_ value: [FfiSqlValue], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeFfiSqlValue.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiSqlValue] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [FfiSqlValue]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeFfiSqlValue.read(from: &buf))
         }
         return seq
     }
@@ -2768,10 +3038,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_mutate_task() != 59757) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_method_ffisqlexecutor_query_one() != 60448) {
+    if (uniffi_taskchampion_ffi_checksum_method_ffisqlexecutor_query_one() != 27433) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_method_ffisqlexecutor_query_all() != 58880) {
+    if (uniffi_taskchampion_ffi_checksum_method_ffisqlexecutor_query_all() != 18029) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_method_ffisqlexecutor_execute_batch() != 6036) {
