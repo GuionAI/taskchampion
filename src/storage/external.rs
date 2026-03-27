@@ -485,13 +485,11 @@ fn parse_json_bool(json: &Option<String>, field: &str) -> Result<bool> {
         Some(serde_json::Value::String(s)) => {
             // PowerSync returns integers as text — coerce string to number.
             // Non-numeric strings are a bug upstream; surface as Err.
-            s.parse::<i64>()
-                .map(|n| n != 0)
-                .map_err(|_| {
-                    Error::Database(format!(
-                        "Field {field:?} must be a boolean/number, got string: {s:?}"
-                    ))
-                })
+            s.parse::<i64>().map(|n| n != 0).map_err(|_| {
+                Error::Database(format!(
+                    "Field {field:?} must be a boolean/number, got string: {s:?}"
+                ))
+            })
         }
         Some(other) => Err(Error::Database(format!(
             "Field {field:?} must be a boolean/number, got: {other}"
