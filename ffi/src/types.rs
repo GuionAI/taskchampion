@@ -189,7 +189,7 @@ pub struct FfiSqlStatement {
 /// Maps to SQLite's native storage classes. The host (Swift/Kotlin)
 /// populates these using typed cursor accessors — no string coercion needed.
 // TODO: rename to TCSqlValue when UniFFI supports #[uniffi(name)] on derive macros
-#[derive(uniffi::Enum, Clone)]
+#[derive(uniffi::Enum, Clone, Debug, PartialEq)]
 pub enum FfiSqlValue {
     /// Text (SQLite TEXT).
     Text { value: String },

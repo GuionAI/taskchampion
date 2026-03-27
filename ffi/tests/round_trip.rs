@@ -69,6 +69,7 @@ impl MockFfiSqlExecutor {
                 ValueRef::Integer(n) => FfiSqlValue::Integer { value: n },
                 ValueRef::Real(f) => FfiSqlValue::Real { value: f },
                 ValueRef::Null => FfiSqlValue::Null,
+                // Blob columns are not used by task data; treat as NULL rather than panicking.
                 ValueRef::Blob(_) => FfiSqlValue::Null,
             };
             values.push(val);
