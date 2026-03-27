@@ -383,7 +383,12 @@ mod tests {
     #[test]
     fn row_to_json_preserves_types() {
         let row = FfiSqlRow {
-            columns: vec!["name".into(), "count".into(), "ratio".into(), "extra".into()],
+            columns: vec![
+                "name".into(),
+                "count".into(),
+                "ratio".into(),
+                "extra".into(),
+            ],
             values: vec![
                 FfiSqlValue::Text { value: "80".into() }, // numeric string stays string
                 FfiSqlValue::Integer { value: 42 },
@@ -396,7 +401,10 @@ mod tests {
         let obj = v.as_object().unwrap();
 
         // Text value "80" must remain a JSON string, not a number
-        assert_eq!(obj.get("name"), Some(&serde_json::Value::String("80".into())));
+        assert_eq!(
+            obj.get("name"),
+            Some(&serde_json::Value::String("80".into()))
+        );
         // Integer must be a JSON number
         assert_eq!(obj.get("count"), Some(&serde_json::json!(42)));
         // Real must be a JSON number

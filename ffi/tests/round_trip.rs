@@ -548,11 +548,7 @@ async fn test_position_numeric_string_round_trip() {
         .await
         .expect("set position");
 
-    let task = session
-        .get_task(uuid)
-        .await
-        .expect("get")
-        .expect("exists");
+    let task = session.get_task(uuid).await.expect("get").expect("exists");
     assert_eq!(
         task.position.as_deref(),
         Some("80"),
