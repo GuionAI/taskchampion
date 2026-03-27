@@ -111,6 +111,9 @@ pub trait StorageTxn: Send {
     /// updates it. Otherwise, inserts a new row with a v7 UUID.
     async fn set_tag_color(&mut self, name: String, color: String) -> Result<()>;
 
+    /// Get all unique tag names across all tasks.
+    async fn get_all_tags(&mut self) -> Result<Vec<String>>;
+
     /// Check whether this storage is entirely empty
     #[allow(clippy::wrong_self_convention)] // mut is required here for storage access
     async fn is_empty(&mut self) -> Result<bool> {

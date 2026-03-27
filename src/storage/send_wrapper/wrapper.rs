@@ -220,4 +220,8 @@ impl StorageTxn for WrapperTxn {
         self.call(|tx| TxnMessage::SetTagColor(name, color, tx))
             .await
     }
+
+    async fn get_all_tags(&mut self) -> Result<Vec<String>> {
+        self.call(|tx| TxnMessage::GetAllTags(tx)).await
+    }
 }

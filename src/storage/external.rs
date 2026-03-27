@@ -15,7 +15,7 @@ use crate::storage::columns::{raw_to_task, RawTaskRow, TASK_SELECT_COLS};
 use crate::storage::sql_ops::{
     add_operation_stmt, create_task_stmt, delete_task_stmts, insert_project_stmt, prepare_task,
     remove_operation_stmt, set_tag_color_stmt, set_task_stmts, SqlParam, SqlStatement,
-    ALL_OPERATIONS_SQL, ALL_OPS_WITH_ID_DESC_SQL, ALL_TASK_UUIDS_SQL, ANNOTATION_QUERY_SQL,
+    ALL_OPERATIONS_SQL, ALL_OPS_WITH_ID_DESC_SQL, ALL_TAGS_SQL, ALL_TASK_UUIDS_SQL, ANNOTATION_QUERY_SQL,
     PROJECT_LOOKUP_SQL, TAG_COLOR_READ_SQL, TAG_QUERY_SQL, TASK_EXISTS_SQL,
 };
 use crate::storage::{Storage, StorageTxn, TaskMap};
@@ -461,6 +461,13 @@ impl StorageTxn for ExternalStorageTxn<'_> {
 
         self.write_buffer.push(stmt);
         Ok(())
+    }
+
+    async fn get_all_tags(&mut self) -> Result<Vec<String>> {
+        let rows = self.executor.query_all(ALL_TAGS_SQL, &[]).await?;
+        rows.iter()
+            .map(|json| parse_json_string_field(json, "name"))
+            .collect()
     }
 
     async fn commit(&mut self) -> Result<()> {

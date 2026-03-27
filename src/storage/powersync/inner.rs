@@ -15,7 +15,7 @@ use crate::storage::columns::{raw_to_task, TASK_SELECT_COLS};
 use crate::storage::sql_ops::{
     add_operation_stmt, create_task_stmt, delete_task_stmts, prepare_task, remove_operation_stmt,
     set_tag_color_stmt, set_task_stmts, SqlStatement, ALL_OPERATIONS_SQL, ALL_TASK_UUIDS_SQL,
-    LAST_OPERATION_SQL, TAG_COLOR_READ_SQL, TASK_EXISTS_SQL,
+    ALL_TAGS_SQL, LAST_OPERATION_SQL, TAG_COLOR_READ_SQL, TASK_EXISTS_SQL,
 };
 
 /// Query tc_tags and tc_annotations for the given task UUID and inject them
@@ -454,6 +454,14 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
         let stmt = set_tag_color_stmt(&name, &color, existing_id.as_deref());
         execute_sql_stmt(t, &stmt)?;
         Ok(())
+    }
+
+    async fn get_all_tags(&mut self) -> Result<Vec<String>> {
+        let t = self.get_txn()?;
+        let mut q = t.prepare(ALL_TAGS_SQL)?;
+        let rows = q.query_map([], |row| row.get::<_, String>(0))?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| Error::Database(format!("get_all_tags: {e}")))
     }
 
     async fn commit(&mut self) -> Result<()> {
