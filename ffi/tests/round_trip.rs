@@ -6,7 +6,10 @@ use std::sync::{Arc, Mutex};
 use rusqlite::Connection;
 use taskchampion_ffi::{
     replica_ops::FfiSession,
-    types::{FfiError, FfiSqlExecutor, FfiSqlParam, FfiSqlStatement, FfiStatus, TaskMutation},
+    types::{
+        FfiError, FfiSqlExecutor, FfiSqlParam, FfiSqlRow, FfiSqlStatement, FfiSqlValue, FfiStatus,
+        TaskMutation,
+    },
 };
 use uuid::Uuid;
 
@@ -52,26 +55,26 @@ impl MockFfiSqlExecutor {
         }
     }
 
-    /// Convert a rusqlite Row to a JSON object string.
-    fn row_to_json(row: &rusqlite::Row, col_count: usize) -> rusqlite::Result<String> {
+    /// Convert a rusqlite Row to an FfiSqlRow with typed values.
+    fn row_to_ffi(row: &rusqlite::Row, col_count: usize) -> rusqlite::Result<FfiSqlRow> {
         use rusqlite::types::ValueRef;
-        let mut map = serde_json::Map::new();
+        let mut columns = Vec::with_capacity(col_count);
+        let mut values = Vec::with_capacity(col_count);
         for i in 0..col_count {
-            let name = row.as_ref().column_name(i)?.to_string();
+            columns.push(row.as_ref().column_name(i)?.to_string());
             let val = match row.get_ref(i)? {
-                ValueRef::Text(b) => {
-                    serde_json::Value::String(String::from_utf8_lossy(b).into_owned())
-                }
-                ValueRef::Integer(n) => serde_json::Value::Number(n.into()),
-                ValueRef::Real(f) => serde_json::Number::from_f64(f)
-                    .map(serde_json::Value::Number)
-                    .unwrap_or(serde_json::Value::Null),
-                ValueRef::Null => serde_json::Value::Null,
-                ValueRef::Blob(_) => serde_json::Value::Null,
+                ValueRef::Text(b) => FfiSqlValue::Text {
+                    value: String::from_utf8_lossy(b).into_owned(),
+                },
+                ValueRef::Integer(n) => FfiSqlValue::Integer { value: n },
+                ValueRef::Real(f) => FfiSqlValue::Real { value: f },
+                ValueRef::Null => FfiSqlValue::Null,
+                // Blob columns are not used by task data; treat as NULL rather than panicking.
+                ValueRef::Blob(_) => FfiSqlValue::Null,
             };
-            map.insert(name, val);
+            values.push(val);
         }
-        Ok(serde_json::Value::Object(map).to_string())
+        Ok(FfiSqlRow { columns, values })
     }
 
     /// Convert FfiSqlParam to a rusqlite-compatible value.
@@ -94,7 +97,7 @@ impl FfiSqlExecutor for MockFfiSqlExecutor {
         &self,
         sql: String,
         params: Vec<FfiSqlParam>,
-    ) -> Result<Option<String>, FfiError> {
+    ) -> Result<Option<FfiSqlRow>, FfiError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(&sql).map_err(|e| FfiError::Storage {
             message: format!("Prepare failed: {e}"),
@@ -102,9 +105,9 @@ impl FfiSqlExecutor for MockFfiSqlExecutor {
         let col_count = stmt.column_count();
         let bound = Self::bind_params(&params);
         let refs: Vec<&dyn rusqlite::types::ToSql> = bound.iter().map(|b| b.as_ref()).collect();
-        let result = stmt.query_row(&*refs, |row| Self::row_to_json(row, col_count));
+        let result = stmt.query_row(&*refs, |row| Self::row_to_ffi(row, col_count));
         match result {
-            Ok(json) => Ok(Some(json)),
+            Ok(row) => Ok(Some(row)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(FfiError::Storage {
                 message: format!("Query failed: {e}"),
@@ -116,7 +119,7 @@ impl FfiSqlExecutor for MockFfiSqlExecutor {
         &self,
         sql: String,
         params: Vec<FfiSqlParam>,
-    ) -> Result<Vec<String>, FfiError> {
+    ) -> Result<Vec<FfiSqlRow>, FfiError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(&sql).map_err(|e| FfiError::Storage {
             message: format!("Prepare failed: {e}"),
@@ -125,7 +128,7 @@ impl FfiSqlExecutor for MockFfiSqlExecutor {
         let bound = Self::bind_params(&params);
         let refs: Vec<&dyn rusqlite::types::ToSql> = bound.iter().map(|b| b.as_ref()).collect();
         let rows = stmt
-            .query_map(&*refs, |row| Self::row_to_json(row, col_count))
+            .query_map(&*refs, |row| Self::row_to_ffi(row, col_count))
             .map_err(|e| FfiError::Storage {
                 message: format!("Query failed: {e}"),
             })?;
@@ -524,6 +527,34 @@ async fn test_get_all_tags() {
 
     let tags = session.get_all_tags().await.unwrap();
     assert_eq!(tags, vec!["home", "urgent", "work"]);
+}
+
+#[tokio::test]
+async fn test_position_numeric_string_round_trip() {
+    let session = make_session();
+    let uuid = Uuid::new_v4().to_string();
+
+    session
+        .create_task(uuid.clone(), "Position test".into())
+        .await
+        .expect("create");
+
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetPosition {
+                value: Some("80".into()),
+            }],
+        )
+        .await
+        .expect("set position");
+
+    let task = session.get_task(uuid).await.expect("get").expect("exists");
+    assert_eq!(
+        task.position.as_deref(),
+        Some("80"),
+        "numeric position string must survive round-trip"
+    );
 }
 
 #[tokio::test]
