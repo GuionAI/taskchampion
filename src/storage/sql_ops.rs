@@ -3,7 +3,7 @@
 //! Both `PowerSyncTxn` and `ExternalStorageTxn` use these functions to
 //! produce SQL statements. The caller decides how to execute them.
 
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use uuid::Uuid;
 
 use crate::errors::{Error, Result};
@@ -38,8 +38,8 @@ impl rusqlite::types::ToSql for SqlParam {
     }
 }
 
-/// Task data parsed into promoted columns, tags, annotations, and residual blob.
-/// This is the shared preparation step before generating SQL.
+/// Task data parsed into promoted columns and residual blob.
+/// Tags and annotations remain in the data blob as `tag_*` / `annotation_*` keys.
 pub(crate) struct PreparedTask {
     pub(crate) data_json: String,
     pub(crate) status: Option<String>,
@@ -55,12 +55,10 @@ pub(crate) struct PreparedTask {
     pub(crate) end_at: Option<String>,
     pub(crate) wait_at: Option<String>,
     pub(crate) project_name: Option<String>,
-    pub(crate) tag_names: Vec<String>,
-    pub(crate) annotations: Vec<(i64, String)>,
 }
 
-/// Parse a TaskMap into its promoted columns, tags, annotations, and residual
-/// data blob. This is the shared preparation step before generating SQL.
+/// Parse a TaskMap into its promoted columns and residual data blob.
+/// Tags and annotations are left in `task_data` and serialized into `data_json`.
 pub(crate) fn prepare_task(mut task_data: TaskMap) -> Result<PreparedTask> {
     // Extract string columns.
     let status = task_data.remove("status");
@@ -78,43 +76,20 @@ pub(crate) fn prepare_task(mut task_data: TaskMap) -> Result<PreparedTask> {
     let end_at = extract_timestamp(&mut task_data, "end")?;
     let wait_at = extract_timestamp(&mut task_data, "wait")?;
 
-    // Extract project name (before tag extraction).
+    // Extract project name.
     let project_name = task_data.remove("project");
 
-    // Extract tags.
-    let tag_keys: Vec<String> = task_data
-        .keys()
-        .filter(|k| k.starts_with("tag_"))
-        .cloned()
-        .collect();
-    let tag_names: Vec<String> = tag_keys
-        .into_iter()
-        .filter_map(|k| {
-            task_data.remove(&k);
-            k.strip_prefix("tag_").map(String::from)
-        })
-        .collect();
+    // Validate annotation keys have integer epoch suffixes.
+    for k in task_data.keys().filter(|k| k.starts_with("annotation_")) {
+        let epoch_str = k.strip_prefix("annotation_").unwrap();
+        epoch_str.parse::<i64>().map_err(|_| {
+            Error::Database(format!(
+                "Invalid annotation key {k:?}: epoch suffix is not an integer"
+            ))
+        })?;
+    }
 
-    // Extract annotations.
-    let annotation_keys: Vec<String> = task_data
-        .keys()
-        .filter(|k| k.starts_with("annotation_"))
-        .cloned()
-        .collect();
-    let annotations: Vec<(i64, String)> = annotation_keys
-        .into_iter()
-        .map(|k| {
-            let desc = task_data.remove(&k).expect("key collected from same map");
-            let epoch_str = k.strip_prefix("annotation_").unwrap();
-            let epoch: i64 = epoch_str.parse().map_err(|_| {
-                Error::Database(format!(
-                    "Invalid annotation key {k:?}: epoch suffix is not an integer"
-                ))
-            })?;
-            Ok((epoch, desc))
-        })
-        .collect::<Result<Vec<_>>>()?;
-
+    // Tags and annotations remain in task_data and are serialized into the blob.
     let data_json = serde_json::to_string(&task_data)
         .map_err(|e| Error::Database(format!("Failed to serialize task data: {e}")))?;
 
@@ -133,8 +108,6 @@ pub(crate) fn prepare_task(mut task_data: TaskMap) -> Result<PreparedTask> {
         end_at,
         wait_at,
         project_name,
-        tag_names,
-        annotations,
     })
 }
 
@@ -146,7 +119,7 @@ fn opt(v: &Option<String>) -> SqlParam {
     }
 }
 
-/// Generate SQL statements for set_task (INSERT or UPDATE + tags + annotations).
+/// Generate SQL statements for set_task (INSERT or UPDATE).
 pub(crate) fn set_task_stmts(
     uuid: &Uuid,
     prepared: &PreparedTask,
@@ -182,7 +155,7 @@ pub(crate) fn set_task_stmts(
                 opt(&prepared.parent_id),
                 opt(&prepared.position),
                 project_param,
-                SqlParam::Text(uuid_str.clone()),
+                SqlParam::Text(uuid_str),
             ],
         });
     } else {
@@ -194,7 +167,7 @@ pub(crate) fn set_task_stmts(
                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 .into(),
             params: vec![
-                SqlParam::Text(uuid_str.clone()),
+                SqlParam::Text(uuid_str),
                 SqlParam::Text(prepared.data_json.clone()),
                 opt(&prepared.status),
                 opt(&prepared.description),
@@ -213,48 +186,6 @@ pub(crate) fn set_task_stmts(
         });
     }
 
-    // Tags: delete all, re-insert.
-    stmts.push(SqlStatement {
-        sql: "DELETE FROM tc_tags WHERE task_id = ?".into(),
-        params: vec![SqlParam::Text(uuid_str.clone())],
-    });
-    for tag_name in &prepared.tag_names {
-        stmts.push(SqlStatement {
-            sql: "INSERT INTO tc_tags (id, task_id, name) VALUES (?, ?, ?)".into(),
-            params: vec![
-                SqlParam::Text(Uuid::now_v7().to_string()),
-                SqlParam::Text(uuid_str.clone()),
-                SqlParam::Text(tag_name.clone()),
-            ],
-        });
-    }
-
-    // Annotations: delete all, re-insert.
-    stmts.push(SqlStatement {
-        sql: "DELETE FROM tc_annotations WHERE task_id = ?".into(),
-        params: vec![SqlParam::Text(uuid_str.clone())],
-    });
-    for (epoch, description) in &prepared.annotations {
-        let entry_at = DateTime::from_timestamp(*epoch, 0)
-            .map(|dt| dt.to_rfc3339())
-            .ok_or_else(|| {
-                Error::Database(format!(
-                    "Invalid annotation timestamp: epoch {epoch} is out of range"
-                ))
-            })?;
-        stmts.push(SqlStatement {
-            sql: "INSERT INTO tc_annotations (id, task_id, entry_at, description) \
-                  VALUES (?, ?, ?, ?)"
-                .into(),
-            params: vec![
-                SqlParam::Text(Uuid::now_v7().to_string()),
-                SqlParam::Text(uuid_str.clone()),
-                SqlParam::Text(entry_at),
-                SqlParam::Text(description.clone()),
-            ],
-        });
-    }
-
     Ok(stmts)
 }
 
@@ -266,23 +197,13 @@ pub(crate) fn create_task_stmt(uuid: &Uuid) -> SqlStatement {
     }
 }
 
-/// Generate SQL statements for delete_task (tags, annotations, then task).
+/// Generate SQL statements for delete_task (task row only; tags/annotations are in the data blob).
 pub(crate) fn delete_task_stmts(uuid: &Uuid) -> Vec<SqlStatement> {
     let uuid_str = uuid.to_string();
-    vec![
-        SqlStatement {
-            sql: "DELETE FROM tc_tags WHERE task_id = ?".into(),
-            params: vec![SqlParam::Text(uuid_str.clone())],
-        },
-        SqlStatement {
-            sql: "DELETE FROM tc_annotations WHERE task_id = ?".into(),
-            params: vec![SqlParam::Text(uuid_str.clone())],
-        },
-        SqlStatement {
-            sql: "DELETE FROM tc_tasks WHERE id = ?".into(),
-            params: vec![SqlParam::Text(uuid_str)],
-        },
-    ]
+    vec![SqlStatement {
+        sql: "DELETE FROM tc_tasks WHERE id = ?".into(),
+        params: vec![SqlParam::Text(uuid_str)],
+    }]
 }
 
 /// Generate SQL statement for add_operation.
@@ -366,11 +287,9 @@ pub(crate) const ALL_OPS_WITH_ID_DESC_SQL: &str =
 pub(crate) const LAST_OPERATION_SQL: &str =
     "SELECT id, data FROM tc_operations ORDER BY id DESC LIMIT 1";
 pub(crate) const ALL_TASK_UUIDS_SQL: &str = "SELECT id FROM tc_tasks";
-#[cfg(feature = "storage-external")]
-pub(crate) const TAG_QUERY_SQL: &str = "SELECT name FROM tc_tags WHERE task_id = ?";
-#[cfg(feature = "storage-external")]
-pub(crate) const ANNOTATION_QUERY_SQL: &str =
-    "SELECT entry_at, description FROM tc_annotations WHERE task_id = ?";
 pub(crate) const TAG_COLOR_READ_SQL: &str =
     "SELECT id, color FROM tc_tag_colors WHERE name = ? ORDER BY created_at DESC LIMIT 1";
-pub(crate) const ALL_TAGS_SQL: &str = "SELECT DISTINCT name FROM tc_tags ORDER BY name";
+pub(crate) const ALL_TAGS_SQL: &str = "SELECT DISTINCT substr(j.key, 5) as name \
+     FROM tc_tasks, json_each(tc_tasks.data) as j \
+     WHERE j.key LIKE 'tag_%' \
+     ORDER BY name";

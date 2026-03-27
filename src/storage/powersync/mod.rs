@@ -144,7 +144,7 @@ mod test {
         Ok(())
     }
 
-    /// Verify that tag_* keys round-trip through set_task/get_task via tc_tags table.
+    /// Verify that tag_* keys round-trip through set_task/get_task via the data blob.
     #[tokio::test]
     async fn test_tags_round_trip() -> Result<()> {
         let mut storage = PowerSyncStorageInner::new_for_test()?;
@@ -191,7 +191,7 @@ mod test {
         Ok(())
     }
 
-    /// Verify that annotation_* keys round-trip through set_task/get_task via tc_annotations table.
+    /// Verify that annotation_* keys round-trip through set_task/get_task via the data blob.
     #[tokio::test]
     async fn test_annotations_round_trip() -> Result<()> {
         let mut storage = PowerSyncStorageInner::new_for_test()?;
@@ -222,9 +222,9 @@ mod test {
         Ok(())
     }
 
-    /// Verify that tag_* and annotation_* keys are excluded from the raw `data` blob in tc_tasks.
+    /// Verify that tag_* and annotation_* keys are present in the raw `data` blob in tc_tasks.
     #[tokio::test]
-    async fn test_data_blob_excludes_tags_and_annotations() -> Result<()> {
+    async fn test_data_blob_includes_tags_and_annotations() -> Result<()> {
         let mut storage = PowerSyncStorageInner::new_for_test()?;
         let uuid = Uuid::new_v4();
 
@@ -242,7 +242,7 @@ mod test {
             txn.commit().await?;
         }
 
-        // Query raw data column directly — bypasses get_task merge logic.
+        // Query raw data column directly — confirms keys are persisted in the blob.
         let data_str: String = storage.conn.query_row(
             "SELECT data FROM tc_tasks WHERE id = ?",
             [&uuid.to_string()],
@@ -253,12 +253,12 @@ mod test {
         let obj = data_map.as_object().unwrap();
 
         assert!(
-            !obj.keys().any(|k| k.starts_with("tag_")),
-            "tag_* keys should not be in data blob, got: {obj:?}"
+            obj.keys().any(|k| k.starts_with("tag_")),
+            "tag_* keys should be in data blob, got: {obj:?}"
         );
         assert!(
-            !obj.keys().any(|k| k.starts_with("annotation_")),
-            "annotation_* keys should not be in data blob, got: {obj:?}"
+            obj.keys().any(|k| k.starts_with("annotation_")),
+            "annotation_* keys should be in data blob, got: {obj:?}"
         );
         assert!(
             !obj.contains_key("position"),
@@ -272,51 +272,6 @@ mod test {
             obj.contains_key("my_uda"),
             "UDAs should remain in data blob"
         );
-        Ok(())
-    }
-
-    /// Verify that deleting a task also cleans tc_tags and tc_annotations rows.
-    #[tokio::test]
-    async fn test_delete_task_cleans_tags_and_annotations() -> Result<()> {
-        let mut storage = PowerSyncStorageInner::new_for_test()?;
-        let uuid = Uuid::new_v4();
-
-        {
-            let mut txn = storage.txn().await?;
-            txn.create_task(uuid).await?;
-            let mut task = TaskMap::new();
-            task.insert("status".into(), "pending".into());
-            task.insert("tag_work".into(), String::new());
-            task.insert("annotation_1635301873".into(), "note".into());
-            txn.set_task(uuid, task).await?;
-            txn.commit().await?;
-        }
-
-        {
-            let mut txn = storage.txn().await?;
-            assert!(txn.delete_task(uuid).await?);
-            txn.commit().await?;
-        }
-
-        {
-            let mut txn = storage.txn().await?;
-            assert!(txn.get_task(uuid).await?.is_none());
-            txn.commit().await?;
-        }
-
-        let tag_count: i64 = storage.conn.query_row(
-            "SELECT COUNT(*) FROM tc_tags WHERE task_id = ?",
-            [&uuid.to_string()],
-            |r| r.get(0),
-        )?;
-        assert_eq!(tag_count, 0, "tags should be deleted");
-
-        let ann_count: i64 = storage.conn.query_row(
-            "SELECT COUNT(*) FROM tc_annotations WHERE task_id = ?",
-            [&uuid.to_string()],
-            |r| r.get(0),
-        )?;
-        assert_eq!(ann_count, 0, "annotations should be deleted");
         Ok(())
     }
 

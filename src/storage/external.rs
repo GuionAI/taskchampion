@@ -16,7 +16,7 @@ use crate::storage::sql_ops::{
     add_operation_stmt, create_task_stmt, delete_task_stmts, insert_project_stmt, prepare_task,
     remove_operation_stmt, set_tag_color_stmt, set_task_stmts, SqlParam, SqlStatement,
     ALL_OPERATIONS_SQL, ALL_OPS_WITH_ID_DESC_SQL, ALL_TAGS_SQL, ALL_TASK_UUIDS_SQL,
-    ANNOTATION_QUERY_SQL, PROJECT_LOOKUP_SQL, TAG_COLOR_READ_SQL, TAG_QUERY_SQL, TASK_EXISTS_SQL,
+    PROJECT_LOOKUP_SQL, TAG_COLOR_READ_SQL, TASK_EXISTS_SQL,
 };
 use crate::storage::{Storage, StorageTxn, TaskMap};
 
@@ -162,37 +162,6 @@ impl ExternalStorageTxn<'_> {
             project_name: get_opt_str(obj, "project_name"),
         })
     }
-
-    /// Merge tags and annotations from the host DB into a TaskMap.
-    async fn merge_tags_annotations(&self, task_id: &str, task_map: &mut TaskMap) -> Result<()> {
-        // Tags.
-        let tag_rows = self
-            .executor
-            .query_all(TAG_QUERY_SQL, &[SqlParam::Text(task_id.to_string())])
-            .await?;
-        for json in &tag_rows {
-            let name = parse_json_string_field(json, "name")?;
-            task_map.insert(format!("tag_{name}"), String::new());
-        }
-
-        // Annotations.
-        let ann_rows = self
-            .executor
-            .query_all(ANNOTATION_QUERY_SQL, &[SqlParam::Text(task_id.to_string())])
-            .await?;
-        for json in &ann_rows {
-            let entry_at_iso = parse_json_string_field(json, "entry_at")?;
-            let description = parse_json_string_field(json, "description")?;
-            let dt = chrono::DateTime::parse_from_rfc3339(&entry_at_iso).map_err(|e| {
-                Error::Database(format!(
-                    "Invalid annotation timestamp for task {task_id}: {entry_at_iso:?}: {e}"
-                ))
-            })?;
-            task_map.insert(format!("annotation_{}", dt.timestamp()), description);
-        }
-
-        Ok(())
-    }
 }
 
 // ── StorageTxn impl ───────────────────────────────────────────────────────
@@ -223,9 +192,7 @@ impl StorageTxn for ExternalStorageTxn<'_> {
             None => Ok(None),
             Some(json) => {
                 let raw = Self::parse_task_row(&json)?;
-                let (_, mut task_map) = raw_to_task(raw)?;
-                self.merge_tags_annotations(&uuid.to_string(), &mut task_map)
-                    .await?;
+                let (_, task_map) = raw_to_task(raw)?;
                 Ok(Some(task_map))
             }
         }
@@ -241,9 +208,7 @@ impl StorageTxn for ExternalStorageTxn<'_> {
         let mut tasks = Vec::new();
         for json in &rows {
             let raw = Self::parse_task_row(json)?;
-            let (uuid, mut task_map) = raw_to_task(raw)?;
-            self.merge_tags_annotations(&uuid.to_string(), &mut task_map)
-                .await?;
+            let (uuid, task_map) = raw_to_task(raw)?;
             tasks.push((uuid, task_map));
         }
         Ok(tasks)
@@ -328,9 +293,7 @@ impl StorageTxn for ExternalStorageTxn<'_> {
         let mut tasks = Vec::new();
         for json in &rows {
             let raw = Self::parse_task_row(json)?;
-            let (uuid, mut task_map) = raw_to_task(raw)?;
-            self.merge_tags_annotations(&uuid.to_string(), &mut task_map)
-                .await?;
+            let (uuid, task_map) = raw_to_task(raw)?;
             tasks.push((uuid, task_map));
         }
         Ok(tasks)
@@ -563,14 +526,6 @@ mod test {
                 CREATE TABLE IF NOT EXISTS projects (
                     id TEXT PRIMARY KEY, name TEXT,
                     created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
-                );
-                CREATE TABLE IF NOT EXISTS tc_tags (
-                    id TEXT PRIMARY KEY, task_id TEXT NOT NULL,
-                    name TEXT NOT NULL, UNIQUE (task_id, name)
-                );
-                CREATE TABLE IF NOT EXISTS tc_annotations (
-                    id TEXT PRIMARY KEY, task_id TEXT NOT NULL,
-                    entry_at TEXT NOT NULL, description TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS tc_tag_colors (
                     id TEXT PRIMARY KEY,

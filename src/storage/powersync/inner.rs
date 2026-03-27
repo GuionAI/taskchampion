@@ -4,7 +4,6 @@ use crate::storage::send_wrapper::{WrappedStorage, WrappedStorageTxn};
 use crate::storage::TaskMap;
 use anyhow::Context;
 use async_trait::async_trait;
-use chrono::DateTime;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::path::Path;
 use uuid::Uuid;
@@ -17,45 +16,6 @@ use crate::storage::sql_ops::{
     set_tag_color_stmt, set_task_stmts, SqlStatement, ALL_OPERATIONS_SQL, ALL_TAGS_SQL,
     ALL_TASK_UUIDS_SQL, LAST_OPERATION_SQL, TAG_COLOR_READ_SQL, TASK_EXISTS_SQL,
 };
-
-/// Query tc_tags and tc_annotations for the given task UUID and inject them
-/// into the TaskMap as `tag_<name>` and `annotation_<epoch>` keys.
-fn merge_tags_annotations(
-    t: &rusqlite::Transaction<'_>,
-    task_id: &str,
-    task_map: &mut TaskMap,
-) -> Result<()> {
-    let mut tag_stmt = t
-        .prepare("SELECT name FROM tc_tags WHERE task_id = ?")
-        .context("Prepare tag query")?;
-    let tag_rows = tag_stmt
-        .query_map([task_id], |row| row.get::<_, String>(0))
-        .context("Query tags")?;
-    for name in tag_rows {
-        let name = name?;
-        task_map.insert(format!("tag_{name}"), String::new());
-    }
-
-    let mut ann_stmt = t
-        .prepare("SELECT entry_at, description FROM tc_annotations WHERE task_id = ?")
-        .context("Prepare annotation query")?;
-    let ann_rows = ann_stmt
-        .query_map([task_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
-        .context("Query annotations")?;
-    for row in ann_rows {
-        let (entry_at_iso, description) = row?;
-        let dt = DateTime::parse_from_rfc3339(&entry_at_iso).map_err(|e| {
-            Error::Database(format!(
-                "Invalid annotation timestamp for task {task_id}: {entry_at_iso:?}: {e}"
-            ))
-        })?;
-        task_map.insert(format!("annotation_{}", dt.timestamp()), description);
-    }
-
-    Ok(())
-}
 
 /// Execute a SqlStatement against a rusqlite Transaction.
 fn execute_sql_stmt(t: &rusqlite::Transaction, stmt: &SqlStatement) -> Result<()> {
@@ -152,18 +112,6 @@ impl PowerSyncStorageInner {
                 id TEXT PRIMARY KEY,
                 name TEXT,
                 created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
-            );
-            CREATE TABLE IF NOT EXISTS tc_tags (
-                id TEXT PRIMARY KEY,
-                task_id TEXT NOT NULL,
-                name TEXT NOT NULL,
-                UNIQUE (task_id, name)
-            );
-            CREATE TABLE IF NOT EXISTS tc_annotations (
-                id TEXT PRIMARY KEY,
-                task_id TEXT NOT NULL,
-                entry_at TEXT NOT NULL,
-                description TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS tc_tag_colors (
                 id TEXT PRIMARY KEY,
@@ -276,8 +224,7 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
         match raw_opt {
             None => Ok(None),
             Some(raw) => {
-                let (_, mut task_map) = raw_to_task(raw)?;
-                merge_tags_annotations(t, &uuid.to_string(), &mut task_map)?;
+                let (_, task_map) = raw_to_task(raw)?;
                 Ok(Some(task_map))
             }
         }
@@ -291,11 +238,7 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
              LEFT JOIN projects p ON t.project_id = p.id
              WHERE t.status = 'pending'"
         );
-        let mut tasks = query_task_rows(t, &sql, [])?;
-        for (uuid, task_map) in &mut tasks {
-            let uuid_str = uuid.to_string();
-            merge_tags_annotations(t, &uuid_str, task_map)?;
-        }
+        let tasks = query_task_rows(t, &sql, [])?;
         Ok(tasks)
     }
 
@@ -362,11 +305,7 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
              FROM tc_tasks t
              LEFT JOIN projects p ON t.project_id = p.id"
         );
-        let mut tasks = query_task_rows(t, &sql, [])?;
-        for (uuid, task_map) in &mut tasks {
-            let uuid_str = uuid.to_string();
-            merge_tags_annotations(t, &uuid_str, task_map)?;
-        }
+        let tasks = query_task_rows(t, &sql, [])?;
         Ok(tasks)
     }
 

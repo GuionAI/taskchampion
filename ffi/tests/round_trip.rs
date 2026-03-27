@@ -40,14 +40,6 @@ impl MockFfiSqlExecutor {
                 id TEXT PRIMARY KEY, name TEXT,
                 created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
             );
-            CREATE TABLE IF NOT EXISTS tc_tags (
-                id TEXT PRIMARY KEY, task_id TEXT NOT NULL,
-                name TEXT NOT NULL, UNIQUE (task_id, name)
-            );
-            CREATE TABLE IF NOT EXISTS tc_annotations (
-                id TEXT PRIMARY KEY, task_id TEXT NOT NULL,
-                entry_at TEXT NOT NULL, description TEXT NOT NULL
-            );
             CREATE TABLE IF NOT EXISTS tc_tag_colors (
                 id TEXT PRIMARY KEY, name TEXT NOT NULL,
                 color TEXT NOT NULL,
