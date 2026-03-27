@@ -7,16 +7,13 @@
 /// SQL that covers all task-related tables.
 ///
 /// Pass this to `db.watch()` so PowerSync re-runs your query whenever any
-/// task, tag, annotation, or project row changes.
+/// task or project row changes.
 #[uniffi::export(name = "allTaskTablesSql")]
 pub fn all_task_tables_sql() -> String {
     "SELECT t.id, t.data, t.status, t.description, t.priority, \
             t.parent_id, t.position, \
-            tag.name, ann.entry_at, ann.description, \
             p.name \
      FROM tc_tasks t \
-     LEFT JOIN tc_tags tag ON tag.task_id = t.id \
-     LEFT JOIN tc_annotations ann ON ann.task_id = t.id \
      LEFT JOIN projects p ON p.id = t.project_id"
         .to_string()
 }
