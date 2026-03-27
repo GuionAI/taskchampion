@@ -103,8 +103,8 @@ pub trait StorageTxn: Send {
     /// `add_operation` this only affects the list of operations.
     async fn remove_operation(&mut self, op: Operation) -> Result<()>;
 
-    /// Get the color for a tag by name. Returns the color of the oldest row
-    /// if duplicates exist (conflict resolution: oldest wins via `created_at` ordering).
+    /// Get the color for a tag by name. Returns the color of the latest row
+    /// if duplicates exist (conflict resolution: last-write-wins via `created_at` ordering).
     async fn get_tag_color(&mut self, name: String) -> Result<Option<String>>;
 
     /// Set the color for a tag by name. If a row already exists for this tag name,

@@ -372,4 +372,5 @@ pub(crate) const TAG_QUERY_SQL: &str = "SELECT name FROM tc_tags WHERE task_id =
 pub(crate) const ANNOTATION_QUERY_SQL: &str =
     "SELECT entry_at, description FROM tc_annotations WHERE task_id = ?";
 pub(crate) const TAG_COLOR_READ_SQL: &str =
-    "SELECT id, color FROM tc_tag_colors WHERE name = ? ORDER BY created_at ASC LIMIT 1";
+    "SELECT id, color FROM tc_tag_colors WHERE name = ? ORDER BY created_at DESC LIMIT 1";
+pub(crate) const ALL_TAGS_SQL: &str = "SELECT DISTINCT name FROM tc_tags ORDER BY name";
