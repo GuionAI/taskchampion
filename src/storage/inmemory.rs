@@ -137,6 +137,22 @@ impl StorageTxn for Txn<'_> {
         Ok(())
     }
 
+    async fn get_all_tags(&mut self) -> Result<Vec<String>> {
+        let tags: Vec<String> = self
+            .data_ref()
+            .tasks
+            .values()
+            .flat_map(|task| {
+                task.keys()
+                    .filter(|k| k.starts_with("tag_"))
+                    .filter_map(|k| k.strip_prefix("tag_").map(String::from))
+            })
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        Ok(tags)
+    }
+
     async fn commit(&mut self) -> Result<()> {
         // copy the new_data back into storage to commit the transaction
         if let Some(data) = self.new_data.take() {

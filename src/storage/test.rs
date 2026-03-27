@@ -72,6 +72,11 @@ macro_rules! storage_tests_no_sync {
         async fn tag_color_update() -> $crate::errors::Result<()> {
             $crate::storage::test::tag_color_update($storage).await
         }
+
+        #[tokio::test]
+        async fn get_all_tags() -> $crate::errors::Result<()> {
+            $crate::storage::test::get_all_tags($storage).await
+        }
     };
 }
 pub(crate) use storage_tests_no_sync;
@@ -290,6 +295,44 @@ pub(super) async fn tag_color_update(mut storage: impl Storage) -> Result<()> {
             txn.get_tag_color("work".into()).await?,
             Some("#00ff00".into())
         );
+    }
+    Ok(())
+}
+
+pub(super) async fn get_all_tags(mut storage: impl Storage) -> Result<()> {
+    // Empty storage returns empty vec.
+    {
+        let mut txn = storage.txn().await?;
+        let tags = txn.get_all_tags().await?;
+        assert!(tags.is_empty(), "no tags before any tasks exist");
+        txn.commit().await?;
+    }
+    // Two tasks with overlapping tags — deduplication check.
+    {
+        let mut txn = storage.txn().await?;
+        txn.set_task(
+            Uuid::new_v4(),
+            taskmap_with(vec![
+                ("tag_work".to_string(), String::new()),
+                ("tag_urgent".to_string(), String::new()),
+            ]),
+        )
+        .await?;
+        txn.set_task(
+            Uuid::new_v4(),
+            taskmap_with(vec![
+                ("tag_work".to_string(), String::new()),
+                ("tag_home".to_string(), String::new()),
+            ]),
+        )
+        .await?;
+        txn.commit().await?;
+    }
+    {
+        let mut txn = storage.txn().await?;
+        let tags = txn.get_all_tags().await?;
+        // "work" appears in both tasks but should only appear once.
+        assert_eq!(tags, vec!["home", "urgent", "work"], "sorted, deduplicated");
     }
     Ok(())
 }

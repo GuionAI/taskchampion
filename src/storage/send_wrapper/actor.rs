@@ -30,6 +30,7 @@ pub(super) enum TxnMessage {
     IsEmpty(oneshot::Sender<Result<bool>>),
     GetTagColor(String, oneshot::Sender<Result<Option<String>>>),
     SetTagColor(String, String, oneshot::Sender<Result<()>>),
+    GetAllTags(oneshot::Sender<Result<Vec<String>>>),
 }
 
 /// State owned by the dedicated thread. It handles the various channels and
@@ -121,6 +122,9 @@ impl<S: WrappedStorage> ActorImpl<S> {
                 }
                 TxnMessage::SetTagColor(name, color, resp) => {
                     let _ = resp.send(txn.set_tag_color(name, color).await);
+                }
+                TxnMessage::GetAllTags(resp) => {
+                    let _ = resp.send(txn.get_all_tags().await);
                 }
             };
         }
