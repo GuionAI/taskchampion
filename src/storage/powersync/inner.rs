@@ -458,8 +458,10 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
 
     async fn get_all_tags(&mut self) -> Result<Vec<String>> {
         let t = self.get_txn()?;
-        let mut q = t.prepare(ALL_TAGS_SQL)?;
-        let rows = q.query_map([], |row| row.get::<_, String>(0))?;
+        let mut q = t.prepare(ALL_TAGS_SQL).context("get_all_tags: prepare")?;
+        let rows = q
+            .query_map([], |row| row.get::<_, String>(0))
+            .context("get_all_tags: query")?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|e| Error::Database(format!("get_all_tags: {e}")))
     }

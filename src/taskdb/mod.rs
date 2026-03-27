@@ -113,6 +113,7 @@ impl<S: Storage> TaskDb<S> {
 
     /// Get the color for a tag by name.
     pub(crate) async fn get_tag_color(&mut self, name: String) -> Result<Option<String>> {
+        // Read-only: transaction is intentionally not committed
         let mut txn = self.storage.txn().await?;
         txn.get_tag_color(name).await
     }
@@ -126,6 +127,7 @@ impl<S: Storage> TaskDb<S> {
 
     /// Get all unique tag names across all tasks.
     pub(crate) async fn get_all_tags(&mut self) -> Result<Vec<String>> {
+        // Read-only: transaction is intentionally not committed
         let mut txn = self.storage.txn().await?;
         txn.get_all_tags().await
     }

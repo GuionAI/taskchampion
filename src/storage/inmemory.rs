@@ -138,7 +138,7 @@ impl StorageTxn for Txn<'_> {
     }
 
     async fn get_all_tags(&mut self) -> Result<Vec<String>> {
-        let mut tags: Vec<String> = self
+        let tags: Vec<String> = self
             .data_ref()
             .tasks
             .values()
@@ -147,10 +147,9 @@ impl StorageTxn for Txn<'_> {
                     .filter(|k| k.starts_with("tag_"))
                     .filter_map(|k| k.strip_prefix("tag_").map(String::from))
             })
-            .collect::<std::collections::HashSet<_>>()
+            .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
             .collect();
-        tags.sort();
         Ok(tags)
     }
 
