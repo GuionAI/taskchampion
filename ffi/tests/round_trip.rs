@@ -529,6 +529,38 @@ async fn test_get_all_tags() {
 }
 
 #[tokio::test]
+async fn test_position_numeric_string_round_trip() {
+    let session = make_session();
+    let uuid = Uuid::new_v4().to_string();
+
+    session
+        .create_task(uuid.clone(), "Position test".into())
+        .await
+        .expect("create");
+
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetPosition {
+                value: Some("80".into()),
+            }],
+        )
+        .await
+        .expect("set position");
+
+    let task = session
+        .get_task(uuid)
+        .await
+        .expect("get")
+        .expect("exists");
+    assert_eq!(
+        task.position.as_deref(),
+        Some("80"),
+        "numeric position string must survive round-trip"
+    );
+}
+
+#[tokio::test]
 async fn test_get_tag_color_returns_empty_string() {
     let session = make_session();
 
