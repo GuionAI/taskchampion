@@ -103,13 +103,14 @@ pub trait StorageTxn: Send {
     /// `add_operation` this only affects the list of operations.
     async fn remove_operation(&mut self, op: Operation) -> Result<()>;
 
-    /// Get the color for a tag by name. Returns the color of the latest row
+    /// Get the metadata JSON for a tag by name. Returns the `data` column of the latest row
     /// if duplicates exist (conflict resolution: last-write-wins via `created_at` ordering).
-    async fn get_tag_color(&mut self, name: String) -> Result<Option<String>>;
+    async fn get_tag_metadata(&mut self, name: String) -> Result<Option<String>>;
 
-    /// Set the color for a tag by name. If a row already exists for this tag name,
+    /// Set the metadata JSON for a tag by name. If a row already exists for this tag name,
     /// updates it. Otherwise, inserts a new row with a v7 UUID.
-    async fn set_tag_color(&mut self, name: String, color: String) -> Result<()>;
+    /// The `data` parameter is an opaque JSON string (e.g. `{"color":"#ff0000","is_status":true}`).
+    async fn set_tag_metadata(&mut self, name: String, data: String) -> Result<()>;
 
     /// Get all unique tag names across all tasks.
     async fn get_all_tags(&mut self) -> Result<Vec<String>>;
