@@ -212,12 +212,12 @@ impl StorageTxn for WrapperTxn {
         self.call(TxnMessage::IsEmpty).await
     }
 
-    async fn get_tag_color(&mut self, name: String) -> Result<Option<String>> {
-        self.call(|tx| TxnMessage::GetTagColor(name, tx)).await
+    async fn get_tag_metadata(&mut self, name: String) -> Result<Option<String>> {
+        self.call(|tx| TxnMessage::GetTagMetadata(name, tx)).await
     }
 
-    async fn set_tag_color(&mut self, name: String, color: String) -> Result<()> {
-        self.call(|tx| TxnMessage::SetTagColor(name, color, tx))
+    async fn set_tag_metadata(&mut self, name: String, data: String) -> Result<()> {
+        self.call(|tx| TxnMessage::SetTagMetadata(name, data, tx))
             .await
     }
 
