@@ -824,3 +824,46 @@ async fn test_set_value_rejects_known_keys() {
         "known keys should be rejected by SetValue"
     );
 }
+
+#[tokio::test]
+async fn test_set_value_rejects_flicknote_dedicated_keys() {
+    let session = make_session();
+    let uuid = Uuid::new_v4().to_string();
+
+    session
+        .create_task(uuid.clone(), "FlickNote key guard test".into())
+        .await
+        .expect("create");
+
+    // is_full_day has a dedicated variant — SetValue must reject it to prevent
+    // casing mismatches (e.g. "True" instead of "true") bypassing the typed setter.
+    let result = session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetValue {
+                key: "is_full_day".into(),
+                value: Some("True".into()),
+            }],
+        )
+        .await;
+    assert!(
+        matches!(result, Err(FfiError::InvalidInput { .. })),
+        "is_full_day should be rejected by SetValue"
+    );
+
+    // estimate has a dedicated variant with a >0 guard — SetValue must reject it
+    // to prevent bypassing that guard via a raw "0" string.
+    let result = session
+        .mutate_task(
+            uuid,
+            vec![TaskMutation::SetValue {
+                key: "estimate".into(),
+                value: Some("0".into()),
+            }],
+        )
+        .await;
+    assert!(
+        matches!(result, Err(FfiError::InvalidInput { .. })),
+        "estimate should be rejected by SetValue"
+    );
+}

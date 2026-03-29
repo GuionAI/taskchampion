@@ -50,7 +50,7 @@ impl From<&Task> for FfiTask {
                 .get_value("estimate")
                 .and_then(|v| v.parse::<u32>().ok()),
             remaining_data: {
-                // Exclude the 2 dedicated FlickNote fields from remaining_data
+                // Exclude the 3 dedicated FlickNote/custom fields from remaining_data
                 // since they have typed accessors above.
                 // Note: "scheduled" is not in TC's Prop enum, so it appears as a
                 // UDA — exclude it too since it has a dedicated timestamp field.

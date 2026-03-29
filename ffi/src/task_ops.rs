@@ -190,6 +190,8 @@ fn apply_mutation(
                 "position",
                 "start",
                 "scheduled",
+                "is_full_day",
+                "estimate",
             ];
             if known.contains(&key.as_str())
                 || key.starts_with("tag_")
