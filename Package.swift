@@ -26,8 +26,8 @@ let package = Package(
         // Do NOT use the main branch as an SPM dependency; always pin to a tagged version.
         .binaryTarget(
             name: "TaskChampionFFIFFI",
-            url: "https://github.com/GuionAI/taskchampion/releases/download/v3.0.2-guion.24/TaskChampionFFIFFI.xcframework.zip",
-            checksum: "96f6c6961bea183166576bb8ab0ac8fca78d248ea7c05300926bced403a4dbac"
+            url: "https://github.com/GuionAI/taskchampion/releases/download/v3.0.2-guion.25/TaskChampionFFIFFI.xcframework.zip",
+            checksum: "cb7323002df7c5b1e7f7e6579e9194b1fe2f0040ce18bec0816b1225d2efeee3"
         ),
     ]
 )

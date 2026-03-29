@@ -425,6 +425,22 @@ private let UNIFFI_CALLBACK_UNEXPECTED_ERROR: Int32 = 2
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
+    typealias FfiType = UInt32
+    typealias SwiftType = UInt32
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt32 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterInt64: FfiConverterPrimitive {
     typealias FfiType = Int64
     typealias SwiftType = Int64
@@ -528,6 +544,9 @@ fileprivate struct FfiConverterString: FfiConverter {
  * Construct once at startup; all task operations are async methods
  * on this object. Each method creates an ephemeral [`Replica`] — no
  * persistent state is held between calls, making concurrent use safe.
+ *
+ * Named `FfiSession` (not `TCSession`) due to UniFFI derive macro
+ * limitations — see `types.rs` module docs.
  */
 public protocol FfiSessionProtocol: AnyObject, Sendable {
     
@@ -607,6 +626,9 @@ public protocol FfiSessionProtocol: AnyObject, Sendable {
  * Construct once at startup; all task operations are async methods
  * on this object. Each method creates an ephemeral [`Replica`] — no
  * persistent state is held between calls, making concurrent use safe.
+ *
+ * Named `FfiSession` (not `TCSession`) due to UniFFI derive macro
+ * limitations — see `types.rs` module docs.
  */
 open class FfiSession: FfiSessionProtocol, @unchecked Sendable {
     fileprivate let handle: UInt64
@@ -1607,6 +1629,14 @@ public struct FfiTask: Equatable, Hashable {
     public var due: Int64?
     public var wait: Int64?
     /**
+     * Scheduled date as Unix epoch seconds, or `None` if not set.
+     */
+    public var scheduled: Int64?
+    /**
+     * Start time (active tracking) as Unix epoch seconds, or `None`.
+     */
+    public var start: Int64?
+    /**
      * Parent task UUID as a string, or `None`.
      */
     public var parent: String?
@@ -1624,6 +1654,28 @@ public struct FfiTask: Equatable, Hashable {
     public var isActive: Bool
     public var isBlocked: Bool
     public var isBlocking: Bool
+    /**
+     * FlickNote: whether this is a full-day task. Derived from UDA `is_full_day`.
+     */
+    public var isFullDay: Bool
+    /**
+     * FlickNote: time estimate in 15-minute boxes. Derived from UDA `estimate`.
+     * `None` if not set or not a valid u32.
+     */
+    public var estimate: UInt32?
+    /**
+     * User-defined attributes not covered by dedicated fields.
+     *
+     * Keys are the raw TaskMap keys (e.g. `"custom_field"`).
+     * Values are the raw string values from the TaskMap.
+     * Empty if the task has no UDAs.
+     *
+     * Note: `"scheduled"` is excluded here even though it's a UDA in core,
+     * because it has a dedicated `scheduled` timestamp field above.
+     * `"is_full_day"` and `"estimate"` are also excluded since they have
+     * typed accessors above.
+     */
+    public var remainingData: [String: String]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -1632,6 +1684,12 @@ public struct FfiTask: Equatable, Hashable {
          * Unix epoch seconds, or `None` if not set.
          */entry: Int64?, modified: Int64?, due: Int64?, wait: Int64?, 
         /**
+         * Scheduled date as Unix epoch seconds, or `None` if not set.
+         */scheduled: Int64?, 
+        /**
+         * Start time (active tracking) as Unix epoch seconds, or `None`.
+         */start: Int64?, 
+        /**
          * Parent task UUID as a string, or `None`.
          */parent: String?, position: String?, 
         /**
@@ -1639,7 +1697,26 @@ public struct FfiTask: Equatable, Hashable {
          */tags: [String], annotations: [FfiAnnotation], 
         /**
          * UUIDs of tasks this task depends on.
-         */dependencies: [String], isWaiting: Bool, isActive: Bool, isBlocked: Bool, isBlocking: Bool) {
+         */dependencies: [String], isWaiting: Bool, isActive: Bool, isBlocked: Bool, isBlocking: Bool, 
+        /**
+         * FlickNote: whether this is a full-day task. Derived from UDA `is_full_day`.
+         */isFullDay: Bool, 
+        /**
+         * FlickNote: time estimate in 15-minute boxes. Derived from UDA `estimate`.
+         * `None` if not set or not a valid u32.
+         */estimate: UInt32?, 
+        /**
+         * User-defined attributes not covered by dedicated fields.
+         *
+         * Keys are the raw TaskMap keys (e.g. `"custom_field"`).
+         * Values are the raw string values from the TaskMap.
+         * Empty if the task has no UDAs.
+         *
+         * Note: `"scheduled"` is excluded here even though it's a UDA in core,
+         * because it has a dedicated `scheduled` timestamp field above.
+         * `"is_full_day"` and `"estimate"` are also excluded since they have
+         * typed accessors above.
+         */remainingData: [String: String]) {
         self.uuid = uuid
         self.status = status
         self.description = description
@@ -1648,6 +1725,8 @@ public struct FfiTask: Equatable, Hashable {
         self.modified = modified
         self.due = due
         self.wait = wait
+        self.scheduled = scheduled
+        self.start = start
         self.parent = parent
         self.position = position
         self.tags = tags
@@ -1657,6 +1736,9 @@ public struct FfiTask: Equatable, Hashable {
         self.isActive = isActive
         self.isBlocked = isBlocked
         self.isBlocking = isBlocking
+        self.isFullDay = isFullDay
+        self.estimate = estimate
+        self.remainingData = remainingData
     }
 
     
@@ -1683,6 +1765,8 @@ public struct FfiConverterTypeFfiTask: FfiConverterRustBuffer {
                 modified: FfiConverterOptionInt64.read(from: &buf), 
                 due: FfiConverterOptionInt64.read(from: &buf), 
                 wait: FfiConverterOptionInt64.read(from: &buf), 
+                scheduled: FfiConverterOptionInt64.read(from: &buf), 
+                start: FfiConverterOptionInt64.read(from: &buf), 
                 parent: FfiConverterOptionString.read(from: &buf), 
                 position: FfiConverterOptionString.read(from: &buf), 
                 tags: FfiConverterSequenceString.read(from: &buf), 
@@ -1691,7 +1775,10 @@ public struct FfiConverterTypeFfiTask: FfiConverterRustBuffer {
                 isWaiting: FfiConverterBool.read(from: &buf), 
                 isActive: FfiConverterBool.read(from: &buf), 
                 isBlocked: FfiConverterBool.read(from: &buf), 
-                isBlocking: FfiConverterBool.read(from: &buf)
+                isBlocking: FfiConverterBool.read(from: &buf), 
+                isFullDay: FfiConverterBool.read(from: &buf), 
+                estimate: FfiConverterOptionUInt32.read(from: &buf), 
+                remainingData: FfiConverterDictionaryStringString.read(from: &buf)
         )
     }
 
@@ -1704,6 +1791,8 @@ public struct FfiConverterTypeFfiTask: FfiConverterRustBuffer {
         FfiConverterOptionInt64.write(value.modified, into: &buf)
         FfiConverterOptionInt64.write(value.due, into: &buf)
         FfiConverterOptionInt64.write(value.wait, into: &buf)
+        FfiConverterOptionInt64.write(value.scheduled, into: &buf)
+        FfiConverterOptionInt64.write(value.start, into: &buf)
         FfiConverterOptionString.write(value.parent, into: &buf)
         FfiConverterOptionString.write(value.position, into: &buf)
         FfiConverterSequenceString.write(value.tags, into: &buf)
@@ -1713,6 +1802,9 @@ public struct FfiConverterTypeFfiTask: FfiConverterRustBuffer {
         FfiConverterBool.write(value.isActive, into: &buf)
         FfiConverterBool.write(value.isBlocked, into: &buf)
         FfiConverterBool.write(value.isBlocking, into: &buf)
+        FfiConverterBool.write(value.isFullDay, into: &buf)
+        FfiConverterOptionUInt32.write(value.estimate, into: &buf)
+        FfiConverterDictionaryStringString.write(value.remainingData, into: &buf)
     }
 }
 
@@ -2291,6 +2383,43 @@ public enum TaskMutation: Equatable, Hashable {
      * Soft-delete: sets status to `Deleted`.
      */
     case delete
+    /**
+     * Set the scheduled date. `None` clears the field.
+     */
+    case setScheduled(epoch: Int64?
+    )
+    /**
+     * Set the start time to a specific epoch. `None` clears the field.
+     *
+     * Unlike `Start` (which sets to now) and `Stop` (which clears),
+     * this variant accepts an arbitrary timestamp.
+     */
+    case setStart(epoch: Int64?
+    )
+    /**
+     * Set FlickNote is_full_day flag.
+     *
+     * Stored as `"true"` in TaskMap when `true`, removed when `false`.
+     */
+    case setIsFullDay(value: Bool
+    )
+    /**
+     * Set FlickNote time estimate (count of 15-minute boxes, must be >0).
+     *
+     * Stored as a decimal string in TaskMap (e.g. `"2"` = 30 minutes).
+     * Pass `None` to clear.
+     */
+    case setEstimate(boxes: UInt32?
+    )
+    /**
+     * Generic escape hatch for setting arbitrary UDA values.
+     *
+     * `key` is the raw TaskMap key. `value` is `None` to remove.
+     * Returns `InvalidInput` if `key` is a known TaskChampion property
+     * (use the dedicated variant instead).
+     */
+    case setValue(key: String, value: String?
+    )
 
 
 
@@ -2361,6 +2490,21 @@ public struct FfiConverterTypeTaskMutation: FfiConverterRustBuffer {
         case 17: return .stop
         
         case 18: return .delete
+        
+        case 19: return .setScheduled(epoch: try FfiConverterOptionInt64.read(from: &buf)
+        )
+        
+        case 20: return .setStart(epoch: try FfiConverterOptionInt64.read(from: &buf)
+        )
+        
+        case 21: return .setIsFullDay(value: try FfiConverterBool.read(from: &buf)
+        )
+        
+        case 22: return .setEstimate(boxes: try FfiConverterOptionUInt32.read(from: &buf)
+        )
+        
+        case 23: return .setValue(key: try FfiConverterString.read(from: &buf), value: try FfiConverterOptionString.read(from: &buf)
+        )
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -2456,6 +2600,32 @@ public struct FfiConverterTypeTaskMutation: FfiConverterRustBuffer {
         case .delete:
             writeInt(&buf, Int32(18))
         
+        
+        case let .setScheduled(epoch):
+            writeInt(&buf, Int32(19))
+            FfiConverterOptionInt64.write(epoch, into: &buf)
+            
+        
+        case let .setStart(epoch):
+            writeInt(&buf, Int32(20))
+            FfiConverterOptionInt64.write(epoch, into: &buf)
+            
+        
+        case let .setIsFullDay(value):
+            writeInt(&buf, Int32(21))
+            FfiConverterBool.write(value, into: &buf)
+            
+        
+        case let .setEstimate(boxes):
+            writeInt(&buf, Int32(22))
+            FfiConverterOptionUInt32.write(boxes, into: &buf)
+            
+        
+        case let .setValue(key,value):
+            writeInt(&buf, Int32(23))
+            FfiConverterString.write(key, into: &buf)
+            FfiConverterOptionString.write(value, into: &buf)
+            
         }
     }
 }
@@ -2475,6 +2645,30 @@ public func FfiConverterTypeTaskMutation_lower(_ value: TaskMutation) -> RustBuf
     return FfiConverterTypeTaskMutation.lower(value)
 }
 
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionUInt32: FfiConverterRustBuffer {
+    typealias SwiftType = UInt32?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterUInt32.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterUInt32.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -2819,6 +3013,32 @@ fileprivate struct FfiConverterSequenceTypeTaskMutation: FfiConverterRustBuffer 
             seq.append(try FfiConverterTypeTaskMutation.read(from: &buf))
         }
         return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterDictionaryStringString: FfiConverterRustBuffer {
+    public static func write(_ value: [String: String], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for (key, value) in value {
+            FfiConverterString.write(key, into: &buf)
+            FfiConverterString.write(value, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [String: String] {
+        let len: Int32 = try readInt(&buf)
+        var dict = [String: String]()
+        dict.reserveCapacity(Int(len))
+        for _ in 0..<len {
+            let key = try FfiConverterString.read(from: &buf)
+            let value = try FfiConverterString.read(from: &buf)
+            dict[key] = value
+        }
+        return dict
     }
 }
 private let UNIFFI_RUST_FUTURE_POLL_READY: Int8 = 0
