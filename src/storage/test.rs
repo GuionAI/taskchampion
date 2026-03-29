@@ -258,9 +258,9 @@ pub(super) async fn tag_metadata_round_trip(mut storage: impl Storage) -> Result
         assert_eq!(txn.get_tag_metadata("work".into()).await?, None);
 
         // Set two different tag metadata entries.
-        txn.set_tag_metadata("work".into(), r#"{"color":"#ff0000"}"#.into())
+        txn.set_tag_metadata("work".into(), r##"{"color":"#ff0000"}"##.into())
             .await?;
-        txn.set_tag_metadata("home".into(), r#"{"color":"#00ff00"}"#.into())
+        txn.set_tag_metadata("home".into(), r##"{"color":"#00ff00"}"##.into())
             .await?;
         txn.commit().await?;
     }
@@ -269,11 +269,11 @@ pub(super) async fn tag_metadata_round_trip(mut storage: impl Storage) -> Result
         let mut txn = storage.txn().await?;
         assert_eq!(
             txn.get_tag_metadata("work".into()).await?,
-            Some(r#"{"color":"#ff0000"}"#.into())
+            Some(r##"{"color":"#ff0000"}"##.into())
         );
         assert_eq!(
             txn.get_tag_metadata("home".into()).await?,
-            Some(r#"{"color":"#00ff00"}"#.into())
+            Some(r##"{"color":"#00ff00"}"##.into())
         );
         assert_eq!(txn.get_tag_metadata("nonexistent".into()).await?, None);
     }
@@ -283,13 +283,13 @@ pub(super) async fn tag_metadata_round_trip(mut storage: impl Storage) -> Result
 pub(super) async fn tag_metadata_update(mut storage: impl Storage) -> Result<()> {
     {
         let mut txn = storage.txn().await?;
-        txn.set_tag_metadata("work".into(), r#"{"color":"#ff0000"}"#.into())
+        txn.set_tag_metadata("work".into(), r##"{"color":"#ff0000"}"##.into())
             .await?;
         txn.commit().await?;
     }
     {
         let mut txn = storage.txn().await?;
-        txn.set_tag_metadata("work".into(), r#"{"color":"#00ff00"}"#.into())
+        txn.set_tag_metadata("work".into(), r##"{"color":"#00ff00"}"##.into())
             .await?;
         txn.commit().await?;
     }
@@ -297,7 +297,7 @@ pub(super) async fn tag_metadata_update(mut storage: impl Storage) -> Result<()>
         let mut txn = storage.txn().await?;
         assert_eq!(
             txn.get_tag_metadata("work".into()).await?,
-            Some(r#"{"color":"#00ff00"}"#.into())
+            Some(r##"{"color":"#00ff00"}"##.into())
         );
     }
     Ok(())

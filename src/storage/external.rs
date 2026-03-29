@@ -815,7 +815,7 @@ mod test {
 
         let mut txn = storage.txn().await.unwrap();
         assert_eq!(txn.get_tag_metadata("urgent".into()).await.unwrap(), None);
-        txn.set_tag_metadata("urgent".into(), r#"{"color":"#ff0000"}"#.into())
+        txn.set_tag_metadata("urgent".into(), r##"{"color":"#ff0000"}"##.into())
             .await
             .unwrap();
         txn.commit().await.unwrap();
@@ -824,7 +824,7 @@ mod test {
         let mut txn = storage.txn().await.unwrap();
         assert_eq!(
             txn.get_tag_metadata("urgent".into()).await.unwrap(),
-            Some(r#"{"color":"#ff0000"}"#.into())
+            Some(r##"{"color":"#ff0000"}"##.into())
         );
     }
 
@@ -836,10 +836,10 @@ mod test {
 
         let mut txn = storage.txn().await.unwrap();
         // Two calls in the same transaction for the same tag.
-        txn.set_tag_metadata("urgent".into(), r#"{"color":"#ff0000"}"#.into())
+        txn.set_tag_metadata("urgent".into(), r##"{"color":"#ff0000"}"##.into())
             .await
             .unwrap();
-        txn.set_tag_metadata("urgent".into(), r#"{"color":"#00ff00"}"#.into())
+        txn.set_tag_metadata("urgent".into(), r##"{"color":"#00ff00"}"##.into())
             .await
             .unwrap();
         txn.commit().await.unwrap();
@@ -849,7 +849,7 @@ mod test {
         let mut txn = storage.txn().await.unwrap();
         assert_eq!(
             txn.get_tag_metadata("urgent".into()).await.unwrap(),
-            Some(r#"{"color":"#00ff00"}"#.into()),
+            Some(r##"{"color":"#00ff00"}"##.into()),
             "second set_tag_metadata in same txn should win"
         );
     }
@@ -860,14 +860,14 @@ mod test {
         let mut storage = storage().await;
 
         let mut txn = storage.txn().await.unwrap();
-        txn.set_tag_metadata("urgent".into(), r#"{"color":"#ff0000"}"#.into())
+        txn.set_tag_metadata("urgent".into(), r##"{"color":"#ff0000"}"##.into())
             .await
             .unwrap();
         txn.commit().await.unwrap();
         drop(txn);
 
         let mut txn = storage.txn().await.unwrap();
-        txn.set_tag_metadata("urgent".into(), r#"{"color":"#00ff00"}"#.into())
+        txn.set_tag_metadata("urgent".into(), r##"{"color":"#00ff00"}"##.into())
             .await
             .unwrap();
         txn.commit().await.unwrap();
@@ -876,7 +876,7 @@ mod test {
         let mut txn = storage.txn().await.unwrap();
         assert_eq!(
             txn.get_tag_metadata("urgent".into()).await.unwrap(),
-            Some(r#"{"color":"#00ff00"}"#.into())
+            Some(r##"{"color":"#00ff00"}"##.into())
         );
     }
 

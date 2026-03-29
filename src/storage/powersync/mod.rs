@@ -403,26 +403,28 @@ mod test {
 
     /// Verify last-write-wins: when sync produces duplicate rows for the same
     /// tag name, get_tag_metadata returns the data from the row with the latest
-    /// created_at timestamp.
+    /// created_at timestamp (whole-row LWW, not per-field merge).
     #[tokio::test]
     async fn test_tag_metadata_lww() -> Result<()> {
         let mut storage = PowerSyncStorageInner::new_for_test()?;
 
+        // Older row: has color + is_status + icon.
         storage.conn.execute(
             "INSERT INTO tc_tag_metadata (id, name, data, created_at) VALUES (?, ?, ?, ?)",
             rusqlite::params![
                 Uuid::new_v4().to_string(),
                 "work",
-                r#"{"color":"#ff0000"}"#,
+                r##"{"color":"#ff0000","is_status":true,"icon":7}"##,
                 "2026-03-25 12:00:00.000"
             ],
         )?;
+        // Newer row: only color (is_status/icon absent).
         storage.conn.execute(
             "INSERT INTO tc_tag_metadata (id, name, data, created_at) VALUES (?, ?, ?, ?)",
             rusqlite::params![
                 Uuid::new_v4().to_string(),
                 "work",
-                r#"{"color":"#00ff00"}"#,
+                r##"{"color":"#00ff00"}"##,
                 "2026-03-26 12:00:00.000"
             ],
         )?;
@@ -431,8 +433,8 @@ mod test {
         let data = txn.get_tag_metadata("work".into()).await?;
         assert_eq!(
             data,
-            Some(r#"{"color":"#00ff00"}"#.into()),
-            "should return latest row's data (most recent created_at)"
+            Some(r##"{"color":"#00ff00"}"##.into()),
+            "should return latest row's data (whole-row LWW, not per-field merge)"
         );
         txn.commit().await?;
         Ok(())

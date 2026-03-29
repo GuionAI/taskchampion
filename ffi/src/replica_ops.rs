@@ -12,7 +12,10 @@ use uuid::Uuid;
 use chrono::Utc;
 
 use crate::convert::{tree_map_to_ffi, FfiSqlExecutorAdapter};
-use crate::types::{FfiDependencyEdge, FfiError, FfiSqlExecutor, FfiTask, FfiTreeNode};
+use crate::types::{
+    FfiDependencyEdge, FfiError, FfiSqlExecutor, FfiTagMetadata, FfiTask, FfiTreeNode,
+    TagMetadataJson,
+};
 
 // ---------------------------------------------------------------------------
 // TCSession (FfiSession)
@@ -173,29 +176,52 @@ impl FfiSession {
         .await
     }
 
-    /// Get the color associated with a tag name.
+    /// Get the metadata for a tag by name.
     ///
-    /// Returns an empty string if no color has been set for this tag.
-    pub async fn get_tag_color(&self, name: String) -> Result<String, FfiError> {
+    /// Returns a typed record with color, is_status, and icon fields.
+    /// All fields default to empty/false/None if no metadata exists or
+    /// if the stored JSON is missing fields.
+    pub async fn get_tag_metadata(&self, name: String) -> Result<FfiTagMetadata, FfiError> {
         self.with_replica(|mut replica| async move {
-            replica
-                .get_tag_color(name)
+            let json_str = replica
+                .get_tag_metadata(name)
                 .await
-                .map(|opt| opt.unwrap_or_default())
-                .map_err(FfiError::from)
+                .map_err(FfiError::from)?;
+            let parsed: TagMetadataJson = match json_str {
+                Some(s) => serde_json::from_str(&s).unwrap_or_default(),
+                None => TagMetadataJson::default(),
+            };
+            Ok(FfiTagMetadata::from(parsed))
         })
         .await
     }
 
-    /// Set the color for a tag name.
-    ///
-    /// If a color already exists for this tag, it is updated.
+    /// Set the color for a tag. Reads existing metadata, patches color, writes back.
     pub async fn set_tag_color(&self, name: String, color: String) -> Result<(), FfiError> {
         self.with_replica(|mut replica| async move {
-            replica
-                .set_tag_color(name, color)
-                .await
-                .map_err(FfiError::from)
+            let mut meta = read_tag_metadata(&mut replica, &name).await?;
+            meta.color = color;
+            write_tag_metadata(&mut replica, name, &meta).await
+        })
+        .await
+    }
+
+    /// Set whether a tag is a status tag. Reads existing metadata, patches is_status, writes back.
+    pub async fn set_tag_is_status(&self, name: String, value: bool) -> Result<(), FfiError> {
+        self.with_replica(|mut replica| async move {
+            let mut meta = read_tag_metadata(&mut replica, &name).await?;
+            meta.is_status = value;
+            write_tag_metadata(&mut replica, name, &meta).await
+        })
+        .await
+    }
+
+    /// Set the icon for a tag. Pass `None` to clear. Reads existing metadata, patches icon, writes back.
+    pub async fn set_tag_icon(&self, name: String, icon: Option<i64>) -> Result<(), FfiError> {
+        self.with_replica(|mut replica| async move {
+            let mut meta = read_tag_metadata(&mut replica, &name).await?;
+            meta.icon = icon;
+            write_tag_metadata(&mut replica, name, &meta).await
         })
         .await
     }
@@ -237,4 +263,38 @@ pub(crate) fn parse_uuid(s: &str) -> Result<Uuid, FfiError> {
     Uuid::parse_str(s).map_err(|e| FfiError::InvalidInput {
         message: format!("Invalid UUID: {e}"),
     })
+}
+
+// NOTE: Not atomic across concurrent calls — each granular setter opens an
+// ephemeral Replica, so two concurrent setters for the same tag can interleave.
+// This is intentional: matches the storage layer's LWW (last-write-wins) semantics.
+
+/// Read and deserialize tag metadata, defaulting to empty if not found.
+async fn read_tag_metadata(
+    replica: &mut Replica<ExternalStorage>,
+    name: &str,
+) -> Result<TagMetadataJson, FfiError> {
+    let json_str = replica
+        .get_tag_metadata(name.to_string())
+        .await
+        .map_err(FfiError::from)?;
+    Ok(match json_str {
+        Some(s) => serde_json::from_str(&s).unwrap_or_default(),
+        None => TagMetadataJson::default(),
+    })
+}
+
+/// Serialize and write tag metadata.
+async fn write_tag_metadata(
+    replica: &mut Replica<ExternalStorage>,
+    name: String,
+    meta: &TagMetadataJson,
+) -> Result<(), FfiError> {
+    let json = serde_json::to_string(meta).map_err(|e| FfiError::Internal {
+        message: format!("Failed to serialize tag metadata: {e}"),
+    })?;
+    replica
+        .set_tag_metadata(name, json)
+        .await
+        .map_err(FfiError::from)
 }
