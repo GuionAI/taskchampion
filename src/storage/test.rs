@@ -64,13 +64,13 @@ macro_rules! storage_tests_no_sync {
         }
 
         #[tokio::test]
-        async fn tag_color_round_trip() -> $crate::errors::Result<()> {
-            $crate::storage::test::tag_color_round_trip($storage).await
+        async fn tag_metadata_round_trip() -> $crate::errors::Result<()> {
+            $crate::storage::test::tag_metadata_round_trip($storage).await
         }
 
         #[tokio::test]
-        async fn tag_color_update() -> $crate::errors::Result<()> {
-            $crate::storage::test::tag_color_update($storage).await
+        async fn tag_metadata_update() -> $crate::errors::Result<()> {
+            $crate::storage::test::tag_metadata_update($storage).await
         }
 
         #[tokio::test]
@@ -251,49 +251,53 @@ pub(super) async fn all_tasks_and_uuids(mut storage: impl Storage) -> Result<()>
     Ok(())
 }
 
-pub(super) async fn tag_color_round_trip(mut storage: impl Storage) -> Result<()> {
+pub(super) async fn tag_metadata_round_trip(mut storage: impl Storage) -> Result<()> {
     {
         let mut txn = storage.txn().await?;
-        // No color set yet.
-        assert_eq!(txn.get_tag_color("work".into()).await?, None);
+        // No metadata set yet.
+        assert_eq!(txn.get_tag_metadata("work".into()).await?, None);
 
-        // Set two different tag colors.
-        txn.set_tag_color("work".into(), "#ff0000".into()).await?;
-        txn.set_tag_color("home".into(), "#00ff00".into()).await?;
+        // Set two different tag metadata entries.
+        txn.set_tag_metadata("work".into(), r##"{"color":"#ff0000"}"##.into())
+            .await?;
+        txn.set_tag_metadata("home".into(), r##"{"color":"#00ff00"}"##.into())
+            .await?;
         txn.commit().await?;
     }
     {
         // Read back — verify isolation between tags.
         let mut txn = storage.txn().await?;
         assert_eq!(
-            txn.get_tag_color("work".into()).await?,
-            Some("#ff0000".into())
+            txn.get_tag_metadata("work".into()).await?,
+            Some(r##"{"color":"#ff0000"}"##.into())
         );
         assert_eq!(
-            txn.get_tag_color("home".into()).await?,
-            Some("#00ff00".into())
+            txn.get_tag_metadata("home".into()).await?,
+            Some(r##"{"color":"#00ff00"}"##.into())
         );
-        assert_eq!(txn.get_tag_color("nonexistent".into()).await?, None);
+        assert_eq!(txn.get_tag_metadata("nonexistent".into()).await?, None);
     }
     Ok(())
 }
 
-pub(super) async fn tag_color_update(mut storage: impl Storage) -> Result<()> {
+pub(super) async fn tag_metadata_update(mut storage: impl Storage) -> Result<()> {
     {
         let mut txn = storage.txn().await?;
-        txn.set_tag_color("work".into(), "#ff0000".into()).await?;
+        txn.set_tag_metadata("work".into(), r##"{"color":"#ff0000"}"##.into())
+            .await?;
         txn.commit().await?;
     }
     {
         let mut txn = storage.txn().await?;
-        txn.set_tag_color("work".into(), "#00ff00".into()).await?;
+        txn.set_tag_metadata("work".into(), r##"{"color":"#00ff00"}"##.into())
+            .await?;
         txn.commit().await?;
     }
     {
         let mut txn = storage.txn().await?;
         assert_eq!(
-            txn.get_tag_color("work".into()).await?,
-            Some("#00ff00".into())
+            txn.get_tag_metadata("work".into()).await?,
+            Some(r##"{"color":"#00ff00"}"##.into())
         );
     }
     Ok(())

@@ -157,20 +157,20 @@ impl<S: Storage> Replica<S> {
         Ok(res)
     }
 
-    /// Get the color for a tag by name.
+    /// Get the metadata JSON for a tag by name.
     ///
-    /// Returns `None` if no color has been set for this tag. When sync produces
+    /// Returns `None` if no metadata has been set for this tag. When sync produces
     /// duplicate rows, the latest row wins (LWW by `created_at`).
-    pub async fn get_tag_color(&mut self, name: String) -> Result<Option<String>> {
-        self.taskdb.get_tag_color(name).await
+    pub async fn get_tag_metadata(&mut self, name: String) -> Result<Option<String>> {
+        self.taskdb.get_tag_metadata(name).await
     }
 
-    /// Set the color for a tag by name.
+    /// Set the metadata JSON for a tag by name.
     ///
-    /// If a color already exists for this tag, it is updated. Otherwise a new
-    /// row is inserted with a v7 UUID.
-    pub async fn set_tag_color(&mut self, name: String, color: String) -> Result<()> {
-        self.taskdb.set_tag_color(name, color).await
+    /// If metadata already exists for this tag, it is updated. Otherwise a new
+    /// row is inserted with a v7 UUID. The `data` parameter is an opaque JSON string.
+    pub async fn set_tag_metadata(&mut self, name: String, data: String) -> Result<()> {
+        self.taskdb.set_tag_metadata(name, data).await
     }
 
     /// Get all unique tag names across all tasks, sorted alphabetically.

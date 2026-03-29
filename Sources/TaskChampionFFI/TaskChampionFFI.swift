@@ -573,11 +573,13 @@ public protocol FfiSessionProtocol: AnyObject, Sendable {
     func getAllTags() async throws  -> [String]
     
     /**
-     * Get the color associated with a tag name.
+     * Get the metadata for a tag by name.
      *
-     * Returns an empty string if no color has been set for this tag.
+     * Returns a typed record with color, is_status, and icon fields.
+     * All fields default to empty/false/None if no metadata exists or
+     * if the stored JSON is missing fields.
      */
-    func getTagColor(name: String) async throws  -> String
+    func getTagMetadata(name: String) async throws  -> FfiTagMetadata
     
     /**
      * Fetch a single task by UUID. Returns `None` if not found.
@@ -590,11 +592,19 @@ public protocol FfiSessionProtocol: AnyObject, Sendable {
     func pendingTasks() async throws  -> [FfiTask]
     
     /**
-     * Set the color for a tag name.
-     *
-     * If a color already exists for this tag, it is updated.
+     * Set the color for a tag. Reads existing metadata, patches color, writes back.
      */
     func setTagColor(name: String, color: String) async throws 
+    
+    /**
+     * Set the icon for a tag. Pass `None` to clear. Reads existing metadata, patches icon, writes back.
+     */
+    func setTagIcon(name: String, icon: Int64?) async throws 
+    
+    /**
+     * Set whether a tag is a status tag. Reads existing metadata, patches is_status, writes back.
+     */
+    func setTagIsStatus(name: String, value: Bool) async throws 
     
     /**
      * Return the task tree as a flat list of [`FfiTreeNode`]s.
@@ -777,15 +787,17 @@ open func getAllTags()async throws  -> [String]  {
 }
     
     /**
-     * Get the color associated with a tag name.
+     * Get the metadata for a tag by name.
      *
-     * Returns an empty string if no color has been set for this tag.
+     * Returns a typed record with color, is_status, and icon fields.
+     * All fields default to empty/false/None if no metadata exists or
+     * if the stored JSON is missing fields.
      */
-open func getTagColor(name: String)async throws  -> String  {
+open func getTagMetadata(name: String)async throws  -> FfiTagMetadata  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_taskchampion_ffi_fn_method_ffisession_get_tag_color(
+                uniffi_taskchampion_ffi_fn_method_ffisession_get_tag_metadata(
                     self.uniffiCloneHandle(),
                     FfiConverterString.lower(name)
                 )
@@ -793,7 +805,7 @@ open func getTagColor(name: String)async throws  -> String  {
             pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
             completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterString.lift,
+            liftFunc: FfiConverterTypeFfiTagMetadata_lift,
             errorHandler: FfiConverterTypeFfiError_lift
         )
 }
@@ -839,9 +851,7 @@ open func pendingTasks()async throws  -> [FfiTask]  {
 }
     
     /**
-     * Set the color for a tag name.
-     *
-     * If a color already exists for this tag, it is updated.
+     * Set the color for a tag. Reads existing metadata, patches color, writes back.
      */
 open func setTagColor(name: String, color: String)async throws   {
     return
@@ -850,6 +860,46 @@ open func setTagColor(name: String, color: String)async throws   {
                 uniffi_taskchampion_ffi_fn_method_ffisession_set_tag_color(
                     self.uniffiCloneHandle(),
                     FfiConverterString.lower(name),FfiConverterString.lower(color)
+                )
+            },
+            pollFunc: ffi_taskchampion_ffi_rust_future_poll_void,
+            completeFunc: ffi_taskchampion_ffi_rust_future_complete_void,
+            freeFunc: ffi_taskchampion_ffi_rust_future_free_void,
+            liftFunc: { $0 },
+            errorHandler: FfiConverterTypeFfiError_lift
+        )
+}
+    
+    /**
+     * Set the icon for a tag. Pass `None` to clear. Reads existing metadata, patches icon, writes back.
+     */
+open func setTagIcon(name: String, icon: Int64?)async throws   {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_taskchampion_ffi_fn_method_ffisession_set_tag_icon(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(name),FfiConverterOptionInt64.lower(icon)
+                )
+            },
+            pollFunc: ffi_taskchampion_ffi_rust_future_poll_void,
+            completeFunc: ffi_taskchampion_ffi_rust_future_complete_void,
+            freeFunc: ffi_taskchampion_ffi_rust_future_free_void,
+            liftFunc: { $0 },
+            errorHandler: FfiConverterTypeFfiError_lift
+        )
+}
+    
+    /**
+     * Set whether a tag is a status tag. Reads existing metadata, patches is_status, writes back.
+     */
+open func setTagIsStatus(name: String, value: Bool)async throws   {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_taskchampion_ffi_fn_method_ffisession_set_tag_is_status(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(name),FfiConverterBool.lower(value)
                 )
             },
             pollFunc: ffi_taskchampion_ffi_rust_future_poll_void,
@@ -1610,6 +1660,85 @@ public func FfiConverterTypeFfiSqlStatement_lift(_ buf: RustBuffer) throws -> Ff
 #endif
 public func FfiConverterTypeFfiSqlStatement_lower(_ value: FfiSqlStatement) -> RustBuffer {
     return FfiConverterTypeFfiSqlStatement.lower(value)
+}
+
+
+/**
+ * Tag metadata — typed view of the `tc_tag_metadata.data` JSONB column.
+ */
+public struct FfiTagMetadata: Equatable, Hashable {
+    /**
+     * Hex color string (e.g. "#ff0000"), or empty if not set.
+     */
+    public var color: String
+    /**
+     * Whether this tag represents a status category.
+     */
+    public var isStatus: Bool
+    /**
+     * Icon identifier, or `None` if not set.
+     */
+    public var icon: Int64?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Hex color string (e.g. "#ff0000"), or empty if not set.
+         */color: String, 
+        /**
+         * Whether this tag represents a status category.
+         */isStatus: Bool, 
+        /**
+         * Icon identifier, or `None` if not set.
+         */icon: Int64?) {
+        self.color = color
+        self.isStatus = isStatus
+        self.icon = icon
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension FfiTagMetadata: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiTagMetadata: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiTagMetadata {
+        return
+            try FfiTagMetadata(
+                color: FfiConverterString.read(from: &buf), 
+                isStatus: FfiConverterBool.read(from: &buf), 
+                icon: FfiConverterOptionInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FfiTagMetadata, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.color, into: &buf)
+        FfiConverterBool.write(value.isStatus, into: &buf)
+        FfiConverterOptionInt64.write(value.icon, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiTagMetadata_lift(_ buf: RustBuffer) throws -> FfiTagMetadata {
+    return try FfiConverterTypeFfiTagMetadata.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiTagMetadata_lower(_ value: FfiTagMetadata) -> RustBuffer {
+    return FfiConverterTypeFfiTagMetadata.lower(value)
 }
 
 
@@ -3192,14 +3321,14 @@ public func allTaskTablesSql() -> String  {
 })
 }
 /**
- * SQL that covers the tag colors table.
+ * SQL that covers the tag metadata table.
  *
  * Pass this to `db.watch()` so PowerSync re-runs your query whenever a
- * `tc_tag_colors` row changes (e.g. color set on another device via sync).
+ * `tc_tag_metadata` row changes (e.g. metadata set on another device via sync).
  */
-public func tagColorTablesSql() -> String  {
+public func tagMetadataTablesSql() -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_taskchampion_ffi_fn_func_tagcolortablessql($0
+    uniffi_taskchampion_ffi_fn_func_tagmetadatatablessql($0
     )
 })
 }
@@ -3222,7 +3351,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_taskchampion_ffi_checksum_func_alltasktablessql() != 45498) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_func_tagcolortablessql() != 36535) {
+    if (uniffi_taskchampion_ffi_checksum_func_tagmetadatatablessql() != 42248) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_all_tasks() != 57965) {
@@ -3237,7 +3366,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_get_all_tags() != 42592) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_method_ffisession_get_tag_color() != 38804) {
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_get_tag_metadata() != 48489) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_get_task() != 45469) {
@@ -3246,7 +3375,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_pending_tasks() != 10449) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_method_ffisession_set_tag_color() != 50403) {
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_set_tag_color() != 15733) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_set_tag_icon() != 12878) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_set_tag_is_status() != 21996) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_tree_map() != 45281) {

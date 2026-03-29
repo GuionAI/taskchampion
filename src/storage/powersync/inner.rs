@@ -13,8 +13,8 @@ use super::row_reader::{query_task_rows, read_raw_task_row};
 use crate::storage::columns::{raw_to_task, TASK_SELECT_COLS};
 use crate::storage::sql_ops::{
     add_operation_stmt, create_task_stmt, delete_task_stmts, prepare_task, remove_operation_stmt,
-    set_tag_color_stmt, set_task_stmts, SqlStatement, ALL_OPERATIONS_SQL, ALL_TAGS_SQL,
-    ALL_TASK_UUIDS_SQL, LAST_OPERATION_SQL, TAG_COLOR_READ_SQL, TASK_EXISTS_SQL,
+    set_tag_metadata_stmt, set_task_stmts, SqlStatement, ALL_OPERATIONS_SQL, ALL_TAGS_SQL,
+    ALL_TASK_UUIDS_SQL, LAST_OPERATION_SQL, TAG_METADATA_READ_SQL, TASK_EXISTS_SQL,
 };
 
 /// Execute a SqlStatement against a rusqlite Transaction.
@@ -113,10 +113,10 @@ impl PowerSyncStorageInner {
                 name TEXT,
                 created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
             );
-            CREATE TABLE IF NOT EXISTS tc_tag_colors (
+            CREATE TABLE IF NOT EXISTS tc_tag_metadata (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
-                color TEXT NOT NULL,
+                data TEXT NOT NULL DEFAULT '{}',
                 created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
             );
         ",
@@ -375,22 +375,26 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
         Ok(())
     }
 
-    async fn get_tag_color(&mut self, name: String) -> Result<Option<String>> {
+    async fn get_tag_metadata(&mut self, name: String) -> Result<Option<String>> {
         let t = self.get_txn()?;
-        let color = t
-            .query_row(TAG_COLOR_READ_SQL, [&name], |row| row.get::<_, String>(1))
+        let data = t
+            .query_row(TAG_METADATA_READ_SQL, [&name], |row| {
+                row.get::<_, String>(1)
+            })
             .optional()
-            .context("Get tag color")?;
-        Ok(color)
+            .context("Get tag metadata")?;
+        Ok(data)
     }
 
-    async fn set_tag_color(&mut self, name: String, color: String) -> Result<()> {
+    async fn set_tag_metadata(&mut self, name: String, data: String) -> Result<()> {
         let t = self.get_txn()?;
         let existing_id: Option<String> = t
-            .query_row(TAG_COLOR_READ_SQL, [&name], |row| row.get::<_, String>(0))
+            .query_row(TAG_METADATA_READ_SQL, [&name], |row| {
+                row.get::<_, String>(0)
+            })
             .optional()
-            .context("Check existing tag color")?;
-        let stmt = set_tag_color_stmt(&name, &color, existing_id.as_deref());
+            .context("Check existing tag metadata")?;
+        let stmt = set_tag_metadata_stmt(&name, &data, existing_id.as_deref());
         execute_sql_stmt(t, &stmt)?;
         Ok(())
     }

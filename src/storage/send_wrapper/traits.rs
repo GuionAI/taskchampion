@@ -18,8 +18,8 @@ pub(in crate::storage) trait WrappedStorageTxn {
     async fn all_operations(&mut self) -> Result<Vec<Operation>>;
     async fn add_operation(&mut self, op: Operation) -> Result<()>;
     async fn remove_operation(&mut self, op: Operation) -> Result<()>;
-    async fn get_tag_color(&mut self, name: String) -> Result<Option<String>>;
-    async fn set_tag_color(&mut self, name: String, color: String) -> Result<()>;
+    async fn get_tag_metadata(&mut self, name: String) -> Result<Option<String>>;
+    async fn set_tag_metadata(&mut self, name: String, data: String) -> Result<()>;
     async fn get_all_tags(&mut self) -> Result<Vec<String>>;
     #[allow(clippy::wrong_self_convention)] // mut is required here for storage access
     async fn is_empty(&mut self) -> Result<bool> {

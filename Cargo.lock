@@ -1183,6 +1183,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "rusqlite",
+ "serde",
  "serde_json",
  "taskchampion",
  "tokio",

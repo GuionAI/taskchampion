@@ -402,37 +402,39 @@ mod test {
     }
 
     /// Verify last-write-wins: when sync produces duplicate rows for the same
-    /// tag name, get_tag_color returns the color from the row with the latest
-    /// created_at timestamp.
+    /// tag name, get_tag_metadata returns the data from the row with the latest
+    /// created_at timestamp (whole-row LWW, not per-field merge).
     #[tokio::test]
-    async fn test_tag_color_lww() -> Result<()> {
+    async fn test_tag_metadata_lww() -> Result<()> {
         let mut storage = PowerSyncStorageInner::new_for_test()?;
 
+        // Older row: has color + is_status + icon.
         storage.conn.execute(
-            "INSERT INTO tc_tag_colors (id, name, color, created_at) VALUES (?, ?, ?, ?)",
+            "INSERT INTO tc_tag_metadata (id, name, data, created_at) VALUES (?, ?, ?, ?)",
             rusqlite::params![
                 Uuid::new_v4().to_string(),
                 "work",
-                "#ff0000",
+                r##"{"color":"#ff0000","is_status":true,"icon":7}"##,
                 "2026-03-25 12:00:00.000"
             ],
         )?;
+        // Newer row: only color (is_status/icon absent).
         storage.conn.execute(
-            "INSERT INTO tc_tag_colors (id, name, color, created_at) VALUES (?, ?, ?, ?)",
+            "INSERT INTO tc_tag_metadata (id, name, data, created_at) VALUES (?, ?, ?, ?)",
             rusqlite::params![
                 Uuid::new_v4().to_string(),
                 "work",
-                "#00ff00",
+                r##"{"color":"#00ff00"}"##,
                 "2026-03-26 12:00:00.000"
             ],
         )?;
 
         let mut txn = storage.txn().await?;
-        let color = txn.get_tag_color("work".into()).await?;
+        let data = txn.get_tag_metadata("work".into()).await?;
         assert_eq!(
-            color,
-            Some("#00ff00".into()),
-            "should return latest row's color (most recent created_at)"
+            data,
+            Some(r##"{"color":"#00ff00"}"##.into()),
+            "should return latest row's data (whole-row LWW, not per-field merge)"
         );
         txn.commit().await?;
         Ok(())

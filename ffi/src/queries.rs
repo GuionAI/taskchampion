@@ -18,11 +18,11 @@ pub fn all_task_tables_sql() -> String {
         .to_string()
 }
 
-/// SQL that covers the tag colors table.
+/// SQL that covers the tag metadata table.
 ///
 /// Pass this to `db.watch()` so PowerSync re-runs your query whenever a
-/// `tc_tag_colors` row changes (e.g. color set on another device via sync).
-#[uniffi::export(name = "tagColorTablesSql")]
-pub fn tag_color_tables_sql() -> String {
-    "SELECT id, name, color FROM tc_tag_colors".to_string()
+/// `tc_tag_metadata` row changes (e.g. metadata set on another device via sync).
+#[uniffi::export(name = "tagMetadataTablesSql")]
+pub fn tag_metadata_tables_sql() -> String {
+    "SELECT id, name, data FROM tc_tag_metadata".to_string()
 }

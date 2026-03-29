@@ -43,9 +43,9 @@ impl MockFfiSqlExecutor {
                 id TEXT PRIMARY KEY, name TEXT,
                 created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
             );
-            CREATE TABLE IF NOT EXISTS tc_tag_colors (
+            CREATE TABLE IF NOT EXISTS tc_tag_metadata (
                 id TEXT PRIMARY KEY, name TEXT NOT NULL,
-                color TEXT NOT NULL,
+                data TEXT NOT NULL DEFAULT '{}',
                 created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
             );",
         )
@@ -75,6 +75,16 @@ impl MockFfiSqlExecutor {
             values.push(val);
         }
         Ok(FfiSqlRow { columns, values })
+    }
+
+    /// Inject a raw row into tc_tag_metadata for testing (e.g. malformed JSON).
+    fn inject_raw_tag_metadata(&self, name: &str, data: &str) {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO tc_tag_metadata (id, name, data) VALUES (?, ?, ?)",
+            rusqlite::params![Uuid::new_v4().to_string(), name, data],
+        )
+        .expect("inject_raw_tag_metadata");
     }
 
     /// Convert FfiSqlParam to a rusqlite-compatible value.
@@ -165,6 +175,13 @@ impl FfiSqlExecutor for MockFfiSqlExecutor {
 fn make_session() -> Arc<FfiSession> {
     let executor: Arc<dyn FfiSqlExecutor> = Arc::new(MockFfiSqlExecutor::new());
     FfiSession::new(executor)
+}
+
+/// Returns both the session and the underlying executor so tests can inject raw rows.
+fn make_session_with_executor() -> (Arc<FfiSession>, Arc<MockFfiSqlExecutor>) {
+    let mock = Arc::new(MockFfiSqlExecutor::new());
+    let session = FfiSession::new(mock.clone() as Arc<dyn FfiSqlExecutor>);
+    (session, mock)
 }
 
 // ---------------------------------------------------------------------------
@@ -558,20 +575,158 @@ async fn test_position_numeric_string_round_trip() {
 }
 
 #[tokio::test]
-async fn test_get_tag_color_returns_empty_string() {
+async fn test_get_tag_metadata_returns_defaults_when_unset() {
     let session = make_session();
 
-    // No color set — FFI returns empty string.
-    let color = session.get_tag_color("work".into()).await.unwrap();
-    assert_eq!(color, "");
+    let meta = session.get_tag_metadata("work".into()).await.unwrap();
+    assert_eq!(meta.color, "");
+    assert!(!meta.is_status);
+    assert_eq!(meta.icon, None);
+}
 
-    // Set and read back.
+#[tokio::test]
+async fn test_set_tag_color_round_trip() {
+    let session = make_session();
+
     session
         .set_tag_color("work".into(), "#ff0000".into())
         .await
         .unwrap();
-    let color = session.get_tag_color("work".into()).await.unwrap();
-    assert_eq!(color, "#ff0000");
+
+    let meta = session.get_tag_metadata("work".into()).await.unwrap();
+    assert_eq!(meta.color, "#ff0000");
+    assert!(!meta.is_status, "other fields should remain default");
+    assert_eq!(meta.icon, None);
+}
+
+#[tokio::test]
+async fn test_set_tag_is_status_round_trip() {
+    let session = make_session();
+
+    session
+        .set_tag_is_status("next".into(), true)
+        .await
+        .unwrap();
+
+    let meta = session.get_tag_metadata("next".into()).await.unwrap();
+    assert!(meta.is_status);
+    assert_eq!(meta.color, "", "other fields should remain default");
+}
+
+#[tokio::test]
+async fn test_set_tag_icon_round_trip() {
+    let session = make_session();
+
+    session.set_tag_icon("home".into(), Some(42)).await.unwrap();
+
+    let meta = session.get_tag_metadata("home".into()).await.unwrap();
+    assert_eq!(meta.icon, Some(42));
+    assert_eq!(meta.color, "");
+}
+
+#[tokio::test]
+async fn test_granular_mutations_preserve_other_fields() {
+    let session = make_session();
+
+    // Set all three fields on one tag.
+    session
+        .set_tag_color("work".into(), "#ff0000".into())
+        .await
+        .unwrap();
+    session
+        .set_tag_is_status("work".into(), true)
+        .await
+        .unwrap();
+    session.set_tag_icon("work".into(), Some(7)).await.unwrap();
+
+    // Verify all fields survived.
+    let meta = session.get_tag_metadata("work".into()).await.unwrap();
+    assert_eq!(meta.color, "#ff0000");
+    assert!(meta.is_status);
+    assert_eq!(meta.icon, Some(7));
+
+    // Update only color — other fields must survive.
+    session
+        .set_tag_color("work".into(), "#00ff00".into())
+        .await
+        .unwrap();
+
+    let meta = session.get_tag_metadata("work".into()).await.unwrap();
+    assert_eq!(meta.color, "#00ff00");
+    assert!(meta.is_status, "is_status must survive color update");
+    assert_eq!(meta.icon, Some(7), "icon must survive color update");
+}
+
+#[tokio::test]
+async fn test_set_tag_icon_clear() {
+    let session = make_session();
+
+    session.set_tag_icon("work".into(), Some(42)).await.unwrap();
+    session
+        .set_tag_is_status("work".into(), true)
+        .await
+        .unwrap();
+
+    // Clear icon — other fields must survive.
+    session.set_tag_icon("work".into(), None).await.unwrap();
+
+    let meta = session.get_tag_metadata("work".into()).await.unwrap();
+    assert_eq!(meta.icon, None, "icon should be cleared");
+    assert!(meta.is_status, "is_status must survive icon clear");
+}
+
+#[test]
+fn test_tag_metadata_tables_sql_references_correct_table() {
+    let sql = taskchampion_ffi::queries::tag_metadata_tables_sql();
+    assert!(
+        sql.contains("tc_tag_metadata"),
+        "watch SQL must reference tc_tag_metadata, got: {sql}"
+    );
+    assert!(
+        sql.contains("data"),
+        "watch SQL must select data column, got: {sql}"
+    );
+}
+
+#[tokio::test]
+async fn test_get_tag_metadata_malformed_json_falls_back_to_defaults() {
+    let (session, mock) = make_session_with_executor();
+    // Inject a malformed row directly — simulates corrupted sync data.
+    mock.inject_raw_tag_metadata("broken", "NOT VALID JSON");
+
+    let meta = session.get_tag_metadata("broken".into()).await.unwrap();
+    assert_eq!(
+        meta.color, "",
+        "malformed JSON should fall back to empty color"
+    );
+    assert!(!meta.is_status, "malformed JSON should fall back to false");
+    assert_eq!(meta.icon, None, "malformed JSON should fall back to None");
+}
+
+#[tokio::test]
+async fn test_set_tag_color_with_malformed_json_returns_error() {
+    let (session, mock) = make_session_with_executor();
+    // Inject a malformed row — setter must error, not silently overwrite.
+    mock.inject_raw_tag_metadata("broken", "NOT VALID JSON");
+
+    let result = session
+        .set_tag_color("broken".into(), "#ff0000".into())
+        .await;
+    assert!(
+        result.is_err(),
+        "setter against corrupt metadata must return an error, not silently overwrite"
+    );
+}
+
+#[tokio::test]
+async fn test_set_tag_icon_zero_round_trip() {
+    let session = make_session();
+
+    // Some(0) is a valid icon — must not be confused with None.
+    session.set_tag_icon("work".into(), Some(0)).await.unwrap();
+
+    let meta = session.get_tag_metadata("work".into()).await.unwrap();
+    assert_eq!(meta.icon, Some(0), "icon=0 must round-trip correctly");
 }
 
 #[tokio::test]

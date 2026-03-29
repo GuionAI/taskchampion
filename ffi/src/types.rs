@@ -189,6 +189,39 @@ pub enum TaskMutation {
     },
 }
 
+/// Tag metadata — typed view of the `tc_tag_metadata.data` JSONB column.
+#[derive(uniffi::Record)]
+pub struct FfiTagMetadata {
+    /// Hex color string (e.g. "#ff0000"), or empty if not set.
+    pub color: String,
+    /// Whether this tag represents a status category.
+    pub is_status: bool,
+    /// Icon identifier, or `None` if not set.
+    pub icon: Option<i64>,
+}
+
+/// Internal serde helper — deserializes the JSONB `data` column.
+/// Fields use Option so missing keys deserialize as None/false/empty.
+#[derive(serde::Deserialize, serde::Serialize, Default)]
+pub(crate) struct TagMetadataJson {
+    #[serde(default)]
+    pub color: String,
+    #[serde(default)]
+    pub is_status: bool,
+    #[serde(default)]
+    pub icon: Option<i64>,
+}
+
+impl From<TagMetadataJson> for FfiTagMetadata {
+    fn from(j: TagMetadataJson) -> Self {
+        Self {
+            color: j.color,
+            is_status: j.is_status,
+            icon: j.icon,
+        }
+    }
+}
+
 /// Error type returned by all FFI functions.
 ///
 /// Variants are designed for programmatic matching on the Swift/Kotlin side.
