@@ -593,16 +593,28 @@ public protocol FfiSessionProtocol: AnyObject, Sendable {
     
     /**
      * Set the color for a tag. Reads existing metadata, patches color, writes back.
+     *
+     * Note: concurrent calls to any setter for the same tag interleave at the
+     * whole-metadata level (last-write-wins). Set all fields in a single call
+     * sequence, not in parallel, if consistency matters.
      */
     func setTagColor(name: String, color: String) async throws 
     
     /**
      * Set the icon for a tag. Pass `None` to clear. Reads existing metadata, patches icon, writes back.
+     *
+     * Note: concurrent calls to any setter for the same tag interleave at the
+     * whole-metadata level (last-write-wins). Set all fields in a single call
+     * sequence, not in parallel, if consistency matters.
      */
     func setTagIcon(name: String, icon: Int64?) async throws 
     
     /**
      * Set whether a tag is a status tag. Reads existing metadata, patches is_status, writes back.
+     *
+     * Note: concurrent calls to any setter for the same tag interleave at the
+     * whole-metadata level (last-write-wins). Set all fields in a single call
+     * sequence, not in parallel, if consistency matters.
      */
     func setTagIsStatus(name: String, value: Bool) async throws 
     
@@ -852,6 +864,10 @@ open func pendingTasks()async throws  -> [FfiTask]  {
     
     /**
      * Set the color for a tag. Reads existing metadata, patches color, writes back.
+     *
+     * Note: concurrent calls to any setter for the same tag interleave at the
+     * whole-metadata level (last-write-wins). Set all fields in a single call
+     * sequence, not in parallel, if consistency matters.
      */
 open func setTagColor(name: String, color: String)async throws   {
     return
@@ -872,6 +888,10 @@ open func setTagColor(name: String, color: String)async throws   {
     
     /**
      * Set the icon for a tag. Pass `None` to clear. Reads existing metadata, patches icon, writes back.
+     *
+     * Note: concurrent calls to any setter for the same tag interleave at the
+     * whole-metadata level (last-write-wins). Set all fields in a single call
+     * sequence, not in parallel, if consistency matters.
      */
 open func setTagIcon(name: String, icon: Int64?)async throws   {
     return
@@ -892,6 +912,10 @@ open func setTagIcon(name: String, icon: Int64?)async throws   {
     
     /**
      * Set whether a tag is a status tag. Reads existing metadata, patches is_status, writes back.
+     *
+     * Note: concurrent calls to any setter for the same tag interleave at the
+     * whole-metadata level (last-write-wins). Set all fields in a single call
+     * sequence, not in parallel, if consistency matters.
      */
 open func setTagIsStatus(name: String, value: Bool)async throws   {
     return
@@ -3375,13 +3399,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_pending_tasks() != 10449) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_method_ffisession_set_tag_color() != 15733) {
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_set_tag_color() != 9789) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_method_ffisession_set_tag_icon() != 12878) {
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_set_tag_icon() != 6198) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_method_ffisession_set_tag_is_status() != 21996) {
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_set_tag_is_status() != 35084) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_tree_map() != 45281) {
