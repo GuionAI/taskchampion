@@ -1,5 +1,14 @@
+//! FFI type definitions for the TaskChampion UniFFI bridge.
+//!
+//! ## Naming Convention
+//!
+//! All public types use an `Ffi` prefix (e.g. `FfiTask`, `FfiStatus`) because
+//! UniFFI 0.31 does not support `#[uniffi(name = "...")]` on derive macros.
+//! Once upstream adds this (<https://github.com/mozilla/uniffi-rs/issues/2507>),
+//! rename to `TC` prefix (`TCTask`, `TCStatus`, etc.) and add
+//! `#[uniffi(name = "TC*")]` attributes.
+
 /// Task status, mirroring `taskchampion::Status`.
-// TODO: rename to TCStatus when UniFFI supports #[uniffi(name)] on derive macros
 #[derive(uniffi::Enum)]
 pub enum FfiStatus {
     Pending,
@@ -10,7 +19,6 @@ pub enum FfiStatus {
 }
 
 /// A single task annotation.
-// TODO: rename to TCAnnotation when UniFFI supports #[uniffi(name)] on derive macros
 #[derive(uniffi::Record)]
 pub struct FfiAnnotation {
     /// Unix epoch seconds.
@@ -19,7 +27,6 @@ pub struct FfiAnnotation {
 }
 
 /// Flat representation of a task suitable for FFI transfer.
-// TODO: rename to TCTask when UniFFI supports #[uniffi(name)] on derive macros
 #[derive(uniffi::Record)]
 pub struct FfiTask {
     pub uuid: String,
@@ -31,6 +38,10 @@ pub struct FfiTask {
     pub modified: Option<i64>,
     pub due: Option<i64>,
     pub wait: Option<i64>,
+    /// Scheduled date as Unix epoch seconds, or `None` if not set.
+    pub scheduled: Option<i64>,
+    /// Start time (active tracking) as Unix epoch seconds, or `None`.
+    pub start: Option<i64>,
     /// Parent task UUID as a string, or `None`.
     pub parent: Option<String>,
     pub position: Option<String>,
@@ -43,10 +54,25 @@ pub struct FfiTask {
     pub is_active: bool,
     pub is_blocked: bool,
     pub is_blocking: bool,
+    /// FlickNote: whether this is a full-day task. Derived from UDA `is_full_day`.
+    pub is_full_day: bool,
+    /// FlickNote: time estimate in 15-minute boxes. Derived from UDA `estimate`.
+    /// `None` if not set or not a valid u32.
+    pub estimate: Option<u32>,
+    /// User-defined attributes not covered by dedicated fields.
+    ///
+    /// Keys are the raw TaskMap keys (e.g. `"custom_field"`).
+    /// Values are the raw string values from the TaskMap.
+    /// Empty if the task has no UDAs.
+    ///
+    /// Note: `"scheduled"` is excluded here even though it's a UDA in core,
+    /// because it has a dedicated `scheduled` timestamp field above.
+    /// `"is_full_day"` and `"estimate"` are also excluded since they have
+    /// typed accessors above.
+    pub remaining_data: std::collections::HashMap<String, String>,
 }
 
 /// A node in the task tree (parent/child hierarchy).
-// TODO: rename to TCTreeNode when UniFFI supports #[uniffi(name)] on derive macros
 #[derive(uniffi::Record)]
 pub struct FfiTreeNode {
     pub uuid: String,
@@ -62,7 +88,6 @@ pub struct FfiTreeNode {
 }
 
 /// A dependency edge: `from_uuid` depends on `to_uuid`.
-// TODO: rename to TCDependencyEdge when UniFFI supports #[uniffi(name)] on derive macros
 #[derive(uniffi::Record)]
 pub struct FfiDependencyEdge {
     /// The task that has the dependency.
@@ -75,7 +100,6 @@ pub struct FfiDependencyEdge {
 ///
 /// Pass a `Vec<TaskMutation>` to `mutate_task` — all mutations are applied in
 /// a single transaction with one undo point.
-// TODO: rename to TCMutation when UniFFI supports #[uniffi(name)] on derive macros
 #[derive(uniffi::Enum)]
 pub enum TaskMutation {
     SetDescription {
@@ -130,6 +154,39 @@ pub enum TaskMutation {
     Stop,
     /// Soft-delete: sets status to `Deleted`.
     Delete,
+    /// Set the scheduled date. `None` clears the field.
+    SetScheduled {
+        epoch: Option<i64>,
+    },
+    /// Set the start time to a specific epoch. `None` clears the field.
+    ///
+    /// Unlike `Start` (which sets to now) and `Stop` (which clears),
+    /// this variant accepts an arbitrary timestamp.
+    SetStart {
+        epoch: Option<i64>,
+    },
+    /// Set FlickNote is_full_day flag.
+    ///
+    /// Stored as `"true"` in TaskMap when `true`, removed when `false`.
+    SetIsFullDay {
+        value: bool,
+    },
+    /// Set FlickNote time estimate (count of 15-minute boxes, must be >0).
+    ///
+    /// Stored as a decimal string in TaskMap (e.g. `"2"` = 30 minutes).
+    /// Pass `None` to clear.
+    SetEstimate {
+        boxes: Option<u32>,
+    },
+    /// Generic escape hatch for setting arbitrary UDA values.
+    ///
+    /// `key` is the raw TaskMap key. `value` is `None` to remove.
+    /// Returns `InvalidInput` if `key` is a known TaskChampion property
+    /// (use the dedicated variant instead).
+    SetValue {
+        key: String,
+        value: Option<String>,
+    },
 }
 
 /// Error type returned by all FFI functions.
@@ -137,7 +194,6 @@ pub enum TaskMutation {
 /// Variants are designed for programmatic matching on the Swift/Kotlin side.
 /// Each carries enough context for the host to decide on UX (retry, show
 /// message, refresh cache, etc.) without parsing strings.
-// TODO: rename to TCError when UniFFI supports #[uniffi(name)] on derive macros
 #[derive(Debug, uniffi::Error)]
 pub enum FfiError {
     /// The referenced task does not exist.
@@ -169,7 +225,6 @@ impl std::error::Error for FfiError {}
 // ── External Storage FFI types ───────────────────────────────────────
 
 /// SQL parameter for external storage queries.
-// TODO: rename to TCSqlParam when UniFFI supports #[uniffi(name)] on derive macros
 #[derive(uniffi::Enum, Clone)]
 pub enum FfiSqlParam {
     Text { value: String },
@@ -177,7 +232,6 @@ pub enum FfiSqlParam {
 }
 
 /// A single SQL statement with parameters, for batched execution.
-// TODO: rename to TCSqlStatement when UniFFI supports #[uniffi(name)] on derive macros
 #[derive(uniffi::Record, Clone)]
 pub struct FfiSqlStatement {
     pub sql: String,
@@ -188,7 +242,6 @@ pub struct FfiSqlStatement {
 ///
 /// Maps to SQLite's native storage classes. The host (Swift/Kotlin)
 /// populates these using typed cursor accessors — no string coercion needed.
-// TODO: rename to TCSqlValue when UniFFI supports #[uniffi(name)] on derive macros
 #[derive(uniffi::Enum, Clone, Debug, PartialEq)]
 pub enum FfiSqlValue {
     /// Text (SQLite TEXT).
@@ -205,7 +258,6 @@ pub enum FfiSqlValue {
 ///
 /// Column names and values are parallel arrays — `values[i]` corresponds
 /// to `columns[i]`.
-// TODO: rename to TCSqlRow when UniFFI supports #[uniffi(name)] on derive macros
 #[derive(uniffi::Record, Clone)]
 pub struct FfiSqlRow {
     /// Column names in SELECT order.
@@ -219,7 +271,6 @@ pub struct FfiSqlRow {
 /// The host (Swift/Kotlin) implements this trait with native async/await.
 /// TaskChampion calls these methods to read/write task data through the
 /// host's database connection.
-// TODO: rename to TCStorageExecutor when UniFFI supports name attr on callback interfaces
 #[uniffi::export(with_foreign)]
 #[async_trait::async_trait]
 pub trait FfiSqlExecutor: Send + Sync {

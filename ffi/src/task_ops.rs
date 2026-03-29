@@ -144,6 +144,68 @@ fn apply_mutation(
             task.set_status(Status::Deleted, ops)
                 .map_err(FfiError::from)?;
         }
+        TaskMutation::SetScheduled { epoch } => {
+            let value = epoch.map(|e| e.to_string());
+            task.set_value("scheduled", value, ops)
+                .map_err(FfiError::from)?;
+        }
+        TaskMutation::SetStart { epoch } => {
+            let value = epoch.map(|e| e.to_string());
+            task.set_value("start", value, ops)
+                .map_err(FfiError::from)?;
+        }
+        TaskMutation::SetIsFullDay { value } => {
+            let v = if value {
+                Some("true".to_string())
+            } else {
+                None
+            };
+            task.set_value("is_full_day", v, ops)
+                .map_err(FfiError::from)?;
+        }
+        TaskMutation::SetEstimate { boxes } => {
+            if let Some(b) = boxes {
+                if b == 0 {
+                    return Err(FfiError::InvalidInput {
+                        message: "estimate must be > 0".into(),
+                    });
+                }
+            }
+            task.set_value("estimate", boxes.map(|b| b.to_string()), ops)
+                .map_err(FfiError::from)?;
+        }
+        TaskMutation::SetValue { key, value } => {
+            // Guard: reject known TaskChampion keys — callers should use
+            // dedicated variants for those.
+            let known = [
+                "status",
+                "description",
+                "priority",
+                "due",
+                "wait",
+                "entry",
+                "end",
+                "modified",
+                "parent_id",
+                "position",
+                "start",
+                "scheduled",
+                "is_full_day",
+                "estimate",
+            ];
+            if known.contains(&key.as_str())
+                || key.starts_with("tag_")
+                || key.starts_with("annotation_")
+                || key.starts_with("dep_")
+            {
+                return Err(FfiError::InvalidInput {
+                    message: format!(
+                        "'{key}' is a known property — use the dedicated mutation variant"
+                    ),
+                });
+            }
+            task.set_value(key, value, ops).map_err(FfiError::from)?;
+        }
     }
     Ok(())
 }

@@ -22,6 +22,10 @@ impl From<&Task> for FfiTask {
             modified: task.get_modified().map(|ts| ts.timestamp()),
             due: task.get_due().map(|ts| ts.timestamp()),
             wait: task.get_wait().map(|ts| ts.timestamp()),
+            scheduled: task
+                .get_value("scheduled")
+                .and_then(|s| s.parse::<i64>().ok()),
+            start: task.get_timestamp("start").map(|ts| ts.timestamp()),
             parent: task.get_parent().map(|u| u.to_string()),
             position: task.get_position().map(|s| s.to_string()),
             tags: task
@@ -41,6 +45,21 @@ impl From<&Task> for FfiTask {
             is_active: task.is_active(),
             is_blocked: task.is_blocked(),
             is_blocking: task.is_blocking(),
+            is_full_day: task.get_value("is_full_day") == Some("true"),
+            estimate: task
+                .get_value("estimate")
+                .and_then(|v| v.parse::<u32>().ok()),
+            remaining_data: {
+                // Exclude the 3 dedicated FlickNote/custom fields from remaining_data
+                // since they have typed accessors above.
+                // Note: "scheduled" is not in TC's Prop enum, so it appears as a
+                // UDA — exclude it too since it has a dedicated timestamp field.
+                let dedicated = ["is_full_day", "estimate", "scheduled"];
+                task.get_user_defined_attributes()
+                    .filter(|(k, _)| !dedicated.contains(k))
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect()
+            },
         }
     }
 }
