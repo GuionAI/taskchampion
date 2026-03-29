@@ -573,3 +573,264 @@ async fn test_get_tag_color_returns_empty_string() {
     let color = session.get_tag_color("work".into()).await.unwrap();
     assert_eq!(color, "#ff0000");
 }
+
+#[tokio::test]
+async fn test_scheduled_round_trip() {
+    let session = make_session();
+    let uuid = Uuid::new_v4().to_string();
+    let epoch: i64 = 1_700_000_000;
+
+    session
+        .create_task(uuid.clone(), "Scheduled test".into())
+        .await
+        .expect("create");
+
+    // Default: None
+    let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
+    assert_eq!(task.scheduled, None);
+
+    // Set scheduled
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetScheduled {
+                epoch: Some(epoch),
+            }],
+        )
+        .await
+        .expect("set scheduled");
+
+    let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
+    assert_eq!(task.scheduled, Some(epoch));
+    // "scheduled" should NOT appear in remaining_data
+    assert!(!task.remaining_data.contains_key("scheduled"));
+
+    // Clear scheduled
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetScheduled { epoch: None }],
+        )
+        .await
+        .expect("clear scheduled");
+
+    let task = session.get_task(uuid).await.unwrap().unwrap();
+    assert_eq!(task.scheduled, None);
+}
+
+#[tokio::test]
+async fn test_start_epoch_round_trip() {
+    let session = make_session();
+    let uuid = Uuid::new_v4().to_string();
+    let epoch: i64 = 1_700_000_000;
+
+    session
+        .create_task(uuid.clone(), "Start test".into())
+        .await
+        .expect("create");
+
+    // Default: None
+    let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
+    assert_eq!(task.start, None);
+
+    // Set start to specific epoch
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetStart {
+                epoch: Some(epoch),
+            }],
+        )
+        .await
+        .expect("set start");
+
+    let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
+    assert_eq!(task.start, Some(epoch));
+
+    // Clear via SetStart { epoch: None }
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetStart { epoch: None }],
+        )
+        .await
+        .expect("clear start");
+
+    let task = session.get_task(uuid).await.unwrap().unwrap();
+    assert_eq!(task.start, None);
+}
+
+#[tokio::test]
+async fn test_is_full_day_round_trip() {
+    let session = make_session();
+    let uuid = Uuid::new_v4().to_string();
+
+    session
+        .create_task(uuid.clone(), "Full day test".into())
+        .await
+        .expect("create");
+
+    // Default: false
+    let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
+    assert!(!task.is_full_day, "default should be false");
+
+    // Set full day
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetIsFullDay { value: true }],
+        )
+        .await
+        .expect("set full day");
+
+    let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
+    assert!(task.is_full_day);
+    // is_full_day should NOT appear in remaining_data
+    assert!(
+        !task.remaining_data.contains_key("is_full_day"),
+        "dedicated fields excluded from remaining_data"
+    );
+
+    // Unset full day
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetIsFullDay { value: false }],
+        )
+        .await
+        .expect("unset full day");
+
+    let task = session.get_task(uuid).await.unwrap().unwrap();
+    assert!(!task.is_full_day);
+}
+
+#[tokio::test]
+async fn test_estimate_round_trip() {
+    let session = make_session();
+    let uuid = Uuid::new_v4().to_string();
+
+    session
+        .create_task(uuid.clone(), "Estimate test".into())
+        .await
+        .expect("create");
+
+    // Default: None
+    let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
+    assert_eq!(task.estimate, None);
+
+    // Set estimate = 2 (30 minutes)
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetEstimate { boxes: Some(2) }],
+        )
+        .await
+        .expect("set estimate");
+
+    let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
+    assert_eq!(task.estimate, Some(2));
+
+    // Clear estimate
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetEstimate { boxes: None }],
+        )
+        .await
+        .expect("clear estimate");
+
+    let task = session.get_task(uuid).await.unwrap().unwrap();
+    assert_eq!(task.estimate, None);
+}
+
+#[tokio::test]
+async fn test_estimate_zero_rejected() {
+    let session = make_session();
+    let uuid = Uuid::new_v4().to_string();
+
+    session
+        .create_task(uuid.clone(), "Zero estimate".into())
+        .await
+        .expect("create");
+
+    let result = session
+        .mutate_task(
+            uuid,
+            vec![TaskMutation::SetEstimate { boxes: Some(0) }],
+        )
+        .await;
+
+    assert!(
+        matches!(result, Err(FfiError::InvalidInput { .. })),
+        "estimate=0 should be rejected"
+    );
+}
+
+#[tokio::test]
+async fn test_set_value_generic_uda() {
+    let session = make_session();
+    let uuid = Uuid::new_v4().to_string();
+
+    session
+        .create_task(uuid.clone(), "Generic UDA".into())
+        .await
+        .expect("create");
+
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetValue {
+                key: "custom_field".into(),
+                value: Some("hello".into()),
+            }],
+        )
+        .await
+        .expect("set generic UDA");
+
+    let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
+    assert_eq!(
+        task.remaining_data.get("custom_field").map(String::as_str),
+        Some("hello")
+    );
+
+    // Clear it
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetValue {
+                key: "custom_field".into(),
+                value: None,
+            }],
+        )
+        .await
+        .expect("clear generic UDA");
+
+    let task = session.get_task(uuid).await.unwrap().unwrap();
+    assert!(!task.remaining_data.contains_key("custom_field"));
+}
+
+#[tokio::test]
+async fn test_set_value_rejects_known_keys() {
+    let session = make_session();
+    let uuid = Uuid::new_v4().to_string();
+
+    session
+        .create_task(uuid.clone(), "Known key test".into())
+        .await
+        .expect("create");
+
+    let result = session
+        .mutate_task(
+            uuid,
+            vec![TaskMutation::SetValue {
+                key: "description".into(),
+                value: Some("sneaky".into()),
+            }],
+        )
+        .await;
+
+    assert!(
+        matches!(result, Err(FfiError::InvalidInput { .. })),
+        "known keys should be rejected by SetValue"
+    );
+}

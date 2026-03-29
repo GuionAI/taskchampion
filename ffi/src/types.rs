@@ -54,6 +54,11 @@ pub struct FfiTask {
     pub is_active: bool,
     pub is_blocked: bool,
     pub is_blocking: bool,
+    /// FlickNote: whether this is a full-day task. Derived from UDA `is_full_day`.
+    pub is_full_day: bool,
+    /// FlickNote: time estimate in 15-minute boxes. Derived from UDA `estimate`.
+    /// `None` if not set or not a valid u32.
+    pub estimate: Option<u32>,
     /// User-defined attributes not covered by dedicated fields.
     ///
     /// Keys are the raw TaskMap keys (e.g. `"custom_field"`).
@@ -62,7 +67,8 @@ pub struct FfiTask {
     ///
     /// Note: `"scheduled"` is excluded here even though it's a UDA in core,
     /// because it has a dedicated `scheduled` timestamp field above.
-    /// Task 4 will add more exclusions when FlickNote custom fields are added.
+    /// `"is_full_day"` and `"estimate"` are also excluded since they have
+    /// typed accessors above.
     pub remaining_data: std::collections::HashMap<String, String>,
 }
 

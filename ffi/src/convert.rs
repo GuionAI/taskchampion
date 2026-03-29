@@ -45,11 +45,16 @@ impl From<&Task> for FfiTask {
             is_active: task.is_active(),
             is_blocked: task.is_blocked(),
             is_blocking: task.is_blocking(),
+            is_full_day: task.get_value("is_full_day") == Some("true"),
+            estimate: task
+                .get_value("estimate")
+                .and_then(|v| v.parse::<u32>().ok()),
             remaining_data: {
-                // "scheduled" is not in TC's Prop enum, so it appears as a UDA.
-                // Exclude it since it has a dedicated timestamp field above.
-                // Task 4 will expand this filter with FlickNote custom fields.
-                let dedicated = ["scheduled"];
+                // Exclude the 2 dedicated FlickNote fields from remaining_data
+                // since they have typed accessors above.
+                // Note: "scheduled" is not in TC's Prop enum, so it appears as a
+                // UDA — exclude it too since it has a dedicated timestamp field.
+                let dedicated = ["is_full_day", "estimate", "scheduled"];
                 task.get_user_defined_attributes()
                     .filter(|(k, _)| !dedicated.contains(k))
                     .map(|(k, v)| (k.to_string(), v.to_string()))
