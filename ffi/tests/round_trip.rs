@@ -617,10 +617,7 @@ async fn test_set_tag_is_status_round_trip() {
 async fn test_set_tag_icon_round_trip() {
     let session = make_session();
 
-    session
-        .set_tag_icon("home".into(), Some(42))
-        .await
-        .unwrap();
+    session.set_tag_icon("home".into(), Some(42)).await.unwrap();
 
     let meta = session.get_tag_metadata("home".into()).await.unwrap();
     assert_eq!(meta.icon, Some(42));
@@ -640,10 +637,7 @@ async fn test_granular_mutations_preserve_other_fields() {
         .set_tag_is_status("work".into(), true)
         .await
         .unwrap();
-    session
-        .set_tag_icon("work".into(), Some(7))
-        .await
-        .unwrap();
+    session.set_tag_icon("work".into(), Some(7)).await.unwrap();
 
     // Verify all fields survived.
     let meta = session.get_tag_metadata("work".into()).await.unwrap();
@@ -701,7 +695,10 @@ async fn test_get_tag_metadata_malformed_json_falls_back_to_defaults() {
     mock.inject_raw_tag_metadata("broken", "NOT VALID JSON");
 
     let meta = session.get_tag_metadata("broken".into()).await.unwrap();
-    assert_eq!(meta.color, "", "malformed JSON should fall back to empty color");
+    assert_eq!(
+        meta.color, "",
+        "malformed JSON should fall back to empty color"
+    );
     assert!(!meta.is_status, "malformed JSON should fall back to false");
     assert_eq!(meta.icon, None, "malformed JSON should fall back to None");
 }

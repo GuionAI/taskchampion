@@ -378,7 +378,9 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
     async fn get_tag_metadata(&mut self, name: String) -> Result<Option<String>> {
         let t = self.get_txn()?;
         let data = t
-            .query_row(TAG_METADATA_READ_SQL, [&name], |row| row.get::<_, String>(1))
+            .query_row(TAG_METADATA_READ_SQL, [&name], |row| {
+                row.get::<_, String>(1)
+            })
             .optional()
             .context("Get tag metadata")?;
         Ok(data)
@@ -387,7 +389,9 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
     async fn set_tag_metadata(&mut self, name: String, data: String) -> Result<()> {
         let t = self.get_txn()?;
         let existing_id: Option<String> = t
-            .query_row(TAG_METADATA_READ_SQL, [&name], |row| row.get::<_, String>(0))
+            .query_row(TAG_METADATA_READ_SQL, [&name], |row| {
+                row.get::<_, String>(0)
+            })
             .optional()
             .context("Check existing tag metadata")?;
         let stmt = set_tag_metadata_stmt(&name, &data, existing_id.as_deref());
