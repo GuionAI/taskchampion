@@ -155,27 +155,38 @@ pub enum TaskMutation {
     /// Soft-delete: sets status to `Deleted`.
     Delete,
     /// Set the scheduled date. `None` clears the field.
-    SetScheduled { epoch: Option<i64> },
+    SetScheduled {
+        epoch: Option<i64>,
+    },
     /// Set the start time to a specific epoch. `None` clears the field.
     ///
     /// Unlike `Start` (which sets to now) and `Stop` (which clears),
     /// this variant accepts an arbitrary timestamp.
-    SetStart { epoch: Option<i64> },
+    SetStart {
+        epoch: Option<i64>,
+    },
     /// Set FlickNote is_full_day flag.
     ///
     /// Stored as `"true"` in TaskMap when `true`, removed when `false`.
-    SetIsFullDay { value: bool },
+    SetIsFullDay {
+        value: bool,
+    },
     /// Set FlickNote time estimate (count of 15-minute boxes, must be >0).
     ///
     /// Stored as a decimal string in TaskMap (e.g. `"2"` = 30 minutes).
     /// Pass `None` to clear.
-    SetEstimate { boxes: Option<u32> },
+    SetEstimate {
+        boxes: Option<u32>,
+    },
     /// Generic escape hatch for setting arbitrary UDA values.
     ///
     /// `key` is the raw TaskMap key. `value` is `None` to remove.
     /// Returns `InvalidInput` if `key` is a known TaskChampion property
     /// (use the dedicated variant instead).
-    SetValue { key: String, value: Option<String> },
+    SetValue {
+        key: String,
+        value: Option<String>,
+    },
 }
 
 /// Error type returned by all FFI functions.

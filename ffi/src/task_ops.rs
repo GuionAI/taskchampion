@@ -155,7 +155,11 @@ fn apply_mutation(
                 .map_err(FfiError::from)?;
         }
         TaskMutation::SetIsFullDay { value } => {
-            let v = if value { Some("true".to_string()) } else { None };
+            let v = if value {
+                Some("true".to_string())
+            } else {
+                None
+            };
             task.set_value("is_full_day", v, ops)
                 .map_err(FfiError::from)?;
         }
@@ -174,8 +178,18 @@ fn apply_mutation(
             // Guard: reject known TaskChampion keys — callers should use
             // dedicated variants for those.
             let known = [
-                "status", "description", "priority", "due", "wait", "entry",
-                "end", "modified", "parent_id", "position", "start", "scheduled",
+                "status",
+                "description",
+                "priority",
+                "due",
+                "wait",
+                "entry",
+                "end",
+                "modified",
+                "parent_id",
+                "position",
+                "start",
+                "scheduled",
             ];
             if known.contains(&key.as_str())
                 || key.starts_with("tag_")

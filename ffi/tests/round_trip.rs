@@ -593,9 +593,7 @@ async fn test_scheduled_round_trip() {
     session
         .mutate_task(
             uuid.clone(),
-            vec![TaskMutation::SetScheduled {
-                epoch: Some(epoch),
-            }],
+            vec![TaskMutation::SetScheduled { epoch: Some(epoch) }],
         )
         .await
         .expect("set scheduled");
@@ -637,9 +635,7 @@ async fn test_start_epoch_round_trip() {
     session
         .mutate_task(
             uuid.clone(),
-            vec![TaskMutation::SetStart {
-                epoch: Some(epoch),
-            }],
+            vec![TaskMutation::SetStart { epoch: Some(epoch) }],
         )
         .await
         .expect("set start");
@@ -649,10 +645,7 @@ async fn test_start_epoch_round_trip() {
 
     // Clear via SetStart { epoch: None }
     session
-        .mutate_task(
-            uuid.clone(),
-            vec![TaskMutation::SetStart { epoch: None }],
-        )
+        .mutate_task(uuid.clone(), vec![TaskMutation::SetStart { epoch: None }])
         .await
         .expect("clear start");
 
@@ -754,10 +747,7 @@ async fn test_estimate_zero_rejected() {
         .expect("create");
 
     let result = session
-        .mutate_task(
-            uuid,
-            vec![TaskMutation::SetEstimate { boxes: Some(0) }],
-        )
+        .mutate_task(uuid, vec![TaskMutation::SetEstimate { boxes: Some(0) }])
         .await;
 
     assert!(
