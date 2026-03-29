@@ -704,6 +704,32 @@ async fn test_get_tag_metadata_malformed_json_falls_back_to_defaults() {
 }
 
 #[tokio::test]
+async fn test_set_tag_color_with_malformed_json_returns_error() {
+    let (session, mock) = make_session_with_executor();
+    // Inject a malformed row — setter must error, not silently overwrite.
+    mock.inject_raw_tag_metadata("broken", "NOT VALID JSON");
+
+    let result = session
+        .set_tag_color("broken".into(), "#ff0000".into())
+        .await;
+    assert!(
+        result.is_err(),
+        "setter against corrupt metadata must return an error, not silently overwrite"
+    );
+}
+
+#[tokio::test]
+async fn test_set_tag_icon_zero_round_trip() {
+    let session = make_session();
+
+    // Some(0) is a valid icon — must not be confused with None.
+    session.set_tag_icon("work".into(), Some(0)).await.unwrap();
+
+    let meta = session.get_tag_metadata("work".into()).await.unwrap();
+    assert_eq!(meta.icon, Some(0), "icon=0 must round-trip correctly");
+}
+
+#[tokio::test]
 async fn test_scheduled_round_trip() {
     let session = make_session();
     let uuid = Uuid::new_v4().to_string();

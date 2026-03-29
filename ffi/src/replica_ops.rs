@@ -197,6 +197,10 @@ impl FfiSession {
     }
 
     /// Set the color for a tag. Reads existing metadata, patches color, writes back.
+    ///
+    /// Note: concurrent calls to any setter for the same tag interleave at the
+    /// whole-metadata level (last-write-wins). Set all fields in a single call
+    /// sequence, not in parallel, if consistency matters.
     pub async fn set_tag_color(&self, name: String, color: String) -> Result<(), FfiError> {
         self.with_replica(|mut replica| async move {
             let mut meta = read_tag_metadata(&mut replica, &name).await?;
@@ -207,6 +211,10 @@ impl FfiSession {
     }
 
     /// Set whether a tag is a status tag. Reads existing metadata, patches is_status, writes back.
+    ///
+    /// Note: concurrent calls to any setter for the same tag interleave at the
+    /// whole-metadata level (last-write-wins). Set all fields in a single call
+    /// sequence, not in parallel, if consistency matters.
     pub async fn set_tag_is_status(&self, name: String, value: bool) -> Result<(), FfiError> {
         self.with_replica(|mut replica| async move {
             let mut meta = read_tag_metadata(&mut replica, &name).await?;
@@ -217,6 +225,10 @@ impl FfiSession {
     }
 
     /// Set the icon for a tag. Pass `None` to clear. Reads existing metadata, patches icon, writes back.
+    ///
+    /// Note: concurrent calls to any setter for the same tag interleave at the
+    /// whole-metadata level (last-write-wins). Set all fields in a single call
+    /// sequence, not in parallel, if consistency matters.
     pub async fn set_tag_icon(&self, name: String, icon: Option<i64>) -> Result<(), FfiError> {
         self.with_replica(|mut replica| async move {
             let mut meta = read_tag_metadata(&mut replica, &name).await?;
@@ -269,7 +281,10 @@ pub(crate) fn parse_uuid(s: &str) -> Result<Uuid, FfiError> {
 // ephemeral Replica, so two concurrent setters for the same tag can interleave.
 // This is intentional: matches the storage layer's LWW (last-write-wins) semantics.
 
-/// Read and deserialize tag metadata, defaulting to empty if not found.
+/// Read and deserialize tag metadata for a setter (strict: propagates parse errors).
+///
+/// Returns an error if the stored JSON is malformed to prevent silent data loss
+/// during read-modify-write. Missing rows return the default (empty) metadata.
 async fn read_tag_metadata(
     replica: &mut Replica<ExternalStorage>,
     name: &str,
@@ -278,10 +293,12 @@ async fn read_tag_metadata(
         .get_tag_metadata(name.to_string())
         .await
         .map_err(FfiError::from)?;
-    Ok(match json_str {
-        Some(s) => serde_json::from_str(&s).unwrap_or_default(),
-        None => TagMetadataJson::default(),
-    })
+    match json_str {
+        Some(s) => serde_json::from_str(&s).map_err(|e| FfiError::Internal {
+            message: format!("Tag metadata for '{name}' is corrupt: {e}"),
+        }),
+        None => Ok(TagMetadataJson::default()),
+    }
 }
 
 /// Serialize and write tag metadata.
