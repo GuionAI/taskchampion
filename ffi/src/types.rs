@@ -38,6 +38,10 @@ pub struct FfiTask {
     pub modified: Option<i64>,
     pub due: Option<i64>,
     pub wait: Option<i64>,
+    /// Scheduled date as Unix epoch seconds, or `None` if not set.
+    pub scheduled: Option<i64>,
+    /// Start time (active tracking) as Unix epoch seconds, or `None`.
+    pub start: Option<i64>,
     /// Parent task UUID as a string, or `None`.
     pub parent: Option<String>,
     pub position: Option<String>,
@@ -50,6 +54,16 @@ pub struct FfiTask {
     pub is_active: bool,
     pub is_blocked: bool,
     pub is_blocking: bool,
+    /// User-defined attributes not covered by dedicated fields.
+    ///
+    /// Keys are the raw TaskMap keys (e.g. `"custom_field"`).
+    /// Values are the raw string values from the TaskMap.
+    /// Empty if the task has no UDAs.
+    ///
+    /// Note: `"scheduled"` is excluded here even though it's a UDA in core,
+    /// because it has a dedicated `scheduled` timestamp field above.
+    /// Task 4 will add more exclusions when FlickNote custom fields are added.
+    pub remaining_data: std::collections::HashMap<String, String>,
 }
 
 /// A node in the task tree (parent/child hierarchy).
