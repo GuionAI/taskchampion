@@ -1,11 +1,12 @@
 //! Round-trip tests for the praxis FFI bridge.
 
 use taskchampion_ffi::recurrence::{
-    FfiMaskChar, FfiRecurrenceSpec, FfiRecurrenceDiffEntry, generate_due_dates,
-    is_template_expired_ffi, mask_char_for_ffi_status, parse_recurrence_spec,
-    recurrence_diff_ffi,
+    generate_due_dates, is_template_expired_ffi, mask_char_for_ffi_status, parse_recurrence_spec,
+    recurrence_diff_ffi, FfiMaskChar, FfiRecurrenceDiffEntry, FfiRecurrenceSpec,
 };
-use taskchampion_ffi::tree::{descendants_to_complete_ffi, descendants_to_delete_ffi, FfiTaskDescendant};
+use taskchampion_ffi::tree::{
+    descendants_to_complete_ffi, descendants_to_delete_ffi, FfiTaskDescendant,
+};
 use taskchampion_ffi::types::FfiStatus;
 
 // ---------------------------------------------------------------------------

@@ -49,7 +49,10 @@ fn ffi_to_task_descendant(d: FfiTaskDescendant) -> Result<TaskDescendant, FfiErr
 pub fn descendants_to_complete_ffi(
     descendants: Vec<FfiTaskDescendant>,
 ) -> Result<Vec<String>, FfiError> {
-    let rust_descs: Result<Vec<_>, _> = descendants.into_iter().map(ffi_to_task_descendant).collect();
+    let rust_descs: Result<Vec<_>, _> = descendants
+        .into_iter()
+        .map(ffi_to_task_descendant)
+        .collect();
     let rust_descs = rust_descs?;
     Ok(descendants_to_complete(&rust_descs)
         .into_iter()
@@ -66,7 +69,10 @@ pub fn descendants_to_complete_ffi(
 pub fn descendants_to_delete_ffi(
     descendants: Vec<FfiTaskDescendant>,
 ) -> Result<FfiDeleteResult, FfiError> {
-    let rust_descs: Result<Vec<_>, _> = descendants.into_iter().map(ffi_to_task_descendant).collect();
+    let rust_descs: Result<Vec<_>, _> = descendants
+        .into_iter()
+        .map(ffi_to_task_descendant)
+        .collect();
     let rust_descs = rust_descs?;
     let (pending_count, all_uuids) = descendants_to_delete(&rust_descs);
     Ok(FfiDeleteResult {

@@ -229,7 +229,11 @@ pub fn is_template_expired_ffi(
     use praxis::recurrence::mask::is_template_expired;
 
     let parsed_mask = parse_mask(&mask);
-    Ok(is_template_expired(&parsed_mask, due_count as usize, until_reached))
+    Ok(is_template_expired(
+        &parsed_mask,
+        due_count as usize,
+        until_reached,
+    ))
 }
 
 // ---------------------------------------------------------------------------
