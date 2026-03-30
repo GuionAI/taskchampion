@@ -51,12 +51,8 @@ impl From<&Task> for FfiTask {
                 .and_then(|v| v.parse::<u32>().ok()),
             recur: task.get_value("recur").map(|v| v.to_string()),
             mask: task.get_value("mask").map(|v| v.to_string()),
-            imask: task
-                .get_value("imask")
-                .and_then(|v| v.parse::<u32>().ok()),
-            until: task
-                .get_value("until")
-                .and_then(|v| v.parse::<i64>().ok()),
+            imask: task.get_value("imask").and_then(|v| v.parse::<u32>().ok()),
+            until: task.get_value("until").and_then(|v| v.parse::<i64>().ok()),
             remaining_data: {
                 // Exclude dedicated fields from remaining_data since they have
                 // typed accessors above.

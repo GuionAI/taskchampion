@@ -175,7 +175,8 @@ fn apply_mutation(
                 .map_err(FfiError::from)?;
         }
         TaskMutation::SetRecur { value } => {
-            task.set_value("recur", value, ops).map_err(FfiError::from)?;
+            task.set_value("recur", value, ops)
+                .map_err(FfiError::from)?;
         }
         TaskMutation::SetMask { value } => {
             task.set_value("mask", value, ops).map_err(FfiError::from)?;

@@ -2,9 +2,7 @@
 
 use crate::types::{FfiError, FfiStatus};
 use praxis::recurrence::mask::{mask_char_for_status, parse_mask, recurrence_diff};
-use praxis::recurrence::orchestrate::{
-    ChildStatusChange, RecurrenceAction, RecurringTemplate,
-};
+use praxis::recurrence::orchestrate::{ChildStatusChange, RecurrenceAction, RecurringTemplate};
 use praxis::recurrence::spec::{parse_spec, RecurrenceSpec};
 use std::collections::HashMap;
 use taskchampion::Status;
@@ -236,11 +234,9 @@ fn recurrence_action_to_ffi(a: RecurrenceAction) -> FfiRecurrenceAction {
             template_uuid: template_uuid.to_string(),
             new_mask,
         },
-        RecurrenceAction::ExpireTemplate { template_uuid } => {
-            FfiRecurrenceAction::ExpireTemplate {
-                template_uuid: template_uuid.to_string(),
-            }
-        }
+        RecurrenceAction::ExpireTemplate { template_uuid } => FfiRecurrenceAction::ExpireTemplate {
+            template_uuid: template_uuid.to_string(),
+        },
         RecurrenceAction::WarnHitLimit { template_uuid } => FfiRecurrenceAction::WarnHitLimit {
             template_uuid: template_uuid.to_string(),
         },
@@ -373,8 +369,10 @@ pub fn reconcile_ffi(
     use praxis::recurrence::orchestrate::reconcile;
 
     let now = epoch_to_dt(now_epoch)?;
-    let rust_templates: Result<Vec<_>, _> =
-        templates.into_iter().map(ffi_to_recurring_template).collect();
+    let rust_templates: Result<Vec<_>, _> = templates
+        .into_iter()
+        .map(ffi_to_recurring_template)
+        .collect();
     let rust_templates = rust_templates?;
 
     let actions = reconcile(&rust_templates, now, future_limit as usize).map_err(|e| {
@@ -576,10 +574,7 @@ mod tests {
         let template_uuid = Uuid::parse_str(&template_uuid_str()).unwrap();
         let action = RecurrenceAction::ExpireTemplate { template_uuid };
         let ffi = recurrence_action_to_ffi(action);
-        assert!(matches!(
-            ffi,
-            FfiRecurrenceAction::ExpireTemplate { .. }
-        ));
+        assert!(matches!(ffi, FfiRecurrenceAction::ExpireTemplate { .. }));
     }
 
     #[test]

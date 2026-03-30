@@ -68,11 +68,10 @@ pub fn plan_completion_ffi(
 
     let rust_parent = recurrence_parent
         .map(|p| -> Result<RecurrenceParentInfo, FfiError> {
-            let template_uuid = Uuid::parse_str(&p.template_uuid).map_err(|e| {
-                FfiError::InvalidInput {
+            let template_uuid =
+                Uuid::parse_str(&p.template_uuid).map_err(|e| FfiError::InvalidInput {
                     message: format!("invalid template UUID '{}': {e}", p.template_uuid),
-                }
-            })?;
+                })?;
             Ok(RecurrenceParentInfo {
                 template_uuid,
                 current_mask: parse_mask(&p.current_mask),
@@ -81,21 +80,18 @@ pub fn plan_completion_ffi(
         })
         .transpose()?;
 
-    let actions =
-        plan_completion(target, &rust_descs, rust_parent.as_ref()).map_err(|e| {
-            FfiError::InvalidInput {
-                message: e.to_string(),
-            }
-        })?;
+    let actions = plan_completion(target, &rust_descs, rust_parent.as_ref()).map_err(|e| {
+        FfiError::InvalidInput {
+            message: e.to_string(),
+        }
+    })?;
 
     Ok(actions
         .into_iter()
         .map(|a| match a {
-            CompletionAction::CompleteTask { uuid } => {
-                FfiCompletionAction::CompleteTask {
-                    uuid: uuid.to_string(),
-                }
-            }
+            CompletionAction::CompleteTask { uuid } => FfiCompletionAction::CompleteTask {
+                uuid: uuid.to_string(),
+            },
             CompletionAction::UpdateRecurrenceMask {
                 template_uuid,
                 new_mask,

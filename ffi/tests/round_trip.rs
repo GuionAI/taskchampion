@@ -1034,11 +1034,7 @@ async fn test_recurrence_uda_fields_round_trip() {
         .expect("create");
 
     // Initially all recurrence fields are None
-    let task = session
-        .get_task(uuid.clone())
-        .await
-        .expect("get")
-        .unwrap();
+    let task = session.get_task(uuid.clone()).await.expect("get").unwrap();
     assert_eq!(task.recur, None);
     assert_eq!(task.mask, None);
     assert_eq!(task.imask, None);
@@ -1065,11 +1061,7 @@ async fn test_recurrence_uda_fields_round_trip() {
         .await
         .expect("set recurrence fields");
 
-    let task = session
-        .get_task(uuid.clone())
-        .await
-        .expect("get")
-        .unwrap();
+    let task = session.get_task(uuid.clone()).await.expect("get").unwrap();
     assert_eq!(task.recur, Some("monthly".into()));
     assert_eq!(task.mask, Some("-+-".into()));
     assert_eq!(task.imask, Some(2));
