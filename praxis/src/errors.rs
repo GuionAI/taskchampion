@@ -4,4 +4,6 @@ use thiserror::Error;
 pub enum RecurrenceError {
     #[error("failed to parse recurrence spec: {0}")]
     Parse(String),
+    #[error("mask index {index} out of bounds (len={len})")]
+    MaskIndexOutOfBounds { index: usize, len: usize },
 }
