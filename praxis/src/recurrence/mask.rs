@@ -4,7 +4,7 @@ use taskchampion::Status;
 use crate::errors::RecurrenceError;
 
 /// A single slot in a recurrence mask, representing the status of one instance.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MaskChar {
     /// Task is pending (not yet complete). Represented as '-'.
     Pending,

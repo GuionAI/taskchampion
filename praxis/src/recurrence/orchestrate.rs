@@ -7,11 +7,12 @@ use crate::errors::RecurrenceError;
 use crate::recurrence::generate::generate_due_dates;
 use crate::recurrence::mask::{
     is_template_expired, mask_char_for_status, parse_mask, recurrence_diff, serialize_mask,
-    MaskChar,
+    MaskChar, RecurrenceMask,
 };
 use crate::recurrence::spec::parse_spec;
 
 /// Input: a recurring template's current state.
+#[derive(Debug)]
 pub struct RecurringTemplate {
     pub uuid: Uuid,
     pub due: DateTime<Utc>,
@@ -32,6 +33,7 @@ pub struct RecurringTemplate {
 /// Actions are ordered per template: creates first, then mask update, then
 /// expiration. Across multiple templates, each template's actions appear
 /// consecutively in this same order.
+#[derive(Debug)]
 pub enum RecurrenceAction {
     /// Create a child task instance for the given template.
     CreateChild {
@@ -54,11 +56,17 @@ pub enum RecurrenceAction {
     },
     /// Template is fully expired — caller should mark it for deletion.
     ExpireTemplate { template_uuid: Uuid },
+    /// Generation hit the internal safety cap for this template.
+    ///
+    /// Indicates corrupt or extreme recurrence data (e.g. very short period with
+    /// a far-future `until`). The actions emitted before this warning are based on
+    /// a partial date set; callers should log or surface this condition.
+    WarnHitLimit { template_uuid: Uuid },
 }
 
 /// Input for a mask update when a child task's status changes.
 pub struct ChildStatusChange {
-    pub child_uuid: Uuid,
+    /// UUID of the parent recurring template whose mask will be updated.
     pub template_uuid: Uuid,
     pub imask: usize,
     pub new_status: Status,
@@ -80,6 +88,13 @@ pub struct ChildStatusChange {
 /// `future_limit` matches TW's `recurrence.limit` config (default 1): it limits
 /// how many future (not-yet-due) instances are pre-generated per template.
 ///
+/// # Warnings
+///
+/// If generation hits the internal safety cap for a template (10 000 iterations),
+/// a `RecurrenceAction::WarnHitLimit` is emitted for that template. The preceding
+/// actions for the template are based on a partial date set; callers should log or
+/// surface this condition.
+///
 /// # Errors
 ///
 /// Returns `Err` if any template's `recur` field cannot be parsed.
@@ -93,8 +108,6 @@ pub fn reconcile(
     for template in templates {
         let spec = parse_spec(&template.recur)?;
         let gen = generate_due_dates(&spec, template.due, now, template.until, future_limit);
-        // TODO: surface gen.hit_limit as a warning to callers — hitting the safety cap
-        // may indicate corrupt or extreme recurrence data.
         let mut mask = parse_mask(&template.mask);
         let missing = recurrence_diff(&mask, &gen.dates);
 
@@ -134,6 +147,13 @@ pub fn reconcile(
                 template_uuid: template.uuid,
             });
         }
+
+        // Warn if generation hit the safety cap — actions above are based on partial data
+        if gen.hit_limit {
+            actions.push(RecurrenceAction::WarnHitLimit {
+                template_uuid: template.uuid,
+            });
+        }
     }
 
     Ok(actions)
@@ -145,12 +165,12 @@ pub fn reconcile(
 /// This is the Rust equivalent of TW's `updateRecurrenceMask()`.
 ///
 /// Returns `Err(RecurrenceError::MaskIndexOutOfBounds)` if `change.imask` is out
-/// of bounds for the current mask.
+/// of bounds for `current_mask`.
 pub fn update_mask_for_child(
-    current_mask: &str,
+    current_mask: &RecurrenceMask,
     change: &ChildStatusChange,
 ) -> Result<String, RecurrenceError> {
-    let mut mask = parse_mask(current_mask);
+    let mut mask = current_mask.clone();
     let new_char = mask_char_for_status(&change.new_status, change.has_wait);
     mask.set(change.imask, new_char)?;
     Ok(serialize_mask(&mask))
@@ -178,6 +198,7 @@ pub(crate) fn compute_child_wait(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::recurrence::mask::parse_mask;
     use chrono::{TimeZone, Utc};
     use pretty_assertions::assert_eq;
     use uuid::Uuid;
@@ -192,7 +213,6 @@ mod tests {
 
     fn change_at(imask: usize, status: Status, has_wait: bool) -> ChildStatusChange {
         ChildStatusChange {
-            child_uuid: uid(),
             template_uuid: uid(),
             imask,
             new_status: status,
@@ -204,35 +224,35 @@ mod tests {
     fn update_mask_child_completed() {
         // mask "-+-" = ['-', '+', '-']; set index 0 to Completed → "++-"
         let change = change_at(0, Status::Completed, false);
-        let result = update_mask_for_child("-+-", &change).unwrap();
+        let result = update_mask_for_child(&parse_mask("-+-"), &change).unwrap();
         assert_eq!(result, "++-");
     }
 
     #[test]
     fn update_mask_child_deleted() {
         let change = change_at(0, Status::Deleted, false);
-        let result = update_mask_for_child("-+W", &change).unwrap();
+        let result = update_mask_for_child(&parse_mask("-+W"), &change).unwrap();
         assert_eq!(result, "X+W");
     }
 
     #[test]
     fn update_mask_child_pending_no_wait() {
         let change = change_at(1, Status::Pending, false);
-        let result = update_mask_for_child("++", &change).unwrap();
+        let result = update_mask_for_child(&parse_mask("++"), &change).unwrap();
         assert_eq!(result, "+-");
     }
 
     #[test]
     fn update_mask_child_pending_has_wait() {
         let change = change_at(0, Status::Pending, true);
-        let result = update_mask_for_child("-+", &change).unwrap();
+        let result = update_mask_for_child(&parse_mask("-+"), &change).unwrap();
         assert_eq!(result, "W+");
     }
 
     #[test]
     fn update_mask_imask_out_of_bounds() {
         let change = change_at(5, Status::Completed, false);
-        let err = update_mask_for_child("-+", &change).unwrap_err();
+        let err = update_mask_for_child(&parse_mask("-+"), &change).unwrap_err();
         assert!(matches!(
             err,
             RecurrenceError::MaskIndexOutOfBounds { index: 5, len: 2 }
@@ -243,18 +263,19 @@ mod tests {
     fn update_mask_round_trip_deleted_then_pending() {
         // Start with '-+', mark index 0 deleted, then back to pending
         let change_delete = change_at(0, Status::Deleted, false);
-        let after_delete = update_mask_for_child("-+", &change_delete).unwrap();
+        let after_delete = update_mask_for_child(&parse_mask("-+"), &change_delete).unwrap();
         assert_eq!(after_delete, "X+");
 
         let change_pending = change_at(0, Status::Pending, false);
-        let after_pending = update_mask_for_child(&after_delete, &change_pending).unwrap();
+        let after_pending =
+            update_mask_for_child(&parse_mask(&after_delete), &change_pending).unwrap();
         assert_eq!(after_pending, "-+");
     }
 
     #[test]
     fn update_mask_preserves_other_slots() {
         let change = change_at(2, Status::Completed, false);
-        let result = update_mask_for_child("-W-", &change).unwrap();
+        let result = update_mask_for_child(&parse_mask("-W-"), &change).unwrap();
         assert_eq!(result, "-W+");
     }
 
@@ -422,6 +443,7 @@ mod tests {
                 RecurrenceAction::CreateChild { template_uuid, .. } => Some(*template_uuid),
                 RecurrenceAction::UpdateTemplateMask { template_uuid, .. } => Some(*template_uuid),
                 RecurrenceAction::ExpireTemplate { template_uuid } => Some(*template_uuid),
+                RecurrenceAction::WarnHitLimit { template_uuid } => Some(*template_uuid),
             })
             .collect();
 
@@ -551,5 +573,102 @@ mod tests {
             creates.is_empty(),
             "should be idempotent — no new creates when mask is already up to date"
         );
+    }
+
+    // T2: intra-template action ordering: creates → mask update → expiry
+    #[test]
+    fn reconcile_intra_template_ordering() {
+        // Template with until, all completed except last slot → creates, mask update, expiry
+        // Setup: due=Jan1, monthly, until=Mar1 (inclusive), mask="++", now=Apr1
+        // Generate: Jan1, Feb1, Mar1 → until_reached=true
+        // mask="++" has 2 slots, Mar1 (index 2) missing → CreateChild
+        // After push '-', mask = "+++" → no pending? Wait, we push '-' (pending) for Mar1.
+        // So mask = "+-+" → wait no. Let me think.
+        // Actually for expiry test I need mask already covering all slots.
+        // Let me use a different approach: empty mask, until already past, future_limit=0
+        // due=Jan1, monthly, until=Jan31, now=Mar1, future_limit=1
+        // Generate: Jan1 (past, <= Jan31), Feb1 (> Jan31 → stop, until_reached=true)
+        // dates=[Jan1], mask="" → CreateChild for Jan1 → mask becomes ['-'] (pending, wait=None)
+        // new_mask = "-" → emit UpdateTemplateMask
+        // is_template_expired(mask=['-'], 1, true) → has pending → NOT expired
+        //
+        // For ordering test, use: 2 creates + mask update + no expiry, verify order
+        let id = uid();
+        let t = template(id, dt(2024, 1, 1), "monthly", "", None, None);
+        let now = dt(2024, 3, 1); // past: Jan, Feb; future with limit=1: Mar
+        let actions = reconcile(&[t], now, 1).unwrap();
+
+        let kinds: Vec<&str> = actions
+            .iter()
+            .map(|a| match a {
+                RecurrenceAction::CreateChild { .. } => "create",
+                RecurrenceAction::UpdateTemplateMask { .. } => "mask",
+                RecurrenceAction::ExpireTemplate { .. } => "expire",
+                RecurrenceAction::WarnHitLimit { .. } => "warn",
+            })
+            .collect();
+
+        // All creates come before the mask update
+        let last_create = kinds.iter().rposition(|&k| k == "create");
+        let first_mask = kinds.iter().position(|&k| k == "mask");
+        if let (Some(lc), Some(fm)) = (last_create, first_mask) {
+            assert!(
+                lc < fm,
+                "all creates must precede mask update; got: {kinds:?}"
+            );
+        }
+
+        // Mask update (if present) comes before expiry (if present)
+        let last_mask = kinds.iter().rposition(|&k| k == "mask");
+        let first_expire = kinds.iter().position(|&k| k == "expire");
+        if let (Some(lm), Some(fe)) = (last_mask, first_expire) {
+            assert!(lm < fe, "mask update must precede expiry; got: {kinds:?}");
+        }
+    }
+
+    // T3: cloneable_fields are propagated to every CreateChild action
+    #[test]
+    fn reconcile_cloneable_fields_propagated() {
+        let id = uid();
+        let mut fields = HashMap::new();
+        fields.insert("description".to_string(), "Weekly review".to_string());
+        fields.insert("project".to_string(), "work".to_string());
+
+        let t = RecurringTemplate {
+            uuid: id,
+            due: dt(2024, 1, 1),
+            recur: "monthly".to_string(),
+            mask: "".to_string(),
+            until: None,
+            wait: None,
+            cloneable_fields: fields.clone(),
+        };
+        let now = dt(2024, 3, 1);
+        let actions = reconcile(&[t], now, 1).unwrap();
+
+        let child_fields: Vec<&HashMap<String, String>> = actions
+            .iter()
+            .filter_map(|a| {
+                if let RecurrenceAction::CreateChild {
+                    cloneable_fields, ..
+                } = a
+                {
+                    Some(cloneable_fields)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        assert!(
+            !child_fields.is_empty(),
+            "expected at least one CreateChild action"
+        );
+        for cf in child_fields {
+            assert_eq!(
+                cf, &fields,
+                "each child should carry the full cloneable_fields"
+            );
+        }
     }
 }

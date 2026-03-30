@@ -1,6 +1,7 @@
 use uuid::Uuid;
 
 use crate::errors::RecurrenceError;
+use crate::recurrence::mask::RecurrenceMask;
 use crate::recurrence::orchestrate::{update_mask_for_child, ChildStatusChange};
 use crate::tree::behavior::{descendants_to_complete, TaskDescendant};
 use taskchampion::Status;
@@ -8,7 +9,9 @@ use taskchampion::Status;
 /// Info about the recurrence parent when completing a recurring child.
 pub struct RecurrenceParentInfo {
     pub template_uuid: Uuid,
-    pub current_mask: String,
+    /// Parsed mask of the parent template. Using `RecurrenceMask` (rather than a raw
+    /// string) pushes parse errors to the call site and avoids redundant re-parsing.
+    pub current_mask: RecurrenceMask,
     pub imask: usize,
 }
 
@@ -27,7 +30,7 @@ pub enum CompletionAction {
 /// Given a task being completed, return all actions needed.
 ///
 /// The target task is always the first action. Subsequent actions are:
-/// 1. `CompleteTask` for each pending descendant (tree behavior)
+/// 1. `CompleteTask` for each pending or waiting descendant (tree behavior)
 /// 2. `UpdateRecurrenceMask` for the recurrence parent (if applicable)
 ///
 /// # Errors
@@ -52,7 +55,6 @@ pub fn plan_completion(
     // Recurrence behavior: update parent mask
     if let Some(parent) = recurrence_parent {
         let change = ChildStatusChange {
-            child_uuid: target_uuid,
             template_uuid: parent.template_uuid,
             imask: parent.imask,
             new_status: Status::Completed,
@@ -71,6 +73,7 @@ pub fn plan_completion(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::recurrence::mask::parse_mask;
     use crate::tree::behavior::TaskDescendant;
     use pretty_assertions::assert_eq;
     use taskchampion::Status;
@@ -88,10 +91,18 @@ mod tests {
         }
     }
 
+    fn desc_waiting(uuid: Uuid) -> TaskDescendant {
+        TaskDescendant {
+            uuid,
+            status: Status::Pending,
+            has_wait: true,
+        }
+    }
+
     fn parent_info(template_uuid: Uuid, mask: &str, imask: usize) -> RecurrenceParentInfo {
         RecurrenceParentInfo {
             template_uuid,
-            current_mask: mask.to_string(),
+            current_mask: parse_mask(mask),
             imask,
         }
     }
@@ -187,5 +198,36 @@ mod tests {
             result.unwrap_err(),
             RecurrenceError::MaskIndexOutOfBounds { .. }
         ));
+    }
+
+    // T1: waiting descendants are included in completion output
+    #[test]
+    fn waiting_descendants_are_completed() {
+        let target = uid();
+        let waiting = uid();
+        let completed = uid();
+        let descendants = vec![
+            desc_waiting(waiting),              // waiting → should be completed
+            desc(completed, Status::Completed), // already done → skipped
+        ];
+        let actions = plan_completion(target, &descendants, None).unwrap();
+
+        let complete_uuids: Vec<Uuid> = actions
+            .iter()
+            .filter_map(|a| {
+                if let CompletionAction::CompleteTask { uuid } = a {
+                    Some(*uuid)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        assert!(complete_uuids.contains(&target));
+        assert!(
+            complete_uuids.contains(&waiting),
+            "waiting descendant should be completed"
+        );
+        assert!(!complete_uuids.contains(&completed));
     }
 }
