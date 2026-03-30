@@ -33,7 +33,7 @@ pub struct FfiTaskDescendant {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn ffi_to_task_descendant(d: FfiTaskDescendant) -> Result<TaskDescendant, FfiError> {
+pub(crate) fn ffi_to_task_descendant(d: FfiTaskDescendant) -> Result<TaskDescendant, FfiError> {
     let uuid = Uuid::parse_str(&d.uuid).map_err(|e| FfiError::InvalidInput {
         message: format!("invalid UUID '{}': {e}", d.uuid),
     })?;
