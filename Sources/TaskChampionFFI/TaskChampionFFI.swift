@@ -1490,7 +1490,7 @@ public func FfiConverterTypeFfiAnnotation_lower(_ value: FfiAnnotation) -> RustB
 
 
 /**
- * Result of `descendants_to_delete` — the pending count and all UUIDs.
+ * Result of `descendants_to_delete_ffi` — the pending count and all UUIDs.
  */
 public struct FfiDeleteResult: Equatable, Hashable {
     /**
@@ -4071,9 +4071,12 @@ public func generateDueDates(spec: FfiRecurrenceSpec, baseDueEpoch: Int64, nowEp
  *
  * Pass the serialized mask string, the total number of generated due dates,
  * and whether the `until` boundary was reached.
+ *
+ * This function is infallible: `parse_mask` and `is_template_expired` both
+ * have no error paths, so the return type is a plain `bool`.
  */
-public func isTemplateExpiredFfi(mask: String, dueCount: UInt32, untilReached: Bool)throws  -> Bool  {
-    return try  FfiConverterBool.lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
+public func isTemplateExpiredFfi(mask: String, dueCount: UInt32, untilReached: Bool) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
     uniffi_taskchampion_ffi_fn_func_is_template_expired_ffi(
         FfiConverterString.lower(mask),
         FfiConverterUInt32.lower(dueCount),
@@ -4168,7 +4171,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_taskchampion_ffi_checksum_func_generate_due_dates() != 26948) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_func_is_template_expired_ffi() != 43264) {
+    if (uniffi_taskchampion_ffi_checksum_func_is_template_expired_ffi() != 53260) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_func_mask_char_for_ffi_status() != 26684) {
@@ -4183,7 +4186,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_taskchampion_ffi_checksum_func_descendants_to_complete_ffi() != 38919) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_func_descendants_to_delete_ffi() != 34284) {
+    if (uniffi_taskchampion_ffi_checksum_func_descendants_to_delete_ffi() != 20591) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_all_tasks() != 57965) {
