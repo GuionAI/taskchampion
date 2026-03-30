@@ -262,11 +262,7 @@ mod tests {
     fn compute_child_wait_negative_offset() {
         // template due=Jan1, wait=Dec25 (7 days before due)
         // child due=Feb1 → child wait=Jan25 (7 days before Feb1)
-        let result = compute_child_wait(
-            dt(2024, 1, 1),
-            Some(dt(2023, 12, 25)),
-            dt(2024, 2, 1),
-        );
+        let result = compute_child_wait(dt(2024, 1, 1), Some(dt(2023, 12, 25)), dt(2024, 2, 1));
         assert_eq!(result, Some(dt(2024, 1, 25)));
     }
 
@@ -274,11 +270,7 @@ mod tests {
     fn compute_child_wait_positive_offset() {
         // template due=Jan1, wait=Jan8 (7 days after due)
         // child due=Feb1 → child wait=Feb8
-        let result = compute_child_wait(
-            dt(2024, 1, 1),
-            Some(dt(2024, 1, 8)),
-            dt(2024, 2, 1),
-        );
+        let result = compute_child_wait(dt(2024, 1, 1), Some(dt(2024, 1, 8)), dt(2024, 2, 1));
         assert_eq!(result, Some(dt(2024, 2, 8)));
     }
 
@@ -435,7 +427,10 @@ mod tests {
 
         let first_t2 = uuids.iter().position(|&u| u == id2).unwrap();
         let last_t1 = uuids.iter().rposition(|&u| u == id1).unwrap();
-        assert!(last_t1 < first_t2, "t1 actions should all precede t2 actions");
+        assert!(
+            last_t1 < first_t2,
+            "t1 actions should all precede t2 actions"
+        );
     }
 
     #[test]

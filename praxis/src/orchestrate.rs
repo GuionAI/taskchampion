@@ -15,8 +15,13 @@ pub struct RecurrenceParentInfo {
 /// Actions for completing a task that may have descendants and/or be a recurring child.
 #[derive(Debug)]
 pub enum CompletionAction {
-    CompleteTask { uuid: Uuid },
-    UpdateRecurrenceMask { template_uuid: Uuid, new_mask: String },
+    CompleteTask {
+        uuid: Uuid,
+    },
+    UpdateRecurrenceMask {
+        template_uuid: Uuid,
+        new_mask: String,
+    },
 }
 
 /// Given a task being completed, return all actions needed.
@@ -95,8 +100,7 @@ mod tests {
     fn target_always_first() {
         let target = uid();
         let child = uid();
-        let actions =
-            plan_completion(target, &[desc(child, Status::Pending)], None).unwrap();
+        let actions = plan_completion(target, &[desc(child, Status::Pending)], None).unwrap();
         assert!(matches!(&actions[0], CompletionAction::CompleteTask { uuid } if *uuid == target));
     }
 
@@ -158,7 +162,10 @@ mod tests {
 
         assert_eq!(actions.len(), 3);
         // target, child, mask update
-        assert!(matches!(&actions[2], CompletionAction::UpdateRecurrenceMask { .. }));
+        assert!(matches!(
+            &actions[2],
+            CompletionAction::UpdateRecurrenceMask { .. }
+        ));
     }
 
     #[test]
