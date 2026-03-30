@@ -782,6 +782,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "praxis"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "pretty_assertions",
+ "taskchampion",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "pretty_assertions"
 version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1182,6 +1194,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
+ "praxis",
  "rusqlite",
  "serde",
  "serde_json",

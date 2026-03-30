@@ -1490,6 +1490,75 @@ public func FfiConverterTypeFfiAnnotation_lower(_ value: FfiAnnotation) -> RustB
 
 
 /**
+ * Result of `descendants_to_delete` — the pending count and all UUIDs.
+ */
+public struct FfiDeleteResult: Equatable, Hashable {
+    /**
+     * Number of Pending/Waiting descendants.
+     */
+    public var pendingCount: UInt32
+    /**
+     * UUIDs of all descendants (all statuses).
+     */
+    public var allUuids: [String]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Number of Pending/Waiting descendants.
+         */pendingCount: UInt32, 
+        /**
+         * UUIDs of all descendants (all statuses).
+         */allUuids: [String]) {
+        self.pendingCount = pendingCount
+        self.allUuids = allUuids
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension FfiDeleteResult: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiDeleteResult: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiDeleteResult {
+        return
+            try FfiDeleteResult(
+                pendingCount: FfiConverterUInt32.read(from: &buf), 
+                allUuids: FfiConverterSequenceString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FfiDeleteResult, into buf: inout [UInt8]) {
+        FfiConverterUInt32.write(value.pendingCount, into: &buf)
+        FfiConverterSequenceString.write(value.allUuids, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiDeleteResult_lift(_ buf: RustBuffer) throws -> FfiDeleteResult {
+    return try FfiConverterTypeFfiDeleteResult.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiDeleteResult_lower(_ value: FfiDeleteResult) -> RustBuffer {
+    return FfiConverterTypeFfiDeleteResult.lower(value)
+}
+
+
+/**
  * A dependency edge: `from_uuid` depends on `to_uuid`.
  */
 public struct FfiDependencyEdge: Equatable, Hashable {
@@ -1555,6 +1624,154 @@ public func FfiConverterTypeFfiDependencyEdge_lift(_ buf: RustBuffer) throws -> 
 #endif
 public func FfiConverterTypeFfiDependencyEdge_lower(_ value: FfiDependencyEdge) -> RustBuffer {
     return FfiConverterTypeFfiDependencyEdge.lower(value)
+}
+
+
+/**
+ * Result of `generate_due_dates` — the generated dates and metadata.
+ */
+public struct FfiGeneratedDates: Equatable, Hashable {
+    /**
+     * Generated due dates as Unix epoch seconds.
+     */
+    public var dates: [Int64]
+    /**
+     * True if the `until` boundary was reached during generation.
+     */
+    public var untilReached: Bool
+    /**
+     * True if generation stopped at the safety cap (data issue indicator).
+     */
+    public var hitLimit: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Generated due dates as Unix epoch seconds.
+         */dates: [Int64], 
+        /**
+         * True if the `until` boundary was reached during generation.
+         */untilReached: Bool, 
+        /**
+         * True if generation stopped at the safety cap (data issue indicator).
+         */hitLimit: Bool) {
+        self.dates = dates
+        self.untilReached = untilReached
+        self.hitLimit = hitLimit
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension FfiGeneratedDates: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiGeneratedDates: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiGeneratedDates {
+        return
+            try FfiGeneratedDates(
+                dates: FfiConverterSequenceInt64.read(from: &buf), 
+                untilReached: FfiConverterBool.read(from: &buf), 
+                hitLimit: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FfiGeneratedDates, into buf: inout [UInt8]) {
+        FfiConverterSequenceInt64.write(value.dates, into: &buf)
+        FfiConverterBool.write(value.untilReached, into: &buf)
+        FfiConverterBool.write(value.hitLimit, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiGeneratedDates_lift(_ buf: RustBuffer) throws -> FfiGeneratedDates {
+    return try FfiConverterTypeFfiGeneratedDates.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiGeneratedDates_lower(_ value: FfiGeneratedDates) -> RustBuffer {
+    return FfiConverterTypeFfiGeneratedDates.lower(value)
+}
+
+
+/**
+ * A `(index, epoch)` pair returned by `recurrence_diff`.
+ */
+public struct FfiRecurrenceDiffEntry: Equatable, Hashable {
+    /**
+     * Zero-based index into the due-dates array.
+     */
+    public var index: UInt32
+    /**
+     * Due date as Unix epoch seconds.
+     */
+    public var epoch: Int64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Zero-based index into the due-dates array.
+         */index: UInt32, 
+        /**
+         * Due date as Unix epoch seconds.
+         */epoch: Int64) {
+        self.index = index
+        self.epoch = epoch
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension FfiRecurrenceDiffEntry: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiRecurrenceDiffEntry: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiRecurrenceDiffEntry {
+        return
+            try FfiRecurrenceDiffEntry(
+                index: FfiConverterUInt32.read(from: &buf), 
+                epoch: FfiConverterInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FfiRecurrenceDiffEntry, into buf: inout [UInt8]) {
+        FfiConverterUInt32.write(value.index, into: &buf)
+        FfiConverterInt64.write(value.epoch, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiRecurrenceDiffEntry_lift(_ buf: RustBuffer) throws -> FfiRecurrenceDiffEntry {
+    return try FfiConverterTypeFfiRecurrenceDiffEntry.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiRecurrenceDiffEntry_lower(_ value: FfiRecurrenceDiffEntry) -> RustBuffer {
+    return FfiConverterTypeFfiRecurrenceDiffEntry.lower(value)
 }
 
 
@@ -1978,6 +2195,85 @@ public func FfiConverterTypeFfiTask_lower(_ value: FfiTask) -> RustBuffer {
 
 
 /**
+ * A task in the tree hierarchy — status info for cascade operations.
+ */
+public struct FfiTaskDescendant: Equatable, Hashable {
+    /**
+     * Task UUID as a string.
+     */
+    public var uuid: String
+    /**
+     * Task status.
+     */
+    public var status: FfiStatus
+    /**
+     * True when the task has a future `wait` date (logically "waiting").
+     */
+    public var hasWait: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Task UUID as a string.
+         */uuid: String, 
+        /**
+         * Task status.
+         */status: FfiStatus, 
+        /**
+         * True when the task has a future `wait` date (logically "waiting").
+         */hasWait: Bool) {
+        self.uuid = uuid
+        self.status = status
+        self.hasWait = hasWait
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension FfiTaskDescendant: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiTaskDescendant: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiTaskDescendant {
+        return
+            try FfiTaskDescendant(
+                uuid: FfiConverterString.read(from: &buf), 
+                status: FfiConverterTypeFfiStatus.read(from: &buf), 
+                hasWait: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FfiTaskDescendant, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.uuid, into: &buf)
+        FfiConverterTypeFfiStatus.write(value.status, into: &buf)
+        FfiConverterBool.write(value.hasWait, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiTaskDescendant_lift(_ buf: RustBuffer) throws -> FfiTaskDescendant {
+    return try FfiConverterTypeFfiTaskDescendant.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiTaskDescendant_lower(_ value: FfiTaskDescendant) -> RustBuffer {
+    return FfiConverterTypeFfiTaskDescendant.lower(value)
+}
+
+
+/**
  * A node in the task tree (parent/child hierarchy).
  */
 public struct FfiTreeNode: Equatable, Hashable {
@@ -2202,6 +2498,325 @@ public func FfiConverterTypeFfiError_lift(_ buf: RustBuffer) throws -> FfiError 
 public func FfiConverterTypeFfiError_lower(_ value: FfiError) -> RustBuffer {
     return FfiConverterTypeFfiError.lower(value)
 }
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * A single mask character — the status of one recurrence instance slot.
+ */
+
+public enum FfiMaskChar: Equatable, Hashable {
+    
+    case pending
+    case waiting
+    case completed
+    case deleted
+    case unknown
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension FfiMaskChar: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiMaskChar: FfiConverterRustBuffer {
+    typealias SwiftType = FfiMaskChar
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiMaskChar {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .pending
+        
+        case 2: return .waiting
+        
+        case 3: return .completed
+        
+        case 4: return .deleted
+        
+        case 5: return .unknown
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: FfiMaskChar, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .pending:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .waiting:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .completed:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .deleted:
+            writeInt(&buf, Int32(4))
+        
+        
+        case .unknown:
+            writeInt(&buf, Int32(5))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiMaskChar_lift(_ buf: RustBuffer) throws -> FfiMaskChar {
+    return try FfiConverterTypeFfiMaskChar.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiMaskChar_lower(_ value: FfiMaskChar) -> RustBuffer {
+    return FfiConverterTypeFfiMaskChar.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * Recurrence spec — mirrors `praxis::recurrence::spec::RecurrenceSpec`.
+ *
+ * UniFFI requires named fields for all non-unit enum variants.
+ */
+
+public enum FfiRecurrenceSpec: Equatable, Hashable {
+    
+    case daily
+    case weekdays
+    case weekly
+    case biweekly
+    case monthly
+    case bimonthly
+    case quarterly
+    case semiannual
+    case annual
+    case biannual
+    case nMonths(n: UInt32
+    )
+    case nQuarters(n: UInt32
+    )
+    case nYears(n: UInt32
+    )
+    case nDays(n: UInt32
+    )
+    case nWeeks(n: UInt32
+    )
+    case isoMonths(n: UInt32
+    )
+    case isoYears(n: UInt32
+    )
+    case isoDays(n: UInt32
+    )
+    case isoWeeks(n: UInt32
+    )
+    case seconds(secs: Int64
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension FfiRecurrenceSpec: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiRecurrenceSpec: FfiConverterRustBuffer {
+    typealias SwiftType = FfiRecurrenceSpec
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiRecurrenceSpec {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .daily
+        
+        case 2: return .weekdays
+        
+        case 3: return .weekly
+        
+        case 4: return .biweekly
+        
+        case 5: return .monthly
+        
+        case 6: return .bimonthly
+        
+        case 7: return .quarterly
+        
+        case 8: return .semiannual
+        
+        case 9: return .annual
+        
+        case 10: return .biannual
+        
+        case 11: return .nMonths(n: try FfiConverterUInt32.read(from: &buf)
+        )
+        
+        case 12: return .nQuarters(n: try FfiConverterUInt32.read(from: &buf)
+        )
+        
+        case 13: return .nYears(n: try FfiConverterUInt32.read(from: &buf)
+        )
+        
+        case 14: return .nDays(n: try FfiConverterUInt32.read(from: &buf)
+        )
+        
+        case 15: return .nWeeks(n: try FfiConverterUInt32.read(from: &buf)
+        )
+        
+        case 16: return .isoMonths(n: try FfiConverterUInt32.read(from: &buf)
+        )
+        
+        case 17: return .isoYears(n: try FfiConverterUInt32.read(from: &buf)
+        )
+        
+        case 18: return .isoDays(n: try FfiConverterUInt32.read(from: &buf)
+        )
+        
+        case 19: return .isoWeeks(n: try FfiConverterUInt32.read(from: &buf)
+        )
+        
+        case 20: return .seconds(secs: try FfiConverterInt64.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: FfiRecurrenceSpec, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .daily:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .weekdays:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .weekly:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .biweekly:
+            writeInt(&buf, Int32(4))
+        
+        
+        case .monthly:
+            writeInt(&buf, Int32(5))
+        
+        
+        case .bimonthly:
+            writeInt(&buf, Int32(6))
+        
+        
+        case .quarterly:
+            writeInt(&buf, Int32(7))
+        
+        
+        case .semiannual:
+            writeInt(&buf, Int32(8))
+        
+        
+        case .annual:
+            writeInt(&buf, Int32(9))
+        
+        
+        case .biannual:
+            writeInt(&buf, Int32(10))
+        
+        
+        case let .nMonths(n):
+            writeInt(&buf, Int32(11))
+            FfiConverterUInt32.write(n, into: &buf)
+            
+        
+        case let .nQuarters(n):
+            writeInt(&buf, Int32(12))
+            FfiConverterUInt32.write(n, into: &buf)
+            
+        
+        case let .nYears(n):
+            writeInt(&buf, Int32(13))
+            FfiConverterUInt32.write(n, into: &buf)
+            
+        
+        case let .nDays(n):
+            writeInt(&buf, Int32(14))
+            FfiConverterUInt32.write(n, into: &buf)
+            
+        
+        case let .nWeeks(n):
+            writeInt(&buf, Int32(15))
+            FfiConverterUInt32.write(n, into: &buf)
+            
+        
+        case let .isoMonths(n):
+            writeInt(&buf, Int32(16))
+            FfiConverterUInt32.write(n, into: &buf)
+            
+        
+        case let .isoYears(n):
+            writeInt(&buf, Int32(17))
+            FfiConverterUInt32.write(n, into: &buf)
+            
+        
+        case let .isoDays(n):
+            writeInt(&buf, Int32(18))
+            FfiConverterUInt32.write(n, into: &buf)
+            
+        
+        case let .isoWeeks(n):
+            writeInt(&buf, Int32(19))
+            FfiConverterUInt32.write(n, into: &buf)
+            
+        
+        case let .seconds(secs):
+            writeInt(&buf, Int32(20))
+            FfiConverterInt64.write(secs, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiRecurrenceSpec_lift(_ buf: RustBuffer) throws -> FfiRecurrenceSpec {
+    return try FfiConverterTypeFfiRecurrenceSpec.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiRecurrenceSpec_lower(_ value: FfiRecurrenceSpec) -> RustBuffer {
+    return FfiConverterTypeFfiRecurrenceSpec.lower(value)
+}
+
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
@@ -2922,6 +3537,31 @@ fileprivate struct FfiConverterOptionTypeFfiTask: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceInt64: FfiConverterRustBuffer {
+    typealias SwiftType = [Int64]
+
+    public static func write(_ value: [Int64], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterInt64.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Int64] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Int64]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterInt64.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
     typealias SwiftType = [String]
 
@@ -2997,6 +3637,31 @@ fileprivate struct FfiConverterSequenceTypeFfiDependencyEdge: FfiConverterRustBu
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeFfiRecurrenceDiffEntry: FfiConverterRustBuffer {
+    typealias SwiftType = [FfiRecurrenceDiffEntry]
+
+    public static func write(_ value: [FfiRecurrenceDiffEntry], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeFfiRecurrenceDiffEntry.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiRecurrenceDiffEntry] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [FfiRecurrenceDiffEntry]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeFfiRecurrenceDiffEntry.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeFfiSqlRow: FfiConverterRustBuffer {
     typealias SwiftType = [FfiSqlRow]
 
@@ -3064,6 +3729,31 @@ fileprivate struct FfiConverterSequenceTypeFfiTask: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeFfiTask.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeFfiTaskDescendant: FfiConverterRustBuffer {
+    typealias SwiftType = [FfiTaskDescendant]
+
+    public static func write(_ value: [FfiTaskDescendant], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeFfiTaskDescendant.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiTaskDescendant] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [FfiTaskDescendant]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeFfiTaskDescendant.read(from: &buf))
         }
         return seq
     }
@@ -3356,6 +4046,103 @@ public func tagMetadataTablesSql() -> String  {
     )
 })
 }
+/**
+ * Generate due dates for a recurrence template.
+ *
+ * - `base_due_epoch`: the initial due date (Unix epoch seconds)
+ * - `now_epoch`: current time (Unix epoch seconds); dates up to `future_limit`
+ * instances beyond `now` are included
+ * - `until_epoch`: optional hard stop (Unix epoch seconds)
+ * - `future_limit`: maximum number of future instances to generate
+ */
+public func generateDueDates(spec: FfiRecurrenceSpec, baseDueEpoch: Int64, nowEpoch: Int64, untilEpoch: Int64?, futureLimit: UInt32)throws  -> FfiGeneratedDates  {
+    return try  FfiConverterTypeFfiGeneratedDates_lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
+    uniffi_taskchampion_ffi_fn_func_generate_due_dates(
+        FfiConverterTypeFfiRecurrenceSpec_lower(spec),
+        FfiConverterInt64.lower(baseDueEpoch),
+        FfiConverterInt64.lower(nowEpoch),
+        FfiConverterOptionInt64.lower(untilEpoch),
+        FfiConverterUInt32.lower(futureLimit),$0
+    )
+})
+}
+/**
+ * Check whether the recurrence template has fully expired.
+ *
+ * Pass the serialized mask string, the total number of generated due dates,
+ * and whether the `until` boundary was reached.
+ */
+public func isTemplateExpiredFfi(mask: String, dueCount: UInt32, untilReached: Bool)throws  -> Bool  {
+    return try  FfiConverterBool.lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
+    uniffi_taskchampion_ffi_fn_func_is_template_expired_ffi(
+        FfiConverterString.lower(mask),
+        FfiConverterUInt32.lower(dueCount),
+        FfiConverterBool.lower(untilReached),$0
+    )
+})
+}
+/**
+ * Map a task's FFI status and wait state to the appropriate mask character.
+ */
+public func maskCharForFfiStatus(status: FfiStatus, hasWait: Bool) -> FfiMaskChar  {
+    return try!  FfiConverterTypeFfiMaskChar_lift(try! rustCall() {
+    uniffi_taskchampion_ffi_fn_func_mask_char_for_ffi_status(
+        FfiConverterTypeFfiStatus_lower(status),
+        FfiConverterBool.lower(hasWait),$0
+    )
+})
+}
+/**
+ * Parse a recurrence spec string (e.g. `"monthly"`, `"7d"`, `"P3W"`).
+ */
+public func parseRecurrenceSpec(input: String)throws  -> FfiRecurrenceSpec  {
+    return try  FfiConverterTypeFfiRecurrenceSpec_lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
+    uniffi_taskchampion_ffi_fn_func_parse_recurrence_spec(
+        FfiConverterString.lower(input),$0
+    )
+})
+}
+/**
+ * Compute which recurrence instances still need to be created.
+ *
+ * Returns `(index, epoch)` pairs for slots not yet covered by the mask.
+ */
+public func recurrenceDiffFfi(mask: String, dueDateEpochs: [Int64])throws  -> [FfiRecurrenceDiffEntry]  {
+    return try  FfiConverterSequenceTypeFfiRecurrenceDiffEntry.lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
+    uniffi_taskchampion_ffi_fn_func_recurrence_diff_ffi(
+        FfiConverterString.lower(mask),
+        FfiConverterSequenceInt64.lower(dueDateEpochs),$0
+    )
+})
+}
+/**
+ * Return UUIDs of descendants that should be auto-completed when the parent
+ * is completed.
+ *
+ * Only Pending (and Waiting) descendants are returned — Completed, Deleted,
+ * Recurring, and Unknown are skipped.
+ */
+public func descendantsToCompleteFfi(descendants: [FfiTaskDescendant])throws  -> [String]  {
+    return try  FfiConverterSequenceString.lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
+    uniffi_taskchampion_ffi_fn_func_descendants_to_complete_ffi(
+        FfiConverterSequenceTypeFfiTaskDescendant.lower(descendants),$0
+    )
+})
+}
+/**
+ * Return the pending count and all UUIDs when the parent task is deleted.
+ *
+ * `pending_count` is the number of Pending/Waiting descendants — used to
+ * decide whether to prompt the user. `all_uuids` contains every descendant
+ * UUID regardless of status.
+ */
+public func descendantsToDeleteFfi(descendants: [FfiTaskDescendant])throws  -> FfiDeleteResult  {
+    return try  FfiConverterTypeFfiDeleteResult_lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
+    uniffi_taskchampion_ffi_fn_func_descendants_to_delete_ffi(
+        FfiConverterSequenceTypeFfiTaskDescendant.lower(descendants),$0
+    )
+})
+}
 
 private enum InitializationResult {
     case ok
@@ -3376,6 +4163,27 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_func_tagmetadatatablessql() != 42248) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_taskchampion_ffi_checksum_func_generate_due_dates() != 26948) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_taskchampion_ffi_checksum_func_is_template_expired_ffi() != 43264) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_taskchampion_ffi_checksum_func_mask_char_for_ffi_status() != 26684) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_taskchampion_ffi_checksum_func_parse_recurrence_spec() != 41629) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_taskchampion_ffi_checksum_func_recurrence_diff_ffi() != 34602) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_taskchampion_ffi_checksum_func_descendants_to_complete_ffi() != 38919) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_taskchampion_ffi_checksum_func_descendants_to_delete_ffi() != 34284) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_all_tasks() != 57965) {
