@@ -3,6 +3,9 @@ use std::collections::HashMap;
 use taskchampion::Status;
 use uuid::Uuid;
 
+use crate::errors::RecurrenceError;
+use crate::recurrence::mask::{mask_char_for_status, parse_mask, serialize_mask};
+
 /// Input: a recurring template's current state.
 pub struct RecurringTemplate {
     pub uuid: Uuid,
@@ -58,6 +61,23 @@ pub struct ChildStatusChange {
     pub has_wait: bool,
 }
 
+/// Given a template's current mask and a child's status change, return the updated
+/// mask string.
+///
+/// This is the Rust equivalent of TW's `updateRecurrenceMask()`.
+///
+/// Returns `Err(RecurrenceError::MaskIndexOutOfBounds)` if `change.imask` is out
+/// of bounds for the current mask.
+pub fn update_mask_for_child(
+    current_mask: &str,
+    change: &ChildStatusChange,
+) -> Result<String, RecurrenceError> {
+    let mut mask = parse_mask(current_mask);
+    let new_char = mask_char_for_status(&change.new_status, change.has_wait);
+    mask.set(change.imask, new_char)?;
+    Ok(serialize_mask(&mask))
+}
+
 /// Compute a child task's wait date by preserving the template's wait-to-due delta.
 ///
 /// If the template has both `due` and `wait`, the offset is:
@@ -82,9 +102,82 @@ mod tests {
     use super::*;
     use chrono::{TimeZone, Utc};
     use pretty_assertions::assert_eq;
+    use uuid::Uuid;
 
     fn dt(year: i32, month: u32, day: u32) -> DateTime<Utc> {
         Utc.with_ymd_and_hms(year, month, day, 0, 0, 0).unwrap()
+    }
+
+    fn uid() -> Uuid {
+        Uuid::new_v4()
+    }
+
+    fn change_at(imask: usize, status: Status, has_wait: bool) -> ChildStatusChange {
+        ChildStatusChange {
+            child_uuid: uid(),
+            template_uuid: uid(),
+            imask,
+            new_status: status,
+            has_wait,
+        }
+    }
+
+    #[test]
+    fn update_mask_child_completed() {
+        // mask "-+-" = ['-', '+', '-']; set index 0 to Completed → "++-"
+        let change = change_at(0, Status::Completed, false);
+        let result = update_mask_for_child("-+-", &change).unwrap();
+        assert_eq!(result, "++-");
+    }
+
+    #[test]
+    fn update_mask_child_deleted() {
+        let change = change_at(0, Status::Deleted, false);
+        let result = update_mask_for_child("-+W", &change).unwrap();
+        assert_eq!(result, "X+W");
+    }
+
+    #[test]
+    fn update_mask_child_pending_no_wait() {
+        let change = change_at(1, Status::Pending, false);
+        let result = update_mask_for_child("++", &change).unwrap();
+        assert_eq!(result, "+-");
+    }
+
+    #[test]
+    fn update_mask_child_pending_has_wait() {
+        let change = change_at(0, Status::Pending, true);
+        let result = update_mask_for_child("-+", &change).unwrap();
+        assert_eq!(result, "W+");
+    }
+
+    #[test]
+    fn update_mask_imask_out_of_bounds() {
+        let change = change_at(5, Status::Completed, false);
+        let err = update_mask_for_child("-+", &change).unwrap_err();
+        assert!(matches!(
+            err,
+            RecurrenceError::MaskIndexOutOfBounds { index: 5, len: 2 }
+        ));
+    }
+
+    #[test]
+    fn update_mask_round_trip_deleted_then_pending() {
+        // Start with '-+', mark index 0 deleted, then back to pending
+        let change_delete = change_at(0, Status::Deleted, false);
+        let after_delete = update_mask_for_child("-+", &change_delete).unwrap();
+        assert_eq!(after_delete, "X+");
+
+        let change_pending = change_at(0, Status::Pending, false);
+        let after_pending = update_mask_for_child(&after_delete, &change_pending).unwrap();
+        assert_eq!(after_pending, "-+");
+    }
+
+    #[test]
+    fn update_mask_preserves_other_slots() {
+        let change = change_at(2, Status::Completed, false);
+        let result = update_mask_for_child("-W-", &change).unwrap();
+        assert_eq!(result, "-W+");
     }
 
     #[test]
