@@ -4,5 +4,6 @@
 #![deny(clippy::dbg_macro)]
 
 pub mod errors;
+pub mod orchestrate;
 pub mod recurrence;
 pub mod tree;
