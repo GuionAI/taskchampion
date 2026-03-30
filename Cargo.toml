@@ -14,7 +14,7 @@ edition = "2021"
 rust-version = "1.91.1"
 
 [workspace]
-members = [ "xtask", "ffi" ]
+members = [ "xtask", "ffi", "praxis" ]
 resolver = "2"
 
 [lib]
