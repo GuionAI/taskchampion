@@ -1,8 +1,10 @@
 use chrono::{DateTime, Utc};
 use taskchampion::Status;
 
+use crate::errors::RecurrenceError;
+
 /// A single slot in a recurrence mask, representing the status of one instance.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MaskChar {
     /// Task is pending (not yet complete). Represented as '-'.
     Pending,
@@ -74,6 +76,20 @@ impl RecurrenceMask {
     /// Append a slot to the mask.
     pub fn push(&mut self, c: MaskChar) {
         self.0.push(c);
+    }
+
+    /// Set the mask char at position `index`.
+    ///
+    /// Returns `Err(RecurrenceError::MaskIndexOutOfBounds)` if `index >= len()`.
+    pub fn set(&mut self, index: usize, c: MaskChar) -> Result<(), RecurrenceError> {
+        if index >= self.0.len() {
+            return Err(RecurrenceError::MaskIndexOutOfBounds {
+                index,
+                len: self.0.len(),
+            });
+        }
+        self.0[index] = c;
+        Ok(())
     }
 
     /// Iterate over all mask chars.
@@ -337,5 +353,32 @@ mod tests {
         let dates = vec![dt(2024, 1, 1), dt(2024, 2, 1)];
         let diff = recurrence_diff(&mask, &dates);
         assert_eq!(diff, vec![] as Vec<(usize, DateTime<Utc>)>);
+    }
+
+    #[test]
+    fn set_updates_slot() {
+        let mut mask = parse_mask("-+X");
+        assert!(mask.set(0, MaskChar::Completed).is_ok());
+        assert_eq!(serialize_mask(&mask), "++X");
+    }
+
+    #[test]
+    fn set_out_of_bounds_returns_error() {
+        let mut mask = parse_mask("-+");
+        let err = mask.set(5, MaskChar::Completed).unwrap_err();
+        assert!(matches!(
+            err,
+            RecurrenceError::MaskIndexOutOfBounds { index: 5, len: 2 }
+        ));
+    }
+
+    #[test]
+    fn set_on_empty_mask_returns_error() {
+        let mut mask = parse_mask("");
+        let err = mask.set(0, MaskChar::Pending).unwrap_err();
+        assert!(matches!(
+            err,
+            RecurrenceError::MaskIndexOutOfBounds { index: 0, len: 0 }
+        ));
     }
 }
