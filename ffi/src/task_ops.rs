@@ -174,6 +174,20 @@ fn apply_mutation(
             task.set_value("estimate", boxes.map(|b| b.to_string()), ops)
                 .map_err(FfiError::from)?;
         }
+        TaskMutation::SetRecur { value } => {
+            task.set_value("recur", value, ops).map_err(FfiError::from)?;
+        }
+        TaskMutation::SetMask { value } => {
+            task.set_value("mask", value, ops).map_err(FfiError::from)?;
+        }
+        TaskMutation::SetImask { value } => {
+            task.set_value("imask", value.map(|v| v.to_string()), ops)
+                .map_err(FfiError::from)?;
+        }
+        TaskMutation::SetUntil { epoch } => {
+            task.set_value("until", epoch.map(|e| e.to_string()), ops)
+                .map_err(FfiError::from)?;
+        }
         TaskMutation::SetValue { key, value } => {
             // Guard: reject known TaskChampion keys — callers should use
             // dedicated variants for those.
@@ -192,6 +206,10 @@ fn apply_mutation(
                 "scheduled",
                 "is_full_day",
                 "estimate",
+                "recur",
+                "mask",
+                "imask",
+                "until",
             ];
             if known.contains(&key.as_str())
                 || key.starts_with("tag_")

@@ -1022,3 +1022,121 @@ async fn test_set_value_rejects_flicknote_dedicated_keys() {
         "estimate should be rejected by SetValue"
     );
 }
+
+#[tokio::test]
+async fn test_recurrence_uda_fields_round_trip() {
+    let session = make_session();
+    let uuid = Uuid::new_v4().to_string();
+
+    session
+        .create_task(uuid.clone(), "Recurring template".into())
+        .await
+        .expect("create");
+
+    // Initially all recurrence fields are None
+    let task = session
+        .get_task(uuid.clone())
+        .await
+        .expect("get")
+        .unwrap();
+    assert_eq!(task.recur, None);
+    assert_eq!(task.mask, None);
+    assert_eq!(task.imask, None);
+    assert_eq!(task.until, None);
+
+    // Set recurrence fields
+    let until_epoch: i64 = 1_800_000_000;
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![
+                TaskMutation::SetRecur {
+                    value: Some("monthly".into()),
+                },
+                TaskMutation::SetMask {
+                    value: Some("-+-".into()),
+                },
+                TaskMutation::SetImask { value: Some(2) },
+                TaskMutation::SetUntil {
+                    epoch: Some(until_epoch),
+                },
+            ],
+        )
+        .await
+        .expect("set recurrence fields");
+
+    let task = session
+        .get_task(uuid.clone())
+        .await
+        .expect("get")
+        .unwrap();
+    assert_eq!(task.recur, Some("monthly".into()));
+    assert_eq!(task.mask, Some("-+-".into()));
+    assert_eq!(task.imask, Some(2));
+    assert_eq!(task.until, Some(until_epoch));
+
+    // These keys must NOT appear in remaining_data
+    assert!(
+        !task.remaining_data.contains_key("recur"),
+        "recur excluded from remaining_data"
+    );
+    assert!(
+        !task.remaining_data.contains_key("mask"),
+        "mask excluded from remaining_data"
+    );
+    assert!(
+        !task.remaining_data.contains_key("imask"),
+        "imask excluded from remaining_data"
+    );
+    assert!(
+        !task.remaining_data.contains_key("until"),
+        "until excluded from remaining_data"
+    );
+
+    // Clear recurrence fields
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![
+                TaskMutation::SetRecur { value: None },
+                TaskMutation::SetMask { value: None },
+                TaskMutation::SetImask { value: None },
+                TaskMutation::SetUntil { epoch: None },
+            ],
+        )
+        .await
+        .expect("clear recurrence fields");
+
+    let task = session.get_task(uuid).await.expect("get").unwrap();
+    assert_eq!(task.recur, None);
+    assert_eq!(task.mask, None);
+    assert_eq!(task.imask, None);
+    assert_eq!(task.until, None);
+}
+
+#[tokio::test]
+async fn test_set_value_rejects_recurrence_dedicated_keys() {
+    let session = make_session();
+    let uuid = Uuid::new_v4().to_string();
+
+    session
+        .create_task(uuid.clone(), "Recurrence key guard test".into())
+        .await
+        .expect("create");
+
+    for key in &["recur", "mask", "imask", "until"] {
+        let result = session
+            .mutate_task(
+                uuid.clone(),
+                vec![TaskMutation::SetValue {
+                    key: (*key).into(),
+                    value: Some("test".into()),
+                }],
+            )
+            .await;
+        assert!(
+            matches!(result, Err(FfiError::InvalidInput { .. })),
+            "'{key}' should be rejected by SetValue — use the dedicated mutation variant"
+        );
+    }
+}
