@@ -57,3 +57,63 @@ pub struct ChildStatusChange {
     /// True when the child has a future `wait` date (logically "waiting").
     pub has_wait: bool,
 }
+
+/// Compute a child task's wait date by preserving the template's wait-to-due delta.
+///
+/// If the template has both `due` and `wait`, the offset is:
+///   `offset = template.wait - template.due`
+/// The child's wait date is then:
+///   `child_wait = child.due + offset`
+///
+/// The offset may be negative (wait is before due) or positive (wait is after due).
+/// Returns `None` if template has no wait, or if date arithmetic overflows.
+pub(crate) fn compute_child_wait(
+    template_due: DateTime<Utc>,
+    template_wait: Option<DateTime<Utc>>,
+    child_due: DateTime<Utc>,
+) -> Option<DateTime<Utc>> {
+    let wait = template_wait?;
+    let offset = wait.signed_duration_since(template_due);
+    child_due.checked_add_signed(offset)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{TimeZone, Utc};
+    use pretty_assertions::assert_eq;
+
+    fn dt(year: i32, month: u32, day: u32) -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(year, month, day, 0, 0, 0).unwrap()
+    }
+
+    #[test]
+    fn compute_child_wait_negative_offset() {
+        // template due=Jan1, wait=Dec25 (7 days before due)
+        // child due=Feb1 → child wait=Jan25 (7 days before Feb1)
+        let result = compute_child_wait(
+            dt(2024, 1, 1),
+            Some(dt(2023, 12, 25)),
+            dt(2024, 2, 1),
+        );
+        assert_eq!(result, Some(dt(2024, 1, 25)));
+    }
+
+    #[test]
+    fn compute_child_wait_positive_offset() {
+        // template due=Jan1, wait=Jan8 (7 days after due)
+        // child due=Feb1 → child wait=Feb8
+        let result = compute_child_wait(
+            dt(2024, 1, 1),
+            Some(dt(2024, 1, 8)),
+            dt(2024, 2, 1),
+        );
+        assert_eq!(result, Some(dt(2024, 2, 8)));
+    }
+
+    #[test]
+    fn compute_child_wait_no_template_wait() {
+        let result = compute_child_wait(dt(2024, 1, 1), None, dt(2024, 2, 1));
+        assert_eq!(result, None);
+    }
+}
