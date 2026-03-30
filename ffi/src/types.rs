@@ -75,12 +75,26 @@ pub struct FfiTask {
     /// Values are the raw string values from the TaskMap.
     /// Empty if the task has no UDAs.
     ///
-    /// Note: `"scheduled"` is excluded here even though it's a UDA in core,
-    /// because it has a dedicated `scheduled` timestamp field above.
-    /// `"is_full_day"`, `"estimate"`, `"recur"`, `"mask"`, `"imask"`, and
-    /// `"until"` are also excluded since they have typed accessors above.
+    /// Keys excluded from this map: `"scheduled"`, `"is_full_day"`, `"estimate"`,
+    /// `"recur"`, `"mask"`, `"imask"`, `"until"` — all have typed accessor fields
+    /// above. See [`DEDICATED_UDA_FIELDS`] for the authoritative list.
     pub remaining_data: std::collections::HashMap<String, String>,
 }
+
+/// UDA keys that have dedicated typed fields on [`FfiTask`].
+///
+/// These keys are excluded from `FfiTask.remaining_data` and rejected by the
+/// `SetValue` mutation. When adding a new dedicated field, update this list —
+/// both `convert.rs` and `task_ops.rs` reference it.
+pub(crate) const DEDICATED_UDA_FIELDS: &[&str] = &[
+    "scheduled",
+    "is_full_day",
+    "estimate",
+    "recur",
+    "mask",
+    "imask",
+    "until",
+];
 
 /// A node in the task tree (parent/child hierarchy).
 #[derive(uniffi::Record)]

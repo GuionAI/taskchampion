@@ -1,12 +1,12 @@
 //! FFI types and exported functions for praxis recurrence support.
 
+use crate::replica_ops::parse_uuid_ctx;
 use crate::types::{FfiError, FfiStatus};
 use praxis::recurrence::mask::{mask_char_for_status, parse_mask, recurrence_diff};
 use praxis::recurrence::orchestrate::{ChildStatusChange, RecurrenceAction, RecurringTemplate};
 use praxis::recurrence::spec::{parse_spec, RecurrenceSpec};
 use std::collections::HashMap;
 use taskchampion::Status;
-use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
 // FFI types
@@ -195,9 +195,7 @@ pub struct FfiChildStatusChange {
 // ---------------------------------------------------------------------------
 
 fn ffi_to_recurring_template(t: FfiRecurringTemplate) -> Result<RecurringTemplate, FfiError> {
-    let uuid = Uuid::parse_str(&t.uuid).map_err(|e| FfiError::InvalidInput {
-        message: format!("invalid template UUID '{}': {e}", t.uuid),
-    })?;
+    let uuid = parse_uuid_ctx(&t.uuid, "template UUID")?;
     let due = epoch_to_dt(t.due_epoch)?;
     let until = t.until_epoch.map(epoch_to_dt).transpose()?;
     let wait = t.wait_epoch.map(epoch_to_dt).transpose()?;
@@ -222,7 +220,12 @@ fn recurrence_action_to_ffi(a: RecurrenceAction) -> FfiRecurrenceAction {
             cloneable_fields,
         } => FfiRecurrenceAction::CreateChild {
             template_uuid: template_uuid.to_string(),
-            imask: imask as u32,
+            // Narrowing cast: praxis enforces a 10k iteration cap so this
+            // will never exceed u32::MAX in practice, but we assert rather
+            // than silently truncate.
+            imask: imask
+                .try_into()
+                .expect("imask exceeds u32::MAX — bug in praxis"),
             due_epoch: due.timestamp(),
             wait_epoch: wait.map(|w| w.timestamp()),
             cloneable_fields,
@@ -244,12 +247,10 @@ fn recurrence_action_to_ffi(a: RecurrenceAction) -> FfiRecurrenceAction {
 }
 
 fn ffi_to_child_status_change(c: FfiChildStatusChange) -> Result<ChildStatusChange, FfiError> {
-    let template_uuid = Uuid::parse_str(&c.template_uuid).map_err(|e| FfiError::InvalidInput {
-        message: format!("invalid template UUID '{}': {e}", c.template_uuid),
-    })?;
+    let template_uuid = parse_uuid_ctx(&c.template_uuid, "template UUID")?;
     Ok(ChildStatusChange {
         template_uuid,
-        imask: c.imask as usize,
+        imask: c.imask as usize, // widening cast: u32 → usize, always safe on 32/64-bit targets
         new_status: Status::from(c.new_status),
         has_wait: c.has_wait,
     })
@@ -421,6 +422,7 @@ pub(crate) fn epoch_to_dt(epoch: i64) -> Result<chrono::DateTime<chrono::Utc>, F
 mod tests {
     use super::*;
     use chrono::TimeZone;
+    use uuid::Uuid;
 
     fn uuid_str() -> String {
         "12345678-1234-1234-1234-123456789abc".to_string()
@@ -634,9 +636,14 @@ mod tests {
         let actions = reconcile_ffi(vec![template], now, 1).unwrap();
         // At minimum: CreateChild for the past-due instance + UpdateTemplateMask
         assert!(!actions.is_empty());
-        assert!(actions
+        // Verify CreateChild action carries the correct template UUID
+        let create = actions
             .iter()
-            .any(|a| matches!(a, FfiRecurrenceAction::CreateChild { .. })));
+            .find(|a| matches!(a, FfiRecurrenceAction::CreateChild { .. }))
+            .expect("expected at least one CreateChild");
+        if let FfiRecurrenceAction::CreateChild { template_uuid, .. } = create {
+            assert_eq!(template_uuid, &uuid_str());
+        }
         assert!(actions
             .iter()
             .any(|a| matches!(a, FfiRecurrenceAction::UpdateTemplateMask { .. })));
@@ -661,7 +668,7 @@ mod tests {
     // --- update_mask_for_child_ffi ---
 
     #[test]
-    fn update_mask_for_child_ffi_valid() {
+    fn update_mask_for_child_ffi_completed() {
         // mask "-+-"; set index 0 to Completed → "++-"
         let change = FfiChildStatusChange {
             template_uuid: template_uuid_str(),
@@ -671,6 +678,32 @@ mod tests {
         };
         let result = update_mask_for_child_ffi("-+-".to_string(), change).unwrap();
         assert_eq!(result, "++-");
+    }
+
+    #[test]
+    fn update_mask_for_child_ffi_deleted() {
+        // mask "-+W"; set index 0 to Deleted → "X+W"
+        let change = FfiChildStatusChange {
+            template_uuid: template_uuid_str(),
+            imask: 0,
+            new_status: FfiStatus::Deleted,
+            has_wait: false,
+        };
+        let result = update_mask_for_child_ffi("-+W".to_string(), change).unwrap();
+        assert_eq!(result, "X+W");
+    }
+
+    #[test]
+    fn update_mask_for_child_ffi_pending_has_wait() {
+        // mask "-+"; set index 0 to Pending with wait → "W+"
+        let change = FfiChildStatusChange {
+            template_uuid: template_uuid_str(),
+            imask: 0,
+            new_status: FfiStatus::Pending,
+            has_wait: true,
+        };
+        let result = update_mask_for_child_ffi("-+".to_string(), change).unwrap();
+        assert_eq!(result, "W+");
     }
 
     #[test]

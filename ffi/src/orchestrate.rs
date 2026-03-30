@@ -1,10 +1,10 @@
 //! FFI types and exported functions for praxis completion orchestration.
 
+use crate::replica_ops::parse_uuid_ctx;
 use crate::tree::{ffi_to_task_descendant, FfiTaskDescendant};
 use crate::types::FfiError;
 use praxis::orchestrate::{plan_completion, CompletionAction, RecurrenceParentInfo};
 use praxis::recurrence::mask::parse_mask;
-use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
 // FFI types
@@ -56,9 +56,7 @@ pub fn plan_completion_ffi(
     descendants: Vec<FfiTaskDescendant>,
     recurrence_parent: Option<FfiRecurrenceParentInfo>,
 ) -> Result<Vec<FfiCompletionAction>, FfiError> {
-    let target = Uuid::parse_str(&target_uuid).map_err(|e| FfiError::InvalidInput {
-        message: format!("invalid target UUID '{target_uuid}': {e}"),
-    })?;
+    let target = parse_uuid_ctx(&target_uuid, "target UUID")?;
 
     let rust_descs: Result<Vec<_>, _> = descendants
         .into_iter()
@@ -68,14 +66,11 @@ pub fn plan_completion_ffi(
 
     let rust_parent = recurrence_parent
         .map(|p| -> Result<RecurrenceParentInfo, FfiError> {
-            let template_uuid =
-                Uuid::parse_str(&p.template_uuid).map_err(|e| FfiError::InvalidInput {
-                    message: format!("invalid template UUID '{}': {e}", p.template_uuid),
-                })?;
+            let template_uuid = parse_uuid_ctx(&p.template_uuid, "template UUID")?;
             Ok(RecurrenceParentInfo {
                 template_uuid,
                 current_mask: parse_mask(&p.current_mask),
-                imask: p.imask as usize,
+                imask: p.imask as usize, // widening cast: u32 → usize, always safe on 32/64-bit targets
             })
         })
         .transpose()?;

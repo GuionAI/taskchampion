@@ -4,7 +4,9 @@ use async_trait::async_trait;
 use taskchampion::{Status, Task, TreeMap};
 use uuid::Uuid;
 
-use crate::types::{FfiAnnotation, FfiError, FfiStatus, FfiTask, FfiTreeNode};
+use crate::types::{
+    FfiAnnotation, FfiError, FfiStatus, FfiTask, FfiTreeNode, DEDICATED_UDA_FIELDS,
+};
 
 // ---------------------------------------------------------------------------
 // Task → FfiTask
@@ -51,24 +53,15 @@ impl From<&Task> for FfiTask {
                 .and_then(|v| v.parse::<u32>().ok()),
             recur: task.get_value("recur").map(|v| v.to_string()),
             mask: task.get_value("mask").map(|v| v.to_string()),
+            // imask/until: parse failure (e.g. corrupt storage value) yields None,
+            // same behaviour as estimate/scheduled. None is indistinguishable from
+            // absent at the FFI layer — the From impl is infallible by design.
+            // Callers that need imask should treat None as "not a recurring child".
             imask: task.get_value("imask").and_then(|v| v.parse::<u32>().ok()),
             until: task.get_value("until").and_then(|v| v.parse::<i64>().ok()),
             remaining_data: {
-                // Exclude dedicated fields from remaining_data since they have
-                // typed accessors above.
-                // Note: "scheduled" is not in TC's Prop enum, so it appears as a
-                // UDA — exclude it too since it has a dedicated timestamp field.
-                let dedicated = [
-                    "is_full_day",
-                    "estimate",
-                    "scheduled",
-                    "recur",
-                    "mask",
-                    "imask",
-                    "until",
-                ];
                 task.get_user_defined_attributes()
-                    .filter(|(k, _)| !dedicated.contains(k))
+                    .filter(|(k, _)| !DEDICATED_UDA_FIELDS.contains(k))
                     .map(|(k, v)| (k.to_string(), v.to_string()))
                     .collect()
             },
