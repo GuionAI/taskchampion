@@ -277,6 +277,16 @@ pub(crate) fn parse_uuid(s: &str) -> Result<Uuid, FfiError> {
     })
 }
 
+/// Parse a UUID string with a context label in the error message.
+///
+/// Prefer this over inlining `Uuid::parse_str(...).map_err(...)` at call sites.
+/// The `ctx` label names the field (e.g. `"target"`, `"template UUID"`).
+pub(crate) fn parse_uuid_ctx(s: &str, ctx: &str) -> Result<Uuid, FfiError> {
+    Uuid::parse_str(s).map_err(|e| FfiError::InvalidInput {
+        message: format!("invalid {ctx} '{s}': {e}"),
+    })
+}
+
 // NOTE: Not atomic across concurrent calls — each granular setter opens an
 // ephemeral Replica, so two concurrent setters for the same tag can interleave.
 // This is intentional: matches the storage layer's LWW (last-write-wins) semantics.

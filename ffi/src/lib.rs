@@ -1,6 +1,7 @@
 uniffi::setup_scaffolding!();
 
 pub(crate) mod convert;
+pub mod orchestrate;
 pub mod queries;
 pub mod recurrence;
 pub mod replica_ops;

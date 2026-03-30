@@ -59,18 +59,42 @@ pub struct FfiTask {
     /// FlickNote: time estimate in 15-minute boxes. Derived from UDA `estimate`.
     /// `None` if not set or not a valid u32.
     pub estimate: Option<u32>,
+    /// Recurrence spec string (e.g. `"monthly"`, `"7d"`). `None` if not a recurring template.
+    pub recur: Option<String>,
+    /// Recurrence mask string (e.g. `"-+XW"`). `None` if not a recurring template.
+    pub mask: Option<String>,
+    /// Index into the parent mask for a recurring child. `None` if not a child.
+    /// Parsed from the `imask` UDA string; `None` if missing or not a valid u32.
+    pub imask: Option<u32>,
+    /// Recurrence expiry as Unix epoch seconds. `None` if not set.
+    /// Parsed from the `until` UDA string; `None` if missing or not a valid i64.
+    pub until: Option<i64>,
     /// User-defined attributes not covered by dedicated fields.
     ///
     /// Keys are the raw TaskMap keys (e.g. `"custom_field"`).
     /// Values are the raw string values from the TaskMap.
     /// Empty if the task has no UDAs.
     ///
-    /// Note: `"scheduled"` is excluded here even though it's a UDA in core,
-    /// because it has a dedicated `scheduled` timestamp field above.
-    /// `"is_full_day"` and `"estimate"` are also excluded since they have
-    /// typed accessors above.
+    /// Keys excluded from this map: `"scheduled"`, `"is_full_day"`, `"estimate"`,
+    /// `"recur"`, `"mask"`, `"imask"`, `"until"` — all have typed accessor fields
+    /// above. See [`DEDICATED_UDA_FIELDS`] for the authoritative list.
     pub remaining_data: std::collections::HashMap<String, String>,
 }
+
+/// UDA keys that have dedicated typed fields on [`FfiTask`].
+///
+/// These keys are excluded from `FfiTask.remaining_data` and rejected by the
+/// `SetValue` mutation. When adding a new dedicated field, update this list —
+/// both `convert.rs` and `task_ops.rs` reference it.
+pub(crate) const DEDICATED_UDA_FIELDS: &[&str] = &[
+    "scheduled",
+    "is_full_day",
+    "estimate",
+    "recur",
+    "mask",
+    "imask",
+    "until",
+];
 
 /// A node in the task tree (parent/child hierarchy).
 #[derive(uniffi::Record)]
@@ -177,6 +201,26 @@ pub enum TaskMutation {
     /// Pass `None` to clear.
     SetEstimate {
         boxes: Option<u32>,
+    },
+    /// Set the recurrence spec string. `None` clears the field.
+    ///
+    /// Use for recurring templates (e.g. `"monthly"`, `"7d"`).
+    SetRecur {
+        value: Option<String>,
+    },
+    /// Set the recurrence mask string. `None` clears the field.
+    SetMask {
+        value: Option<String>,
+    },
+    /// Set the recurring child's index into the parent mask. `None` clears the field.
+    SetImask {
+        value: Option<u32>,
+    },
+    /// Set the recurrence expiry date. `None` clears the field.
+    ///
+    /// Stored as a Unix epoch seconds string in TaskMap.
+    SetUntil {
+        epoch: Option<i64>,
     },
     /// Generic escape hatch for setting arbitrary UDA values.
     ///
