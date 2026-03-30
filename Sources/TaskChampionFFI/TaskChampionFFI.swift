@@ -1490,6 +1490,97 @@ public func FfiConverterTypeFfiAnnotation_lower(_ value: FfiAnnotation) -> RustB
 
 
 /**
+ * Input for `update_mask_for_child_ffi` — a child task status change.
+ *
+ * Mirrors `praxis::recurrence::orchestrate::ChildStatusChange` (no `child_uuid` field).
+ */
+public struct FfiChildStatusChange: Equatable, Hashable {
+    /**
+     * UUID of the parent recurring template whose mask will be updated.
+     */
+    public var templateUuid: String
+    /**
+     * Index into the parent mask for this child instance.
+     */
+    public var imask: UInt32
+    /**
+     * New status for this child.
+     */
+    public var newStatus: FfiStatus
+    /**
+     * True when the child has a future `wait` date (logically "waiting").
+     */
+    public var hasWait: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * UUID of the parent recurring template whose mask will be updated.
+         */templateUuid: String, 
+        /**
+         * Index into the parent mask for this child instance.
+         */imask: UInt32, 
+        /**
+         * New status for this child.
+         */newStatus: FfiStatus, 
+        /**
+         * True when the child has a future `wait` date (logically "waiting").
+         */hasWait: Bool) {
+        self.templateUuid = templateUuid
+        self.imask = imask
+        self.newStatus = newStatus
+        self.hasWait = hasWait
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension FfiChildStatusChange: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiChildStatusChange: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiChildStatusChange {
+        return
+            try FfiChildStatusChange(
+                templateUuid: FfiConverterString.read(from: &buf), 
+                imask: FfiConverterUInt32.read(from: &buf), 
+                newStatus: FfiConverterTypeFfiStatus.read(from: &buf), 
+                hasWait: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FfiChildStatusChange, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.templateUuid, into: &buf)
+        FfiConverterUInt32.write(value.imask, into: &buf)
+        FfiConverterTypeFfiStatus.write(value.newStatus, into: &buf)
+        FfiConverterBool.write(value.hasWait, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiChildStatusChange_lift(_ buf: RustBuffer) throws -> FfiChildStatusChange {
+    return try FfiConverterTypeFfiChildStatusChange.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiChildStatusChange_lower(_ value: FfiChildStatusChange) -> RustBuffer {
+    return FfiConverterTypeFfiChildStatusChange.lower(value)
+}
+
+
+/**
  * Result of `descendants_to_delete_ffi` — the pending count and all UUIDs.
  */
 public struct FfiDeleteResult: Equatable, Hashable {
@@ -1776,6 +1867,203 @@ public func FfiConverterTypeFfiRecurrenceDiffEntry_lower(_ value: FfiRecurrenceD
 
 
 /**
+ * Recurrence parent context when completing a recurring child task.
+ *
+ * Mirrors `praxis::orchestrate::RecurrenceParentInfo`, but uses a raw mask
+ * string and `u32` imask for FFI compatibility.
+ */
+public struct FfiRecurrenceParentInfo: Equatable, Hashable {
+    /**
+     * UUID of the parent recurring template.
+     */
+    public var templateUuid: String
+    /**
+     * Current raw mask string of the parent template (e.g. `"-+-"`).
+     */
+    public var currentMask: String
+    /**
+     * Index into the parent mask for this child instance.
+     */
+    public var imask: UInt32
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * UUID of the parent recurring template.
+         */templateUuid: String, 
+        /**
+         * Current raw mask string of the parent template (e.g. `"-+-"`).
+         */currentMask: String, 
+        /**
+         * Index into the parent mask for this child instance.
+         */imask: UInt32) {
+        self.templateUuid = templateUuid
+        self.currentMask = currentMask
+        self.imask = imask
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension FfiRecurrenceParentInfo: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiRecurrenceParentInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiRecurrenceParentInfo {
+        return
+            try FfiRecurrenceParentInfo(
+                templateUuid: FfiConverterString.read(from: &buf), 
+                currentMask: FfiConverterString.read(from: &buf), 
+                imask: FfiConverterUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FfiRecurrenceParentInfo, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.templateUuid, into: &buf)
+        FfiConverterString.write(value.currentMask, into: &buf)
+        FfiConverterUInt32.write(value.imask, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiRecurrenceParentInfo_lift(_ buf: RustBuffer) throws -> FfiRecurrenceParentInfo {
+    return try FfiConverterTypeFfiRecurrenceParentInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiRecurrenceParentInfo_lower(_ value: FfiRecurrenceParentInfo) -> RustBuffer {
+    return FfiConverterTypeFfiRecurrenceParentInfo.lower(value)
+}
+
+
+/**
+ * Input for `reconcile_ffi` — the current state of a recurring template.
+ *
+ * Mirrors `praxis::recurrence::orchestrate::RecurringTemplate`.
+ */
+public struct FfiRecurringTemplate: Equatable, Hashable {
+    public var uuid: String
+    /**
+     * Initial due date as Unix epoch seconds.
+     */
+    public var dueEpoch: Int64
+    /**
+     * Raw recurrence spec string (e.g. `"weekly"`, `"P1M"`).
+     */
+    public var recur: String
+    /**
+     * Raw mask string (e.g. `"-+XW"`).
+     */
+    public var mask: String
+    /**
+     * Hard expiry date as Unix epoch seconds. `None` if not set.
+     */
+    public var untilEpoch: Int64?
+    /**
+     * Wait date as Unix epoch seconds. `None` if not set.
+     */
+    public var waitEpoch: Int64?
+    /**
+     * Fields to clone onto child tasks (description, project, tags, etc.).
+     */
+    public var cloneableFields: [String: String]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(uuid: String, 
+        /**
+         * Initial due date as Unix epoch seconds.
+         */dueEpoch: Int64, 
+        /**
+         * Raw recurrence spec string (e.g. `"weekly"`, `"P1M"`).
+         */recur: String, 
+        /**
+         * Raw mask string (e.g. `"-+XW"`).
+         */mask: String, 
+        /**
+         * Hard expiry date as Unix epoch seconds. `None` if not set.
+         */untilEpoch: Int64?, 
+        /**
+         * Wait date as Unix epoch seconds. `None` if not set.
+         */waitEpoch: Int64?, 
+        /**
+         * Fields to clone onto child tasks (description, project, tags, etc.).
+         */cloneableFields: [String: String]) {
+        self.uuid = uuid
+        self.dueEpoch = dueEpoch
+        self.recur = recur
+        self.mask = mask
+        self.untilEpoch = untilEpoch
+        self.waitEpoch = waitEpoch
+        self.cloneableFields = cloneableFields
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension FfiRecurringTemplate: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiRecurringTemplate: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiRecurringTemplate {
+        return
+            try FfiRecurringTemplate(
+                uuid: FfiConverterString.read(from: &buf), 
+                dueEpoch: FfiConverterInt64.read(from: &buf), 
+                recur: FfiConverterString.read(from: &buf), 
+                mask: FfiConverterString.read(from: &buf), 
+                untilEpoch: FfiConverterOptionInt64.read(from: &buf), 
+                waitEpoch: FfiConverterOptionInt64.read(from: &buf), 
+                cloneableFields: FfiConverterDictionaryStringString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FfiRecurringTemplate, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.uuid, into: &buf)
+        FfiConverterInt64.write(value.dueEpoch, into: &buf)
+        FfiConverterString.write(value.recur, into: &buf)
+        FfiConverterString.write(value.mask, into: &buf)
+        FfiConverterOptionInt64.write(value.untilEpoch, into: &buf)
+        FfiConverterOptionInt64.write(value.waitEpoch, into: &buf)
+        FfiConverterDictionaryStringString.write(value.cloneableFields, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiRecurringTemplate_lift(_ buf: RustBuffer) throws -> FfiRecurringTemplate {
+    return try FfiConverterTypeFfiRecurringTemplate.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiRecurringTemplate_lower(_ value: FfiRecurringTemplate) -> RustBuffer {
+    return FfiConverterTypeFfiRecurringTemplate.lower(value)
+}
+
+
+/**
  * A single row from a SQL result set.
  *
  * Column names and values are parallel arrays — `values[i]` corresponds
@@ -2034,16 +2322,33 @@ public struct FfiTask: Equatable, Hashable {
      */
     public var estimate: UInt32?
     /**
+     * Recurrence spec string (e.g. `"monthly"`, `"7d"`). `None` if not a recurring template.
+     */
+    public var recur: String?
+    /**
+     * Recurrence mask string (e.g. `"-+XW"`). `None` if not a recurring template.
+     */
+    public var mask: String?
+    /**
+     * Index into the parent mask for a recurring child. `None` if not a child.
+     * Parsed from the `imask` UDA string; `None` if missing or not a valid u32.
+     */
+    public var imask: UInt32?
+    /**
+     * Recurrence expiry as Unix epoch seconds. `None` if not set.
+     * Parsed from the `until` UDA string; `None` if missing or not a valid i64.
+     */
+    public var until: Int64?
+    /**
      * User-defined attributes not covered by dedicated fields.
      *
      * Keys are the raw TaskMap keys (e.g. `"custom_field"`).
      * Values are the raw string values from the TaskMap.
      * Empty if the task has no UDAs.
      *
-     * Note: `"scheduled"` is excluded here even though it's a UDA in core,
-     * because it has a dedicated `scheduled` timestamp field above.
-     * `"is_full_day"` and `"estimate"` are also excluded since they have
-     * typed accessors above.
+     * Keys excluded from this map: `"scheduled"`, `"is_full_day"`, `"estimate"`,
+     * `"recur"`, `"mask"`, `"imask"`, `"until"` — all have typed accessor fields
+     * above. See [`DEDICATED_UDA_FIELDS`] for the authoritative list.
      */
     public var remainingData: [String: String]
 
@@ -2076,16 +2381,29 @@ public struct FfiTask: Equatable, Hashable {
          * `None` if not set or not a valid u32.
          */estimate: UInt32?, 
         /**
+         * Recurrence spec string (e.g. `"monthly"`, `"7d"`). `None` if not a recurring template.
+         */recur: String?, 
+        /**
+         * Recurrence mask string (e.g. `"-+XW"`). `None` if not a recurring template.
+         */mask: String?, 
+        /**
+         * Index into the parent mask for a recurring child. `None` if not a child.
+         * Parsed from the `imask` UDA string; `None` if missing or not a valid u32.
+         */imask: UInt32?, 
+        /**
+         * Recurrence expiry as Unix epoch seconds. `None` if not set.
+         * Parsed from the `until` UDA string; `None` if missing or not a valid i64.
+         */until: Int64?, 
+        /**
          * User-defined attributes not covered by dedicated fields.
          *
          * Keys are the raw TaskMap keys (e.g. `"custom_field"`).
          * Values are the raw string values from the TaskMap.
          * Empty if the task has no UDAs.
          *
-         * Note: `"scheduled"` is excluded here even though it's a UDA in core,
-         * because it has a dedicated `scheduled` timestamp field above.
-         * `"is_full_day"` and `"estimate"` are also excluded since they have
-         * typed accessors above.
+         * Keys excluded from this map: `"scheduled"`, `"is_full_day"`, `"estimate"`,
+         * `"recur"`, `"mask"`, `"imask"`, `"until"` — all have typed accessor fields
+         * above. See [`DEDICATED_UDA_FIELDS`] for the authoritative list.
          */remainingData: [String: String]) {
         self.uuid = uuid
         self.status = status
@@ -2108,6 +2426,10 @@ public struct FfiTask: Equatable, Hashable {
         self.isBlocking = isBlocking
         self.isFullDay = isFullDay
         self.estimate = estimate
+        self.recur = recur
+        self.mask = mask
+        self.imask = imask
+        self.until = until
         self.remainingData = remainingData
     }
 
@@ -2148,6 +2470,10 @@ public struct FfiConverterTypeFfiTask: FfiConverterRustBuffer {
                 isBlocking: FfiConverterBool.read(from: &buf), 
                 isFullDay: FfiConverterBool.read(from: &buf), 
                 estimate: FfiConverterOptionUInt32.read(from: &buf), 
+                recur: FfiConverterOptionString.read(from: &buf), 
+                mask: FfiConverterOptionString.read(from: &buf), 
+                imask: FfiConverterOptionUInt32.read(from: &buf), 
+                until: FfiConverterOptionInt64.read(from: &buf), 
                 remainingData: FfiConverterDictionaryStringString.read(from: &buf)
         )
     }
@@ -2174,6 +2500,10 @@ public struct FfiConverterTypeFfiTask: FfiConverterRustBuffer {
         FfiConverterBool.write(value.isBlocking, into: &buf)
         FfiConverterBool.write(value.isFullDay, into: &buf)
         FfiConverterOptionUInt32.write(value.estimate, into: &buf)
+        FfiConverterOptionString.write(value.recur, into: &buf)
+        FfiConverterOptionString.write(value.mask, into: &buf)
+        FfiConverterOptionUInt32.write(value.imask, into: &buf)
+        FfiConverterOptionInt64.write(value.until, into: &buf)
         FfiConverterDictionaryStringString.write(value.remainingData, into: &buf)
     }
 }
@@ -2362,6 +2692,91 @@ public func FfiConverterTypeFfiTreeNode_lift(_ buf: RustBuffer) throws -> FfiTre
 public func FfiConverterTypeFfiTreeNode_lower(_ value: FfiTreeNode) -> RustBuffer {
     return FfiConverterTypeFfiTreeNode.lower(value)
 }
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * Output of `plan_completion_ffi` — actions the caller should execute.
+ *
+ * Mirrors `praxis::orchestrate::CompletionAction`.
+ */
+
+public enum FfiCompletionAction: Equatable, Hashable {
+    
+    /**
+     * Complete the task with this UUID.
+     */
+    case completeTask(uuid: String
+    )
+    /**
+     * Update the recurrence template's mask string.
+     */
+    case updateRecurrenceMask(templateUuid: String, newMask: String
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension FfiCompletionAction: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiCompletionAction: FfiConverterRustBuffer {
+    typealias SwiftType = FfiCompletionAction
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiCompletionAction {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .completeTask(uuid: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 2: return .updateRecurrenceMask(templateUuid: try FfiConverterString.read(from: &buf), newMask: try FfiConverterString.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: FfiCompletionAction, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .completeTask(uuid):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(uuid, into: &buf)
+            
+        
+        case let .updateRecurrenceMask(templateUuid,newMask):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(templateUuid, into: &buf)
+            FfiConverterString.write(newMask, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiCompletionAction_lift(_ buf: RustBuffer) throws -> FfiCompletionAction {
+    return try FfiConverterTypeFfiCompletionAction.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiCompletionAction_lower(_ value: FfiCompletionAction) -> RustBuffer {
+    return FfiConverterTypeFfiCompletionAction.lower(value)
+}
+
 
 
 /**
@@ -2587,6 +3002,125 @@ public func FfiConverterTypeFfiMaskChar_lift(_ buf: RustBuffer) throws -> FfiMas
 #endif
 public func FfiConverterTypeFfiMaskChar_lower(_ value: FfiMaskChar) -> RustBuffer {
     return FfiConverterTypeFfiMaskChar.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * Output of `reconcile_ffi` — actions the caller should execute against storage.
+ *
+ * Mirrors `praxis::recurrence::orchestrate::RecurrenceAction`.
+ */
+
+public enum FfiRecurrenceAction: Equatable, Hashable {
+    
+    /**
+     * Create a child task instance.
+     */
+    case createChild(templateUuid: String, imask: UInt32, dueEpoch: Int64, waitEpoch: Int64?, cloneableFields: [String: String]
+    )
+    /**
+     * Update the template's mask string.
+     */
+    case updateTemplateMask(templateUuid: String, newMask: String
+    )
+    /**
+     * Template is fully expired — caller should mark it for deletion.
+     */
+    case expireTemplate(templateUuid: String
+    )
+    /**
+     * Generation hit the internal safety cap (10k iterations).
+     *
+     * Indicates corrupt or extreme recurrence data. Callers should log or
+     * surface this condition. Actions emitted before this warning are based
+     * on a partial date set.
+     */
+    case warnHitLimit(templateUuid: String
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension FfiRecurrenceAction: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFfiRecurrenceAction: FfiConverterRustBuffer {
+    typealias SwiftType = FfiRecurrenceAction
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiRecurrenceAction {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .createChild(templateUuid: try FfiConverterString.read(from: &buf), imask: try FfiConverterUInt32.read(from: &buf), dueEpoch: try FfiConverterInt64.read(from: &buf), waitEpoch: try FfiConverterOptionInt64.read(from: &buf), cloneableFields: try FfiConverterDictionaryStringString.read(from: &buf)
+        )
+        
+        case 2: return .updateTemplateMask(templateUuid: try FfiConverterString.read(from: &buf), newMask: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 3: return .expireTemplate(templateUuid: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 4: return .warnHitLimit(templateUuid: try FfiConverterString.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: FfiRecurrenceAction, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .createChild(templateUuid,imask,dueEpoch,waitEpoch,cloneableFields):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(templateUuid, into: &buf)
+            FfiConverterUInt32.write(imask, into: &buf)
+            FfiConverterInt64.write(dueEpoch, into: &buf)
+            FfiConverterOptionInt64.write(waitEpoch, into: &buf)
+            FfiConverterDictionaryStringString.write(cloneableFields, into: &buf)
+            
+        
+        case let .updateTemplateMask(templateUuid,newMask):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(templateUuid, into: &buf)
+            FfiConverterString.write(newMask, into: &buf)
+            
+        
+        case let .expireTemplate(templateUuid):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(templateUuid, into: &buf)
+            
+        
+        case let .warnHitLimit(templateUuid):
+            writeInt(&buf, Int32(4))
+            FfiConverterString.write(templateUuid, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiRecurrenceAction_lift(_ buf: RustBuffer) throws -> FfiRecurrenceAction {
+    return try FfiConverterTypeFfiRecurrenceAction.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFfiRecurrenceAction_lower(_ value: FfiRecurrenceAction) -> RustBuffer {
+    return FfiConverterTypeFfiRecurrenceAction.lower(value)
 }
 
 
@@ -3180,6 +3714,30 @@ public enum TaskMutation: Equatable, Hashable {
     case setEstimate(boxes: UInt32?
     )
     /**
+     * Set the recurrence spec string. `None` clears the field.
+     *
+     * Use for recurring templates (e.g. `"monthly"`, `"7d"`).
+     */
+    case setRecur(value: String?
+    )
+    /**
+     * Set the recurrence mask string. `None` clears the field.
+     */
+    case setMask(value: String?
+    )
+    /**
+     * Set the recurring child's index into the parent mask. `None` clears the field.
+     */
+    case setImask(value: UInt32?
+    )
+    /**
+     * Set the recurrence expiry date. `None` clears the field.
+     *
+     * Stored as a Unix epoch seconds string in TaskMap.
+     */
+    case setUntil(epoch: Int64?
+    )
+    /**
      * Generic escape hatch for setting arbitrary UDA values.
      *
      * `key` is the raw TaskMap key. `value` is `None` to remove.
@@ -3271,7 +3829,19 @@ public struct FfiConverterTypeTaskMutation: FfiConverterRustBuffer {
         case 22: return .setEstimate(boxes: try FfiConverterOptionUInt32.read(from: &buf)
         )
         
-        case 23: return .setValue(key: try FfiConverterString.read(from: &buf), value: try FfiConverterOptionString.read(from: &buf)
+        case 23: return .setRecur(value: try FfiConverterOptionString.read(from: &buf)
+        )
+        
+        case 24: return .setMask(value: try FfiConverterOptionString.read(from: &buf)
+        )
+        
+        case 25: return .setImask(value: try FfiConverterOptionUInt32.read(from: &buf)
+        )
+        
+        case 26: return .setUntil(epoch: try FfiConverterOptionInt64.read(from: &buf)
+        )
+        
+        case 27: return .setValue(key: try FfiConverterString.read(from: &buf), value: try FfiConverterOptionString.read(from: &buf)
         )
         
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -3389,8 +3959,28 @@ public struct FfiConverterTypeTaskMutation: FfiConverterRustBuffer {
             FfiConverterOptionUInt32.write(boxes, into: &buf)
             
         
-        case let .setValue(key,value):
+        case let .setRecur(value):
             writeInt(&buf, Int32(23))
+            FfiConverterOptionString.write(value, into: &buf)
+            
+        
+        case let .setMask(value):
+            writeInt(&buf, Int32(24))
+            FfiConverterOptionString.write(value, into: &buf)
+            
+        
+        case let .setImask(value):
+            writeInt(&buf, Int32(25))
+            FfiConverterOptionUInt32.write(value, into: &buf)
+            
+        
+        case let .setUntil(epoch):
+            writeInt(&buf, Int32(26))
+            FfiConverterOptionInt64.write(epoch, into: &buf)
+            
+        
+        case let .setValue(key,value):
+            writeInt(&buf, Int32(27))
             FfiConverterString.write(key, into: &buf)
             FfiConverterOptionString.write(value, into: &buf)
             
@@ -3481,6 +4071,30 @@ fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterString.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeFfiRecurrenceParentInfo: FfiConverterRustBuffer {
+    typealias SwiftType = FfiRecurrenceParentInfo?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeFfiRecurrenceParentInfo.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeFfiRecurrenceParentInfo.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -3662,6 +4276,31 @@ fileprivate struct FfiConverterSequenceTypeFfiRecurrenceDiffEntry: FfiConverterR
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeFfiRecurringTemplate: FfiConverterRustBuffer {
+    typealias SwiftType = [FfiRecurringTemplate]
+
+    public static func write(_ value: [FfiRecurringTemplate], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeFfiRecurringTemplate.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiRecurringTemplate] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [FfiRecurringTemplate]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeFfiRecurringTemplate.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeFfiSqlRow: FfiConverterRustBuffer {
     typealias SwiftType = [FfiSqlRow]
 
@@ -3779,6 +4418,56 @@ fileprivate struct FfiConverterSequenceTypeFfiTreeNode: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeFfiTreeNode.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeFfiCompletionAction: FfiConverterRustBuffer {
+    typealias SwiftType = [FfiCompletionAction]
+
+    public static func write(_ value: [FfiCompletionAction], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeFfiCompletionAction.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiCompletionAction] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [FfiCompletionAction]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeFfiCompletionAction.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeFfiRecurrenceAction: FfiConverterRustBuffer {
+    typealias SwiftType = [FfiRecurrenceAction]
+
+    public static func write(_ value: [FfiRecurrenceAction], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeFfiRecurrenceAction.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiRecurrenceAction] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [FfiRecurrenceAction]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeFfiRecurrenceAction.read(from: &buf))
         }
         return seq
     }
@@ -4023,6 +4712,25 @@ public func uniffiForeignFutureHandleCountTaskchampionFfi() -> Int {
     UNIFFI_FOREIGN_FUTURE_HANDLE_MAP.count
 }
 /**
+ * Plan all actions needed to complete a task.
+ *
+ * The target task is always the first action. Subsequent actions are:
+ * 1. `CompleteTask` for each pending or waiting descendant (tree behavior)
+ * 2. `UpdateRecurrenceMask` for the recurrence parent (if applicable)
+ *
+ * Returns `InvalidInput` if any UUID is invalid or if `imask` is out of
+ * bounds for the parent mask.
+ */
+public func planCompletionFfi(targetUuid: String, descendants: [FfiTaskDescendant], recurrenceParent: FfiRecurrenceParentInfo?)throws  -> [FfiCompletionAction]  {
+    return try  FfiConverterSequenceTypeFfiCompletionAction.lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
+    uniffi_taskchampion_ffi_fn_func_plan_completion_ffi(
+        FfiConverterString.lower(targetUuid),
+        FfiConverterSequenceTypeFfiTaskDescendant.lower(descendants),
+        FfiConverterOptionTypeFfiRecurrenceParentInfo.lower(recurrenceParent),$0
+    )
+})
+}
+/**
  * SQL that covers all task-related tables.
  *
  * Pass this to `db.watch()` so PowerSync re-runs your query whenever any
@@ -4106,6 +4814,24 @@ public func parseRecurrenceSpec(input: String)throws  -> FfiRecurrenceSpec  {
 })
 }
 /**
+ * Orchestrate recurrence: given templates and the current time, return all
+ * actions needed to bring task storage up to date.
+ *
+ * `future_limit` limits how many future (not-yet-due) instances are
+ * pre-generated per template (matches TW's `recurrence.limit` config, default 1).
+ *
+ * Returns `InvalidInput` if any template's `recur` field cannot be parsed.
+ */
+public func reconcileFfi(templates: [FfiRecurringTemplate], nowEpoch: Int64, futureLimit: UInt32)throws  -> [FfiRecurrenceAction]  {
+    return try  FfiConverterSequenceTypeFfiRecurrenceAction.lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
+    uniffi_taskchampion_ffi_fn_func_reconcile_ffi(
+        FfiConverterSequenceTypeFfiRecurringTemplate.lower(templates),
+        FfiConverterInt64.lower(nowEpoch),
+        FfiConverterUInt32.lower(futureLimit),$0
+    )
+})
+}
+/**
  * Compute which recurrence instances still need to be created.
  *
  * Returns `(index, epoch)` pairs for slots not yet covered by the mask.
@@ -4115,6 +4841,21 @@ public func recurrenceDiffFfi(mask: String, dueDateEpochs: [Int64])throws  -> [F
     uniffi_taskchampion_ffi_fn_func_recurrence_diff_ffi(
         FfiConverterString.lower(mask),
         FfiConverterSequenceInt64.lower(dueDateEpochs),$0
+    )
+})
+}
+/**
+ * Update a template's mask when a child task's status changes.
+ *
+ * `current_mask` is the raw mask string (e.g. `"-+-"`).
+ * Returns the updated mask string, or `InvalidInput` if `imask` is out of
+ * bounds for the mask.
+ */
+public func updateMaskForChildFfi(currentMask: String, change: FfiChildStatusChange)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
+    uniffi_taskchampion_ffi_fn_func_update_mask_for_child_ffi(
+        FfiConverterString.lower(currentMask),
+        FfiConverterTypeFfiChildStatusChange_lower(change),$0
     )
 })
 }
@@ -4162,6 +4903,9 @@ private let initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
+    if (uniffi_taskchampion_ffi_checksum_func_plan_completion_ffi() != 61772) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_taskchampion_ffi_checksum_func_alltasktablessql() != 45498) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -4180,7 +4924,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_taskchampion_ffi_checksum_func_parse_recurrence_spec() != 41629) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_taskchampion_ffi_checksum_func_reconcile_ffi() != 28575) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_taskchampion_ffi_checksum_func_recurrence_diff_ffi() != 34602) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_taskchampion_ffi_checksum_func_update_mask_for_child_ffi() != 45173) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_func_descendants_to_complete_ffi() != 38919) {
