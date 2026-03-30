@@ -124,15 +124,6 @@ pub struct FfiRecurrenceDiffEntry {
     pub epoch: i64,
 }
 
-/// Result of `descendants_to_delete` — the pending count and all UUIDs.
-#[derive(uniffi::Record)]
-pub struct FfiDeleteResult {
-    /// Number of Pending/Waiting descendants.
-    pub pending_count: u32,
-    /// UUIDs of all descendants (all statuses).
-    pub all_uuids: Vec<String>,
-}
-
 // ---------------------------------------------------------------------------
 // Exported functions
 // ---------------------------------------------------------------------------
@@ -220,20 +211,15 @@ pub fn mask_char_for_ffi_status(status: FfiStatus, has_wait: bool) -> FfiMaskCha
 ///
 /// Pass the serialized mask string, the total number of generated due dates,
 /// and whether the `until` boundary was reached.
+///
+/// This function is infallible: `parse_mask` and `is_template_expired` both
+/// have no error paths, so the return type is a plain `bool`.
 #[uniffi::export]
-pub fn is_template_expired_ffi(
-    mask: String,
-    due_count: u32,
-    until_reached: bool,
-) -> Result<bool, FfiError> {
+pub fn is_template_expired_ffi(mask: String, due_count: u32, until_reached: bool) -> bool {
     use praxis::recurrence::mask::is_template_expired;
 
     let parsed_mask = parse_mask(&mask);
-    Ok(is_template_expired(
-        &parsed_mask,
-        due_count as usize,
-        until_reached,
-    ))
+    is_template_expired(&parsed_mask, due_count as usize, until_reached)
 }
 
 // ---------------------------------------------------------------------------

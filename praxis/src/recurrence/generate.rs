@@ -177,12 +177,17 @@ pub fn generate_due_dates(
         match next_due_date(spec, current) {
             Some(next) => {
                 if next <= current {
-                    // Overflow or no-op — stop.
+                    // Overflow or no-op — signal a potential data issue.
+                    hit_limit = true;
                     break;
                 }
                 current = next;
             }
-            None => break,
+            None => {
+                // Arithmetic overflow — signal a potential data issue.
+                hit_limit = true;
+                break;
+            }
         }
     }
 

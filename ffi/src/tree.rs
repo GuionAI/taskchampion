@@ -1,6 +1,5 @@
 //! FFI types and exported functions for praxis tree behavior.
 
-use crate::recurrence::FfiDeleteResult;
 use crate::types::{FfiError, FfiStatus};
 use praxis::tree::behavior::{descendants_to_complete, descendants_to_delete, TaskDescendant};
 use taskchampion::Status;
@@ -9,6 +8,15 @@ use uuid::Uuid;
 // ---------------------------------------------------------------------------
 // FFI types
 // ---------------------------------------------------------------------------
+
+/// Result of `descendants_to_delete_ffi` — the pending count and all UUIDs.
+#[derive(uniffi::Record)]
+pub struct FfiDeleteResult {
+    /// Number of Pending/Waiting descendants.
+    pub pending_count: u32,
+    /// UUIDs of all descendants (all statuses).
+    pub all_uuids: Vec<String>,
+}
 
 /// A task in the tree hierarchy — status info for cascade operations.
 #[derive(uniffi::Record)]

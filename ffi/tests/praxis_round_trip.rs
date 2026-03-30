@@ -58,6 +58,32 @@ fn test_generate_due_dates_monthly() {
     assert!(!result.hit_limit);
 }
 
+#[test]
+fn test_generate_due_dates_with_until() {
+    // Base due: 2024-01-15 UTC
+    let base_epoch: i64 = 1705276800; // 2024-01-15 00:00:00 UTC
+    let now_epoch: i64 = 1705276800;
+    // until: 2024-03-15 UTC — covers exactly 2 monthly intervals after base
+    // 2024-01-15 → 2024-02-15 → 2024-03-15 (until boundary, inclusive)
+    let until_epoch: i64 = 1710460800; // 2024-03-15 00:00:00 UTC
+    let spec = FfiRecurrenceSpec::Monthly;
+
+    let result = generate_due_dates(spec, base_epoch, now_epoch, Some(until_epoch), 10).unwrap();
+    // Should have stopped at/after the until boundary
+    assert!(
+        result.until_reached,
+        "until_reached must be true when until is set"
+    );
+    // All dates must be <= until_epoch
+    for &d in &result.dates {
+        assert!(
+            d <= until_epoch,
+            "date {d} exceeds until_epoch {until_epoch}"
+        );
+    }
+    assert!(!result.hit_limit);
+}
+
 // ---------------------------------------------------------------------------
 // recurrence_diff_ffi
 // ---------------------------------------------------------------------------
@@ -119,19 +145,19 @@ fn test_mask_char_for_status() {
 #[test]
 fn test_is_template_expired() {
     // All completed + until_reached → expired
-    assert!(is_template_expired_ffi("++X".to_string(), 3, true).unwrap());
+    assert!(is_template_expired_ffi("++X".to_string(), 3, true));
 
     // Has pending slot → NOT expired
-    assert!(!is_template_expired_ffi("+-".to_string(), 2, true).unwrap());
+    assert!(!is_template_expired_ffi("+-".to_string(), 2, true));
 
     // until_reached = false → NOT expired
-    assert!(!is_template_expired_ffi("++".to_string(), 2, false).unwrap());
+    assert!(!is_template_expired_ffi("++".to_string(), 2, false));
 
     // Mask shorter than due_count → NOT expired
-    assert!(!is_template_expired_ffi("++".to_string(), 3, true).unwrap());
+    assert!(!is_template_expired_ffi("++".to_string(), 3, true));
 
     // Unknown '?' entries don't block expiry
-    assert!(is_template_expired_ffi("+?X".to_string(), 3, true).unwrap());
+    assert!(is_template_expired_ffi("+?X".to_string(), 3, true));
 }
 
 // ---------------------------------------------------------------------------
@@ -219,4 +245,30 @@ fn test_descendants_to_delete_unknown_not_counted() {
     let result = descendants_to_delete_ffi(descendants).unwrap();
     assert_eq!(result.pending_count, 0);
     assert_eq!(result.all_uuids.len(), 2);
+}
+
+// ---------------------------------------------------------------------------
+// Error handling: invalid UUID
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_descendants_to_complete_invalid_uuid_returns_err() {
+    let descendants = vec![FfiTaskDescendant {
+        uuid: "not-a-uuid".to_string(),
+        status: FfiStatus::Pending,
+        has_wait: false,
+    }];
+    let result = descendants_to_complete_ffi(descendants);
+    assert!(result.is_err(), "expected Err for invalid UUID");
+}
+
+#[test]
+fn test_descendants_to_delete_invalid_uuid_returns_err() {
+    let descendants = vec![FfiTaskDescendant {
+        uuid: "not-a-uuid".to_string(),
+        status: FfiStatus::Pending,
+        has_wait: false,
+    }];
+    let result = descendants_to_delete_ffi(descendants);
+    assert!(result.is_err(), "expected Err for invalid UUID");
 }
