@@ -412,9 +412,10 @@ impl FfiSession {
                 });
             }
 
-            // Get siblings excluding uuid (in position order).
+            // Get siblings excluding uuid, sorted by position string.
             let tm = replica.tree_map().await.map_err(FfiError::from)?;
-            let siblings = tm.sibling_positions(task.get_parent(), Some(uuid_parsed));
+            let mut siblings = tm.sibling_positions(task.get_parent(), Some(uuid_parsed));
+            siblings.sort_by(|(_, a), (_, b)| a.cmp(b));
 
             // Find anchor's index and position.
             let anchor_idx = siblings
@@ -506,9 +507,10 @@ impl FfiSession {
                 });
             }
 
-            // Get siblings excluding uuid (in position order).
+            // Get siblings excluding uuid, sorted by position string.
             let tm = replica.tree_map().await.map_err(FfiError::from)?;
-            let siblings = tm.sibling_positions(task.get_parent(), Some(uuid_parsed));
+            let mut siblings = tm.sibling_positions(task.get_parent(), Some(uuid_parsed));
+            siblings.sort_by(|(_, a), (_, b)| a.cmp(b));
 
             // Find anchor's index and position.
             let anchor_idx = siblings
@@ -622,8 +624,9 @@ impl FfiSession {
                 }
             }
 
-            // Compute new position under new_parent.
-            let siblings = tm.sibling_positions(new_parent_parsed, None);
+            // Compute new position under new_parent (sorted by position string for stable ordering).
+            let mut siblings = tm.sibling_positions(new_parent_parsed, None);
+            siblings.sort_by(|(_, a), (_, b)| a.cmp(b));
             let new_pos: Option<String> = match &position {
                 ReparentPosition::End => {
                     let last_pos = siblings.last().map(|(_, p)| p.as_str());
