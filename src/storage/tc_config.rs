@@ -118,6 +118,11 @@ impl TcConfig {
         Ok(())
     }
 
+    /// Return xstatus names as a `Vec<String>` (preserves insertion order).
+    pub fn xstatus_list(&self) -> Vec<String> {
+        self.xstatus.iter().map(|x| x.name.clone()).collect()
+    }
+
     /// Return `true` if `name` is a known xstatus definition.
     pub fn has_xstatus(&self, name: &str) -> bool {
         self.xstatus.iter().any(|x| x.name == name)
@@ -141,6 +146,25 @@ impl TcConfig {
         let before = self.xstatus.len();
         self.xstatus.retain(|x| x.name != name);
         self.xstatus.len() < before
+    }
+
+    /// Rename `old` → `new` in the xstatus definitions.
+    ///
+    /// Returns `Err` (message) if `old` is not present or `new` already exists.
+    /// Returns `Err` if `old == new` (renaming to the same name is a no-op error).
+    pub fn rename_xstatus(&mut self, old: &str, new: &str) -> Result<(), String> {
+        if !self.xstatus.iter().any(|x| x.name == old) {
+            return Err(format!("XStatus not found: {old}"));
+        }
+        if self.xstatus.iter().any(|x| x.name == new) {
+            return Err(format!("XStatus already exists: {new}"));
+        }
+        for x in &mut self.xstatus {
+            if x.name == old {
+                x.name = new.to_string();
+            }
+        }
+        Ok(())
     }
 }
 
@@ -282,6 +306,80 @@ mod tests {
         assert!(!added_again);
         assert_eq!(cfg.xstatus.len(), 1);
         assert_eq!(cfg.xstatus[0].icon, 128721, "original entry preserved");
+    }
+
+    // ── xstatus_list ──────────────────────────────────────────────────────
+
+    #[test]
+    fn xstatus_list_empty() {
+        let cfg = TcConfig::default();
+        assert!(cfg.xstatus_list().is_empty());
+    }
+
+    #[test]
+    fn xstatus_list_preserves_order() {
+        let mut cfg = TcConfig::default();
+        cfg.add_xstatus(XStatusDef {
+            name: "blocked".into(),
+            icon: 1,
+        });
+        cfg.add_xstatus(XStatusDef {
+            name: "alpha".into(),
+            icon: 2,
+        });
+        assert_eq!(cfg.xstatus_list(), vec!["blocked", "alpha"]);
+    }
+
+    // ── rename_xstatus ──────────────────────────────────────────────────
+
+    #[test]
+    fn rename_xstatus_succeeds() {
+        let mut cfg = TcConfig::default();
+        cfg.add_xstatus(XStatusDef {
+            name: "blocked".into(),
+            icon: 128721,
+        });
+        cfg.rename_xstatus("blocked", "waiting").unwrap();
+        assert!(!cfg.has_xstatus("blocked"));
+        assert!(cfg.has_xstatus("waiting"));
+        // Icon preserved
+        assert_eq!(cfg.xstatus[0].icon, 128721);
+    }
+
+    #[test]
+    fn rename_xstatus_same_name_is_error() {
+        let mut cfg = TcConfig::default();
+        cfg.add_xstatus(XStatusDef {
+            name: "blocked".into(),
+            icon: 1,
+        });
+        let result = cfg.rename_xstatus("blocked", "blocked");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().starts_with("XStatus already exists"));
+    }
+
+    #[test]
+    fn rename_xstatus_old_not_found() {
+        let cfg = &mut TcConfig::default();
+        let result = cfg.rename_xstatus("ghost", "new");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().starts_with("XStatus not found"));
+    }
+
+    #[test]
+    fn rename_xstatus_new_already_exists() {
+        let mut cfg = TcConfig::default();
+        cfg.add_xstatus(XStatusDef {
+            name: "old".into(),
+            icon: 1,
+        });
+        cfg.add_xstatus(XStatusDef {
+            name: "new".into(),
+            icon: 2,
+        });
+        let result = cfg.rename_xstatus("old", "new");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().starts_with("XStatus already exists"));
     }
 
     #[test]

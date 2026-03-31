@@ -2173,3 +2173,126 @@ async fn test_reorder_anchor_with_no_position_returns_error() {
         "expected AnchorHasNoPosition"
     );
 }
+
+// ── xstatus lifecycle ─────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_create_xstatus_success() {
+    let (session, mock) = make_session_with_executor();
+    session
+        .create_xstatus("blocked".into(), 128721)
+        .await
+        .unwrap();
+    let config: serde_json::Value = serde_json::from_str(&mock.read_tc_config()).unwrap();
+    let xs = config["xstatus"].as_array().unwrap();
+    assert_eq!(xs.len(), 1);
+    assert_eq!(xs[0]["name"], "blocked");
+    assert_eq!(xs[0]["icon"], 128721);
+}
+
+#[tokio::test]
+async fn test_create_xstatus_already_exists() {
+    let (session, mock) = make_session_with_executor();
+    mock.inject_tc_config(r#"{"xstatus":[{"name":"blocked","icon":128721}]}"#);
+    let result = session.create_xstatus("blocked".into(), 9999).await;
+    assert!(
+        matches!(result, Err(FfiError::XStatusAlreadyExists { .. })),
+        "expected XStatusAlreadyExists, got: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_delete_xstatus_removes_from_config_and_tasks() {
+    let (session, mock) = make_session_with_executor();
+    mock.inject_tc_config(r#"{"xstatus":[{"name":"blocked","icon":128721}]}"#);
+
+    let uuid = Uuid::new_v4().to_string();
+    session
+        .create_task(uuid.clone(), "XStatus delete test".into())
+        .await
+        .unwrap();
+    session
+        .set_xstatus(uuid.clone(), "blocked".into())
+        .await
+        .unwrap();
+
+    let count = session.delete_xstatus("blocked".into()).await.unwrap();
+    assert_eq!(count, 1, "one task should have xstatus cleared");
+
+    // Config no longer has 'blocked'.
+    let config: serde_json::Value = serde_json::from_str(&mock.read_tc_config()).unwrap();
+    let xs = config["xstatus"].as_array().unwrap();
+    assert!(xs.is_empty());
+
+    // Task no longer has xstatus.
+    let task = session.get_task(uuid).await.unwrap().unwrap();
+    assert_eq!(task.xstatus, None);
+}
+
+#[tokio::test]
+async fn test_delete_xstatus_not_found() {
+    let (session, _mock) = make_session_with_executor();
+    let result = session.delete_xstatus("ghost".into()).await;
+    assert!(
+        matches!(result, Err(FfiError::XStatusNotFound { .. })),
+        "expected XStatusNotFound, got: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_rename_xstatus_success() {
+    let (session, mock) = make_session_with_executor();
+    mock.inject_tc_config(r#"{"xstatus":[{"name":"blocked","icon":128721}]}"#);
+
+    let uuid = Uuid::new_v4().to_string();
+    session
+        .create_task(uuid.clone(), "XStatus rename test".into())
+        .await
+        .unwrap();
+    session
+        .set_xstatus(uuid.clone(), "blocked".into())
+        .await
+        .unwrap();
+
+    let count = session
+        .rename_xstatus("blocked".into(), "waiting".into())
+        .await
+        .unwrap();
+    assert_eq!(count, 1, "one task should have xstatus renamed");
+
+    // Config updated.
+    let config: serde_json::Value = serde_json::from_str(&mock.read_tc_config()).unwrap();
+    let xs = config["xstatus"].as_array().unwrap();
+    assert_eq!(xs.len(), 1);
+    assert_eq!(xs[0]["name"], "waiting");
+    assert_eq!(xs[0]["icon"], 128721);
+
+    // Task updated.
+    let task = session.get_task(uuid).await.unwrap().unwrap();
+    assert_eq!(task.xstatus.as_deref(), Some("waiting"));
+}
+
+#[tokio::test]
+async fn test_rename_xstatus_not_found() {
+    let (session, _mock) = make_session_with_executor();
+    let result = session.rename_xstatus("ghost".into(), "new".into()).await;
+    assert!(
+        matches!(result, Err(FfiError::XStatusNotFound { .. })),
+        "expected XStatusNotFound, got: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_rename_xstatus_already_exists() {
+    let (session, mock) = make_session_with_executor();
+    mock.inject_tc_config(
+        r#"{"xstatus":[{"name":"blocked","icon":1},{"name":"waiting","icon":2}]}"#,
+    );
+    let result = session
+        .rename_xstatus("blocked".into(), "waiting".into())
+        .await;
+    assert!(
+        matches!(result, Err(FfiError::XStatusAlreadyExists { .. })),
+        "expected XStatusAlreadyExists, got: {result:?}"
+    );
+}
