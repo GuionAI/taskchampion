@@ -192,6 +192,66 @@ impl FfiSession {
         })
         .await
     }
+
+    /// Remove `name` from tc_config.tags and strip `tag_{name}` from all tasks atomically.
+    ///
+    /// Returns the number of tasks that had the tag removed.
+    /// Returns `TagNotFound` if the tag is not in tc_config.
+    pub async fn delete_tag(&self, name: String) -> Result<u32, FfiError> {
+        self.with_replica(|mut replica| async move {
+            let mut ops = Operations::new();
+            ops.push(Operation::UndoPoint);
+            let count = replica
+                .delete_tag(&name, &mut ops)
+                .await
+                .map_err(|e| match e {
+                    taskchampion::Error::Usage(ref msg) if msg.starts_with("Tag not found") => {
+                        FfiError::TagNotFound { name: name.clone() }
+                    }
+                    other => FfiError::from(other),
+                })?;
+            replica
+                .commit_operations(ops)
+                .await
+                .map_err(FfiError::from)?;
+            Ok(count)
+        })
+        .await
+    }
+
+    /// Rename `old` to `new` in tc_config.tags and across all task keys atomically.
+    ///
+    /// Returns the number of tasks updated.
+    /// Returns `TagNotFound` if `old` is not in tc_config.
+    /// Returns `TagAlreadyExists` if `new` is already in tc_config.
+    /// Returns `InvalidInput` if `new` is not a valid tag name.
+    pub async fn rename_tag(&self, old: String, new: String) -> Result<u32, FfiError> {
+        self.with_replica(|mut replica| async move {
+            let mut ops = Operations::new();
+            ops.push(Operation::UndoPoint);
+            let count = replica
+                .rename_tag(&old, &new, &mut ops)
+                .await
+                .map_err(|e| match e {
+                    taskchampion::Error::Usage(ref msg) if msg.starts_with("tag not found") => {
+                        FfiError::TagNotFound { name: old.clone() }
+                    }
+                    taskchampion::Error::Usage(ref msg) if msg.starts_with("tag already exists") => {
+                        FfiError::TagAlreadyExists { name: new.clone() }
+                    }
+                    taskchampion::Error::Usage(ref msg) if msg.starts_with("Invalid tag name") => {
+                        FfiError::InvalidInput { message: msg.clone() }
+                    }
+                    other => FfiError::from(other),
+                })?;
+            replica
+                .commit_operations(ops)
+                .await
+                .map_err(FfiError::from)?;
+            Ok(count)
+        })
+        .await
+    }
 }
 
 // ---------------------------------------------------------------------------
