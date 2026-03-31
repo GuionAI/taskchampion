@@ -310,6 +310,83 @@ impl<S: Storage> Replica<S> {
         task.add_tag(tag, ops)
     }
 
+    /// Remove `name` from tc_config.xstatus AND clear the `xstatus` UDA key from every task
+    /// whose xstatus value matches `name`, in a single committed operation group.
+    ///
+    /// Task operations are committed first (with an undo point), then the config is
+    /// persisted. If the task commit fails the config is left untouched. The config
+    /// update is not reversible via `undo` — undo only reverses the task-level clear.
+    ///
+    /// Returns the number of tasks that had the xstatus cleared.
+    /// Returns `Err` if the xstatus is not present in tc_config.
+    pub async fn delete_xstatus(&mut self, name: &str) -> Result<u32> {
+        // Load and validate config first — fail fast before touching tasks.
+        let mut config = self.get_tc_config_parsed().await?;
+        if !config.remove_xstatus(name) {
+            return Err(Error::Usage(format!("XStatus not found: {name}")));
+        }
+
+        // Build task-clear operations: remove xstatus UDA from tasks matching this name.
+        let all = self.taskdb.all_tasks().await?;
+        let mut ops = Operations::new();
+        ops.push(Operation::UndoPoint);
+        let mut count = 0u32;
+        for (uuid, taskmap) in &all {
+            if taskmap.get("xstatus").map(|v| v.as_str()) == Some(name) {
+                ops.push(Operation::Update {
+                    uuid: *uuid,
+                    property: "xstatus".to_string(),
+                    old_value: taskmap.get("xstatus").cloned(),
+                    value: None,
+                    timestamp: chrono::Utc::now(),
+                });
+                count += 1;
+            }
+        }
+
+        // Commit task ops first; only persist config if that succeeds.
+        self.commit_operations(ops).await?;
+        self.set_tc_config_parsed(&config).await?;
+        Ok(count)
+    }
+
+    /// Rename `old` → `new` in tc_config.xstatus AND rename the `xstatus` UDA value on every
+    /// task whose xstatus matches `old`, in a single committed operation group.
+    ///
+    /// Task operations are committed first (with an undo point), then the config is
+    /// persisted. If the task commit fails the config is left untouched. The config
+    /// update is not reversible via `undo`.
+    ///
+    /// Returns the number of tasks that had the xstatus renamed.
+    pub async fn rename_xstatus(&mut self, old: &str, new: &str) -> Result<u32> {
+        // Load and validate config first — fail fast before touching tasks.
+        let mut config = self.get_tc_config_parsed().await?;
+        config.rename_xstatus(old, new).map_err(Error::Usage)?;
+
+        // Build task-rename operations: update xstatus UDA value from old → new.
+        let all = self.taskdb.all_tasks().await?;
+        let mut ops = Operations::new();
+        ops.push(Operation::UndoPoint);
+        let mut count = 0u32;
+        for (uuid, taskmap) in &all {
+            if taskmap.get("xstatus").map(|v| v.as_str()) == Some(old) {
+                ops.push(Operation::Update {
+                    uuid: *uuid,
+                    property: "xstatus".to_string(),
+                    old_value: taskmap.get("xstatus").cloned(),
+                    value: Some(new.to_string()),
+                    timestamp: chrono::Utc::now(),
+                });
+                count += 1;
+            }
+        }
+
+        // Commit task ops first; only persist config if that succeeds.
+        self.commit_operations(ops).await?;
+        self.set_tc_config_parsed(&config).await?;
+        Ok(count)
+    }
+
     /// Get the dependency map for all pending tasks.
     ///
     /// A task dependency is recognized when a task in the working set depends on a task with
@@ -1350,6 +1427,163 @@ mod tests {
         assert!(
             updated.get_value("tag_work").is_some(),
             "tag_work should be set on the task"
+        );
+    }
+
+    // ── xstatus lifecycle helpers ─────────────────────────────────────────
+
+    async fn make_replica_with_xstatus(
+        name: &str,
+    ) -> (Replica<InMemoryStorage>, Uuid) {
+        use crate::storage::tc_config::XStatusDef;
+
+        let mut replica = Replica::new(InMemoryStorage::new());
+        // Set up tc_config with the xstatus definition.
+        let mut config = crate::storage::tc_config::TcConfig::default();
+        config.add_xstatus(XStatusDef {
+            name: name.to_string(),
+            icon: 128721,
+        });
+        replica.set_tc_config_parsed(&config).await.unwrap();
+        // Create a task with the xstatus UDA value.
+        let uuid = Uuid::new_v4();
+        let mut ops = Operations::new();
+        replica.create_task(uuid, &mut ops).await.unwrap();
+        ops.push(Operation::Update {
+            uuid,
+            property: "xstatus".to_string(),
+            old_value: None,
+            value: Some(name.to_string()),
+            timestamp: Utc::now(),
+        });
+        replica.commit_operations(ops).await.unwrap();
+        (replica, uuid)
+    }
+
+    // ── delete_xstatus ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn delete_xstatus_updates_config_and_task() {
+        let (mut replica, task_uuid) = make_replica_with_xstatus("blocked").await;
+        let count = replica.delete_xstatus("blocked").await.unwrap();
+        assert_eq!(count, 1, "one task should have the xstatus cleared");
+        // Config no longer has 'blocked'.
+        let config = replica.get_tc_config_parsed().await.unwrap();
+        assert!(!config.has_xstatus("blocked"));
+        // Task no longer has the xstatus key.
+        let task = replica.get_task(task_uuid).await.unwrap().unwrap();
+        assert!(task.get_value("xstatus").is_none());
+    }
+
+    #[tokio::test]
+    async fn delete_xstatus_nonexistent_returns_err() {
+        let mut replica = Replica::new(InMemoryStorage::new());
+        let err = replica.delete_xstatus("ghost").await.unwrap_err();
+        assert!(
+            matches!(err, Error::Usage(_)),
+            "expected Error::Usage, got: {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_xstatus_only_affects_matching_tasks() {
+        use crate::storage::tc_config::XStatusDef;
+
+        let mut replica = Replica::new(InMemoryStorage::new());
+        let mut config = crate::storage::tc_config::TcConfig::default();
+        config.add_xstatus(XStatusDef {
+            name: "blocked".into(),
+            icon: 1,
+        });
+        config.add_xstatus(XStatusDef {
+            name: "waiting".into(),
+            icon: 2,
+        });
+        replica.set_tc_config_parsed(&config).await.unwrap();
+
+        // Task A with xstatus=blocked, task B with xstatus=waiting.
+        let uuid_a = Uuid::new_v4();
+        let uuid_b = Uuid::new_v4();
+        let mut ops = Operations::new();
+        replica.create_task(uuid_a, &mut ops).await.unwrap();
+        ops.push(Operation::Update {
+            uuid: uuid_a,
+            property: "xstatus".to_string(),
+            old_value: None,
+            value: Some("blocked".to_string()),
+            timestamp: Utc::now(),
+        });
+        replica.create_task(uuid_b, &mut ops).await.unwrap();
+        ops.push(Operation::Update {
+            uuid: uuid_b,
+            property: "xstatus".to_string(),
+            old_value: None,
+            value: Some("waiting".to_string()),
+            timestamp: Utc::now(),
+        });
+        replica.commit_operations(ops).await.unwrap();
+
+        let count = replica.delete_xstatus("blocked").await.unwrap();
+        assert_eq!(count, 1);
+        // Task A cleared, task B untouched.
+        let task_a = replica.get_task(uuid_a).await.unwrap().unwrap();
+        assert!(task_a.get_value("xstatus").is_none());
+        let task_b = replica.get_task(uuid_b).await.unwrap().unwrap();
+        assert_eq!(task_b.get_value("xstatus").unwrap(), "waiting");
+    }
+
+    // ── rename_xstatus ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn rename_xstatus_success() {
+        let (mut replica, task_uuid) = make_replica_with_xstatus("blocked").await;
+        let count = replica.rename_xstatus("blocked", "waiting").await.unwrap();
+        assert_eq!(count, 1, "one task should have the xstatus renamed");
+        // Config updated.
+        let config = replica.get_tc_config_parsed().await.unwrap();
+        assert!(!config.has_xstatus("blocked"));
+        assert!(config.has_xstatus("waiting"));
+        // Task updated.
+        let task = replica.get_task(task_uuid).await.unwrap().unwrap();
+        assert_eq!(task.get_value("xstatus").unwrap(), "waiting");
+    }
+
+    #[tokio::test]
+    async fn rename_xstatus_nonexistent_old() {
+        let mut replica = Replica::new(InMemoryStorage::new());
+        let err = replica
+            .rename_xstatus("ghost", "new")
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, Error::Usage(_)),
+            "expected Error::Usage, got: {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn rename_xstatus_duplicate_new() {
+        use crate::storage::tc_config::XStatusDef;
+
+        let mut replica = Replica::new(InMemoryStorage::new());
+        let mut config = crate::storage::tc_config::TcConfig::default();
+        config.add_xstatus(XStatusDef {
+            name: "old".into(),
+            icon: 1,
+        });
+        config.add_xstatus(XStatusDef {
+            name: "new".into(),
+            icon: 2,
+        });
+        replica.set_tc_config_parsed(&config).await.unwrap();
+
+        let err = replica
+            .rename_xstatus("old", "new")
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, Error::Usage(_)),
+            "expected Error::Usage, got: {err:?}"
         );
     }
 }
