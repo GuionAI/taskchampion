@@ -581,6 +581,13 @@ public protocol FfiSessionProtocol: AnyObject, Sendable {
     func createTask(uuid: String, description: String) async throws  -> FfiTask
     
     /**
+     * Register a new xstatus definition in tc_config.
+     *
+     * Returns `XStatusAlreadyExists` if the name is already registered.
+     */
+    func createXstatus(name: String, icon: UInt32) async throws 
+    
+    /**
      * Remove `name` from tc_config.tags and strip `tag_{name}` from all tasks.
      *
      * Task operations are committed first (undoable), then the config is persisted.
@@ -588,6 +595,15 @@ public protocol FfiSessionProtocol: AnyObject, Sendable {
      * Returns `TagNotFound` if the tag is not in tc_config.
      */
     func deleteTag(name: String) async throws  -> UInt32
+    
+    /**
+     * Remove an xstatus definition from tc_config and clear `xstatus` UDA from
+     * all tasks matching that name.
+     *
+     * Returns the number of tasks that had the xstatus cleared.
+     * Returns `XStatusNotFound` if the name is not in tc_config.xstatus.
+     */
+    func deleteXstatus(name: String) async throws  -> UInt32
     
     /**
      * Return all dependency edges as `(from_uuid depends_on to_uuid)` pairs.
@@ -627,6 +643,16 @@ public protocol FfiSessionProtocol: AnyObject, Sendable {
     func renameTag(old: String, new: String) async throws  -> UInt32
     
     /**
+     * Rename an xstatus definition in tc_config and update the `xstatus` UDA value
+     * on all tasks matching the old name.
+     *
+     * Returns the number of tasks updated.
+     * Returns `XStatusNotFound` if `old` is not in tc_config.xstatus.
+     * Returns `XStatusAlreadyExists` if `new` is already in tc_config.xstatus.
+     */
+    func renameXstatus(old: String, new: String) async throws  -> UInt32
+    
+    /**
      * Move `uuid` to a position immediately after `anchor_uuid` among their shared siblings.
      *
      * Both tasks must have the same parent (or both be root tasks).
@@ -645,6 +671,20 @@ public protocol FfiSessionProtocol: AnyObject, Sendable {
      * Returns `NotASibling` if the two tasks have different parents.
      */
     func reorderBefore(uuid: String, anchorUuid: String) async throws  -> FfiTask
+    
+    /**
+     * Move `uuid` to the first position among its current siblings.
+     *
+     * Returns `TaskNotFound` if the UUID does not exist.
+     */
+    func reorderToBeginning(uuid: String) async throws  -> FfiTask
+    
+    /**
+     * Move `uuid` to the last position among its current siblings.
+     *
+     * Returns `TaskNotFound` if the UUID does not exist.
+     */
+    func reorderToEnd(uuid: String) async throws  -> FfiTask
     
     /**
      * Move `uuid` to a new parent with the specified position among siblings.
@@ -857,6 +897,28 @@ open func createTask(uuid: String, description: String)async throws  -> FfiTask 
 }
     
     /**
+     * Register a new xstatus definition in tc_config.
+     *
+     * Returns `XStatusAlreadyExists` if the name is already registered.
+     */
+open func createXstatus(name: String, icon: UInt32)async throws   {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_taskchampion_ffi_fn_method_ffisession_create_xstatus(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(name),FfiConverterUInt32.lower(icon)
+                )
+            },
+            pollFunc: ffi_taskchampion_ffi_rust_future_poll_void,
+            completeFunc: ffi_taskchampion_ffi_rust_future_complete_void,
+            freeFunc: ffi_taskchampion_ffi_rust_future_free_void,
+            liftFunc: { $0 },
+            errorHandler: FfiConverterTypeFfiError_lift
+        )
+}
+    
+    /**
      * Remove `name` from tc_config.tags and strip `tag_{name}` from all tasks.
      *
      * Task operations are committed first (undoable), then the config is persisted.
@@ -868,6 +930,30 @@ open func deleteTag(name: String)async throws  -> UInt32  {
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_taskchampion_ffi_fn_method_ffisession_delete_tag(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(name)
+                )
+            },
+            pollFunc: ffi_taskchampion_ffi_rust_future_poll_u32,
+            completeFunc: ffi_taskchampion_ffi_rust_future_complete_u32,
+            freeFunc: ffi_taskchampion_ffi_rust_future_free_u32,
+            liftFunc: FfiConverterUInt32.lift,
+            errorHandler: FfiConverterTypeFfiError_lift
+        )
+}
+    
+    /**
+     * Remove an xstatus definition from tc_config and clear `xstatus` UDA from
+     * all tasks matching that name.
+     *
+     * Returns the number of tasks that had the xstatus cleared.
+     * Returns `XStatusNotFound` if the name is not in tc_config.xstatus.
+     */
+open func deleteXstatus(name: String)async throws  -> UInt32  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_taskchampion_ffi_fn_method_ffisession_delete_xstatus(
                     self.uniffiCloneHandle(),
                     FfiConverterString.lower(name)
                 )
@@ -993,6 +1079,31 @@ open func renameTag(old: String, new: String)async throws  -> UInt32  {
 }
     
     /**
+     * Rename an xstatus definition in tc_config and update the `xstatus` UDA value
+     * on all tasks matching the old name.
+     *
+     * Returns the number of tasks updated.
+     * Returns `XStatusNotFound` if `old` is not in tc_config.xstatus.
+     * Returns `XStatusAlreadyExists` if `new` is already in tc_config.xstatus.
+     */
+open func renameXstatus(old: String, new: String)async throws  -> UInt32  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_taskchampion_ffi_fn_method_ffisession_rename_xstatus(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(old),FfiConverterString.lower(new)
+                )
+            },
+            pollFunc: ffi_taskchampion_ffi_rust_future_poll_u32,
+            completeFunc: ffi_taskchampion_ffi_rust_future_complete_u32,
+            freeFunc: ffi_taskchampion_ffi_rust_future_free_u32,
+            liftFunc: FfiConverterUInt32.lift,
+            errorHandler: FfiConverterTypeFfiError_lift
+        )
+}
+    
+    /**
      * Move `uuid` to a position immediately after `anchor_uuid` among their shared siblings.
      *
      * Both tasks must have the same parent (or both be root tasks).
@@ -1032,6 +1143,50 @@ open func reorderBefore(uuid: String, anchorUuid: String)async throws  -> FfiTas
                 uniffi_taskchampion_ffi_fn_method_ffisession_reorder_before(
                     self.uniffiCloneHandle(),
                     FfiConverterString.lower(uuid),FfiConverterString.lower(anchorUuid)
+                )
+            },
+            pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeFfiTask_lift,
+            errorHandler: FfiConverterTypeFfiError_lift
+        )
+}
+    
+    /**
+     * Move `uuid` to the first position among its current siblings.
+     *
+     * Returns `TaskNotFound` if the UUID does not exist.
+     */
+open func reorderToBeginning(uuid: String)async throws  -> FfiTask  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_taskchampion_ffi_fn_method_ffisession_reorder_to_beginning(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(uuid)
+                )
+            },
+            pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeFfiTask_lift,
+            errorHandler: FfiConverterTypeFfiError_lift
+        )
+}
+    
+    /**
+     * Move `uuid` to the last position among its current siblings.
+     *
+     * Returns `TaskNotFound` if the UUID does not exist.
+     */
+open func reorderToEnd(uuid: String)async throws  -> FfiTask  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_taskchampion_ffi_fn_method_ffisession_reorder_to_end(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(uuid)
                 )
             },
             pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
@@ -2956,6 +3111,11 @@ public enum FfiError: Swift.Error, Equatable, Hashable, Foundation.LocalizedErro
     case AnchorHasNoPosition(uuid: String
     )
     /**
+     * The referenced project does not exist (SetProject with unknown name).
+     */
+    case ProjectNotFound(name: String
+    )
+    /**
      * delete_tag / rename_tag on a tag name not present in tc_config.
      */
     case TagNotFound(name: String
@@ -2969,6 +3129,16 @@ public enum FfiError: Swift.Error, Equatable, Hashable, Foundation.LocalizedErro
      * set_xstatus with a name not in tc_config.xstatus definitions.
      */
     case UnknownXStatus(name: String
+    )
+    /**
+     * delete_xstatus / rename_xstatus on a name not present in tc_config.xstatus.
+     */
+    case XStatusNotFound(name: String
+    )
+    /**
+     * rename_xstatus / create_xstatus target already exists in tc_config.xstatus.
+     */
+    case XStatusAlreadyExists(name: String
     )
 
     
@@ -3025,13 +3195,22 @@ public struct FfiConverterTypeFfiError: FfiConverterRustBuffer {
         case 8: return .AnchorHasNoPosition(
             uuid: try FfiConverterString.read(from: &buf)
             )
-        case 9: return .TagNotFound(
+        case 9: return .ProjectNotFound(
             name: try FfiConverterString.read(from: &buf)
             )
-        case 10: return .TagAlreadyExists(
+        case 10: return .TagNotFound(
             name: try FfiConverterString.read(from: &buf)
             )
-        case 11: return .UnknownXStatus(
+        case 11: return .TagAlreadyExists(
+            name: try FfiConverterString.read(from: &buf)
+            )
+        case 12: return .UnknownXStatus(
+            name: try FfiConverterString.read(from: &buf)
+            )
+        case 13: return .XStatusNotFound(
+            name: try FfiConverterString.read(from: &buf)
+            )
+        case 14: return .XStatusAlreadyExists(
             name: try FfiConverterString.read(from: &buf)
             )
 
@@ -3088,18 +3267,33 @@ public struct FfiConverterTypeFfiError: FfiConverterRustBuffer {
             FfiConverterString.write(uuid, into: &buf)
             
         
-        case let .TagNotFound(name):
+        case let .ProjectNotFound(name):
             writeInt(&buf, Int32(9))
             FfiConverterString.write(name, into: &buf)
             
         
-        case let .TagAlreadyExists(name):
+        case let .TagNotFound(name):
             writeInt(&buf, Int32(10))
             FfiConverterString.write(name, into: &buf)
             
         
-        case let .UnknownXStatus(name):
+        case let .TagAlreadyExists(name):
             writeInt(&buf, Int32(11))
+            FfiConverterString.write(name, into: &buf)
+            
+        
+        case let .UnknownXStatus(name):
+            writeInt(&buf, Int32(12))
+            FfiConverterString.write(name, into: &buf)
+            
+        
+        case let .XStatusNotFound(name):
+            writeInt(&buf, Int32(13))
+            FfiConverterString.write(name, into: &buf)
+            
+        
+        case let .XStatusAlreadyExists(name):
+            writeInt(&buf, Int32(14))
             FfiConverterString.write(name, into: &buf)
             
         }
@@ -4057,6 +4251,15 @@ public enum TaskMutation: Equatable, Hashable {
     case setProject(value: String?
     )
     /**
+     * Set the project by UUID. `None` clears the project assignment.
+     *
+     * Unlike `SetProject` (which resolves by name), this writes the
+     * `project_id` column directly. The caller is responsible for
+     * passing a valid project UUID — no existence check is performed.
+     */
+    case setProjectId(value: String?
+    )
+    /**
      * Generic escape hatch for setting arbitrary UDA values.
      *
      * `key` is the raw TaskMap key. `value` is `None` to remove.
@@ -4163,7 +4366,10 @@ public struct FfiConverterTypeTaskMutation: FfiConverterRustBuffer {
         case 27: return .setProject(value: try FfiConverterOptionString.read(from: &buf)
         )
         
-        case 28: return .setValue(key: try FfiConverterString.read(from: &buf), value: try FfiConverterOptionString.read(from: &buf)
+        case 28: return .setProjectId(value: try FfiConverterOptionString.read(from: &buf)
+        )
+        
+        case 29: return .setValue(key: try FfiConverterString.read(from: &buf), value: try FfiConverterOptionString.read(from: &buf)
         )
         
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -4306,8 +4512,13 @@ public struct FfiConverterTypeTaskMutation: FfiConverterRustBuffer {
             FfiConverterOptionString.write(value, into: &buf)
             
         
-        case let .setValue(key,value):
+        case let .setProjectId(value):
             writeInt(&buf, Int32(28))
+            FfiConverterOptionString.write(value, into: &buf)
+            
+        
+        case let .setValue(key,value):
+            writeInt(&buf, Int32(29))
             FfiConverterString.write(key, into: &buf)
             FfiConverterOptionString.write(value, into: &buf)
             
@@ -5263,7 +5474,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_create_task() != 18352) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_create_xstatus() != 50905) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_delete_tag() != 34645) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_delete_xstatus() != 31372) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_dependency_map() != 18621) {
@@ -5281,10 +5498,19 @@ private let initializationResult: InitializationResult = {
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_rename_tag() != 64411) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_rename_xstatus() != 32129) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_reorder_after() != 52718) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_reorder_before() != 32752) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_reorder_to_beginning() != 4582) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_reorder_to_end() != 29726) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_reparent() != 24128) {
