@@ -9,7 +9,7 @@ use std::sync::Arc;
 use taskchampion::{
     position::{append_position, between_position, prepend_position},
     storage::tc_config::TcConfig,
-    ExternalStorage, Operation, Operations, Replica, Status,
+    ExternalStorage, Operation, Operations, Replica, Status, Tag,
 };
 use uuid::Uuid;
 
@@ -239,6 +239,37 @@ impl FfiSession {
                 }
                 other => FfiError::from(other),
             })
+        })
+        .await
+    }
+
+    /// Register `name` as a new tag in tc_config.
+    ///
+    /// Returns `TagAlreadyExists` if the tag is already in tc_config.
+    /// Returns `InvalidInput` if `name` is not a valid tag name.
+    ///
+    /// Swift callers should call this before `mutate_task(AddTag)` to register
+    /// new tags. Pairs with the CLI `task tag add` command on the tw side.
+    pub async fn create_tag(&self, name: String) -> Result<(), FfiError> {
+        self.with_replica(|mut replica| async move {
+            // Validate tag name first — fail fast before reading config.
+            let _: Tag = name.as_str().try_into().map_err(|e| FfiError::InvalidInput {
+                message: format!("Invalid tag name: {e}"),
+            })?;
+
+            let mut config = replica
+                .get_tc_config_parsed()
+                .await
+                .map_err(FfiError::from)?;
+
+            if !config.add_tag(&name) {
+                return Err(FfiError::TagAlreadyExists { name });
+            }
+
+            replica
+                .set_tc_config_parsed(&config)
+                .await
+                .map_err(FfiError::from)
         })
         .await
     }
