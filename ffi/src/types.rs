@@ -299,6 +299,10 @@ pub enum FfiError {
     TagAlreadyExists { name: String },
     /// set_xstatus with a name not in tc_config.xstatus definitions.
     UnknownXStatus { name: String },
+    /// delete_xstatus / rename_xstatus on a name not present in tc_config.xstatus.
+    XStatusNotFound { name: String },
+    /// rename_xstatus / create_xstatus target already exists in tc_config.xstatus.
+    XStatusAlreadyExists { name: String },
 }
 
 impl std::fmt::Display for FfiError {
@@ -327,6 +331,10 @@ impl std::fmt::Display for FfiError {
             FfiError::TagNotFound { name } => write!(f, "Tag not found: {name}"),
             FfiError::TagAlreadyExists { name } => write!(f, "Tag already exists: {name}"),
             FfiError::UnknownXStatus { name } => write!(f, "Unknown xstatus: {name}"),
+            FfiError::XStatusNotFound { name } => write!(f, "XStatus not found: {name}"),
+            FfiError::XStatusAlreadyExists { name } => {
+                write!(f, "XStatus already exists: {name}")
+            }
         }
     }
 }

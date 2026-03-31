@@ -283,6 +283,80 @@ impl FfiSession {
         })
         .await
     }
+
+    /// Register a new xstatus definition in tc_config.
+    ///
+    /// Returns `XStatusAlreadyExists` if the name is already registered.
+    pub async fn create_xstatus(&self, name: String, icon: u32) -> Result<(), FfiError> {
+        use taskchampion::storage::tc_config::XStatusDef;
+
+        self.with_replica(|mut replica| async move {
+            let mut config = replica
+                .get_tc_config_parsed()
+                .await
+                .map_err(FfiError::from)?;
+
+            if !config.add_xstatus(XStatusDef {
+                name: name.clone(),
+                icon,
+            }) {
+                return Err(FfiError::XStatusAlreadyExists { name });
+            }
+
+            replica
+                .set_tc_config_parsed(&config)
+                .await
+                .map_err(FfiError::from)
+        })
+        .await
+    }
+
+    /// Remove an xstatus definition from tc_config and clear `xstatus` UDA from
+    /// all tasks matching that name.
+    ///
+    /// Returns the number of tasks that had the xstatus cleared.
+    /// Returns `XStatusNotFound` if the name is not in tc_config.xstatus.
+    pub async fn delete_xstatus(&self, name: String) -> Result<u32, FfiError> {
+        self.with_replica(|mut replica| async move {
+            replica.delete_xstatus(&name).await.map_err(|e| match e {
+                taskchampion::Error::Usage(ref msg)
+                    if msg.starts_with("XStatus not found") =>
+                {
+                    FfiError::XStatusNotFound { name: name.clone() }
+                }
+                other => FfiError::from(other),
+            })
+        })
+        .await
+    }
+
+    /// Rename an xstatus definition in tc_config and update the `xstatus` UDA value
+    /// on all tasks matching the old name.
+    ///
+    /// Returns the number of tasks updated.
+    /// Returns `XStatusNotFound` if `old` is not in tc_config.xstatus.
+    /// Returns `XStatusAlreadyExists` if `new` is already in tc_config.xstatus.
+    pub async fn rename_xstatus(&self, old: String, new: String) -> Result<u32, FfiError> {
+        self.with_replica(|mut replica| async move {
+            replica
+                .rename_xstatus(&old, &new)
+                .await
+                .map_err(|e| match e {
+                    taskchampion::Error::Usage(ref msg)
+                        if msg.starts_with("XStatus not found") =>
+                    {
+                        FfiError::XStatusNotFound { name: old.clone() }
+                    }
+                    taskchampion::Error::Usage(ref msg)
+                        if msg.starts_with("XStatus already exists") =>
+                    {
+                        FfiError::XStatusAlreadyExists { name: new.clone() }
+                    }
+                    other => FfiError::from(other),
+                })
+        })
+        .await
+    }
 }
 
 /// Load tc_config from replica, returning a default if absent.
