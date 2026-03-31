@@ -48,6 +48,8 @@ pub(crate) struct RawTaskRow {
     pub(crate) parent_id: Option<String>,
     pub(crate) position: Option<String>,
     pub(crate) project_name: Option<String>,
+    /// Raw project UUID from `tc_tasks.project_id` (not the join-resolved name).
+    pub(crate) project_id: Option<String>,
 }
 
 pub(crate) fn raw_to_task(raw: RawTaskRow) -> Result<(Uuid, TaskMap)> {
@@ -74,6 +76,9 @@ pub(crate) fn raw_to_task(raw: RawTaskRow) -> Result<(Uuid, TaskMap)> {
     }
     if let Some(v) = raw.project_name {
         task_map.insert("project".into(), v);
+    }
+    if let Some(v) = raw.project_id {
+        task_map.insert("project_id".into(), v);
     }
 
     // Inject timestamp columns (ISO 8601 → epoch string) back into the task map.
@@ -103,7 +108,8 @@ pub(crate) fn raw_to_task(raw: RawTaskRow) -> Result<(Uuid, TaskMap)> {
 /// Shared column projection for all tc_tasks queries (requires `t` and `p` aliases).
 pub(crate) const TASK_SELECT_COLS: &str = "t.id, t.data, t.status, t.description, t.priority, \
     t.entry_at, t.modified_at, t.due_at, t.scheduled_at, \
-    t.start_at, t.end_at, t.wait_at, t.parent_id, t.position, p.name as project_name";
+    t.start_at, t.end_at, t.wait_at, t.parent_id, t.position, \
+    p.name as project_name, t.project_id";
 
 #[cfg(test)]
 mod tests {
@@ -196,6 +202,7 @@ mod tests {
             parent_id: None,
             position: None,
             project_name: None,
+            project_id: None,
         }
     }
 

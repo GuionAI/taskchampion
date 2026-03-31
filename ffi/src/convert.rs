@@ -59,6 +59,9 @@ impl From<&Task> for FfiTask {
             // Callers that need imask should treat None as "not a recurring child".
             imask: task.get_value("imask").and_then(|v| v.parse::<u32>().ok()),
             until: task.get_value("until").and_then(|v| v.parse::<i64>().ok()),
+            xstatus: task.get_value("xstatus").map(|v| v.to_string()),
+            project: task.get_value("project").map(|v| v.to_string()),
+            project_id: task.get_value("project_id").map(|v| v.to_string()),
             remaining_data: {
                 task.get_user_defined_attributes()
                     .filter(|(k, _)| !DEDICATED_UDA_FIELDS.contains(k))
@@ -279,6 +282,8 @@ fn ffi_error_to_core(e: FfiError) -> taskchampion::Error {
         FfiError::Internal { message } => {
             taskchampion::Error::Other(anyhow::anyhow!("{}", message))
         }
+        // New variants — these flow Rust→Swift only, but the match must be exhaustive.
+        e => taskchampion::Error::Other(anyhow::anyhow!("{}", e)),
     }
 }
 

@@ -49,6 +49,8 @@ pub(super) struct RawTaskRow {
     pub(super) parent_id: Option<String>,
     pub(super) position: Option<String>,
     pub(super) project_name: Option<String>,
+    /// Raw project UUID from `tc_tasks.project_id` (not the join-resolved name).
+    pub(super) project_id: Option<String>,
 }
 
 pub(super) fn read_raw_task_row(r: &rusqlite::Row) -> rusqlite::Result<RawTaskRow> {
@@ -68,6 +70,7 @@ pub(super) fn read_raw_task_row(r: &rusqlite::Row) -> rusqlite::Result<RawTaskRo
         parent_id: r.get("parent_id")?,
         position: r.get("position")?,
         project_name: r.get("project_name")?,
+        project_id: r.get("project_id")?,
     })
 }
 
@@ -95,6 +98,9 @@ pub(super) fn raw_to_task(raw: RawTaskRow) -> Result<(Uuid, TaskMap)> {
     }
     if let Some(v) = raw.project_name {
         task_map.insert("project".into(), v);
+    }
+    if let Some(v) = raw.project_id {
+        task_map.insert("project_id".into(), v);
     }
 
     // Inject timestamp columns (ISO 8601 → epoch string) back into the task map.
@@ -124,7 +130,8 @@ pub(super) fn raw_to_task(raw: RawTaskRow) -> Result<(Uuid, TaskMap)> {
 /// Shared column projection for all tc_tasks queries (requires `t` and `p` aliases).
 pub(super) const TASK_SELECT_COLS: &str = "t.id, t.data, t.status, t.description, t.priority, \
     t.entry_at, t.modified_at, t.due_at, t.scheduled_at, \
-    t.start_at, t.end_at, t.wait_at, t.parent_id, t.position, p.name as project_name";
+    t.start_at, t.end_at, t.wait_at, t.parent_id, t.position, \
+    p.name as project_name, t.project_id";
 
 /// Execute a task SELECT query and convert each row to `(Uuid, TaskMap)`.
 pub(super) fn query_task_rows(
@@ -232,6 +239,7 @@ mod tests {
             parent_id: None,
             position: None,
             project_name: None,
+            project_id: None,
         }
     }
 

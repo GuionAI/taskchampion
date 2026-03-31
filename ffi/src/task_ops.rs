@@ -48,6 +48,21 @@ impl FfiSession {
     }
 }
 
+/// Clear the `xstatus` UDA if it is currently set.
+///
+/// Called from `SetStatus`, `Done`, and `Delete` arms to ensure xstatus is
+/// never left set on a non-pending task.
+fn clear_xstatus_if_set(
+    task: &mut taskchampion::Task,
+    ops: &mut Operations,
+) -> Result<(), FfiError> {
+    if task.get_value("xstatus").is_some() {
+        task.set_value("xstatus", None::<String>, ops)
+            .map_err(FfiError::from)?;
+    }
+    Ok(())
+}
+
 fn apply_mutation(
     task: &mut taskchampion::Task,
     mutation: TaskMutation,
@@ -58,8 +73,12 @@ fn apply_mutation(
             task.set_description(value, ops).map_err(FfiError::from)?;
         }
         TaskMutation::SetStatus { status } => {
-            task.set_status(Status::from(status), ops)
-                .map_err(FfiError::from)?;
+            let new_status = Status::from(status);
+            // Auto-clear xstatus when transitioning to non-pending status.
+            if new_status != Status::Pending {
+                clear_xstatus_if_set(task, ops)?;
+            }
+            task.set_status(new_status, ops).map_err(FfiError::from)?;
         }
         TaskMutation::SetPriority { value } => {
             task.set_priority(value, ops).map_err(FfiError::from)?;
@@ -130,6 +149,7 @@ fn apply_mutation(
             task.remove_dependency(dep, ops).map_err(FfiError::from)?;
         }
         TaskMutation::Done => {
+            clear_xstatus_if_set(task, ops)?;
             task.done(ops).map_err(FfiError::from)?;
         }
         TaskMutation::Start => {
@@ -140,7 +160,8 @@ fn apply_mutation(
         }
         TaskMutation::Delete => {
             // Soft delete: sets status to `Deleted`. The task still exists and
-            // can be re-fetched with `get_task`.
+            // can be re-fetched with `get_task`. Auto-clear xstatus.
+            clear_xstatus_if_set(task, ops)?;
             task.set_status(Status::Deleted, ops)
                 .map_err(FfiError::from)?;
         }
@@ -189,6 +210,10 @@ fn apply_mutation(
             task.set_value("until", epoch.map(|e| e.to_string()), ops)
                 .map_err(FfiError::from)?;
         }
+        TaskMutation::SetProject { value } => {
+            task.set_value("project", value, ops)
+                .map_err(FfiError::from)?;
+        }
         TaskMutation::SetValue { key, value } => {
             // Guard: reject known TaskChampion core keys and dedicated UDA
             // fields — callers should use the typed mutation variant instead.
@@ -204,6 +229,8 @@ fn apply_mutation(
                 "parent_id",
                 "position",
                 "start",
+                "project",
+                "project_id",
             ];
             if core_keys.contains(&key.as_str())
                 || DEDICATED_UDA_FIELDS.contains(&key.as_str())

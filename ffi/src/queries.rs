@@ -17,12 +17,3 @@ pub fn all_task_tables_sql() -> String {
      LEFT JOIN projects p ON p.id = t.project_id"
         .to_string()
 }
-
-/// SQL that covers the tag metadata table.
-///
-/// Pass this to `db.watch()` so PowerSync re-runs your query whenever a
-/// `tc_tag_metadata` row changes (e.g. metadata set on another device via sync).
-#[uniffi::export(name = "tagMetadataTablesSql")]
-pub fn tag_metadata_tables_sql() -> String {
-    "SELECT id, name, data FROM tc_tag_metadata".to_string()
-}

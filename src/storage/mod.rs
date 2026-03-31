@@ -26,6 +26,7 @@ pub mod powersync;
 pub mod sql_ops;
 #[cfg(not(feature = "storage-external"))]
 pub(crate) mod sql_ops;
+pub mod tc_config;
 #[cfg(test)]
 mod test;
 
@@ -103,17 +104,19 @@ pub trait StorageTxn: Send {
     /// `add_operation` this only affects the list of operations.
     async fn remove_operation(&mut self, op: Operation) -> Result<()>;
 
-    /// Get the metadata JSON for a tag by name. Returns the `data` column of the latest row
-    /// if duplicates exist (conflict resolution: last-write-wins via `created_at` ordering).
-    async fn get_tag_metadata(&mut self, name: String) -> Result<Option<String>>;
-
-    /// Set the metadata JSON for a tag by name. If a row already exists for this tag name,
-    /// updates it. Otherwise, inserts a new row with a v7 UUID.
-    /// The `data` parameter is an opaque JSON string (e.g. `{"color":"#ff0000","is_status":true}`).
-    async fn set_tag_metadata(&mut self, name: String, data: String) -> Result<()>;
-
     /// Get all unique tag names across all tasks.
     async fn get_all_tags(&mut self) -> Result<Vec<String>>;
+
+    /// Get the raw JSON value of the `tc_settings` singleton row.
+    ///
+    /// Returns `None` if the row does not exist yet (first-use default).
+    async fn get_tc_config(&mut self) -> Result<Option<String>>;
+
+    /// Set the raw JSON value of the `tc_settings` singleton row.
+    ///
+    /// Uses `INSERT OR REPLACE` semantics — creates the row on first call,
+    /// overwrites it on subsequent calls.
+    async fn set_tc_config(&mut self, value: String) -> Result<()>;
 
     /// Check whether this storage is entirely empty
     #[allow(clippy::wrong_self_convention)] // mut is required here for storage access

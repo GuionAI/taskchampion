@@ -61,16 +61,16 @@ impl WrappedStorageTxn for Box<dyn StorageTxn + Send + '_> {
         self.as_mut().is_empty().await
     }
 
-    async fn get_tag_metadata(&mut self, name: String) -> Result<Option<String>> {
-        self.as_mut().get_tag_metadata(name).await
-    }
-
-    async fn set_tag_metadata(&mut self, name: String, data: String) -> Result<()> {
-        self.as_mut().set_tag_metadata(name, data).await
-    }
-
     async fn get_all_tags(&mut self) -> Result<Vec<String>> {
         self.as_mut().get_all_tags().await
+    }
+
+    async fn get_tc_config(&mut self) -> Result<Option<String>> {
+        self.as_mut().get_tc_config().await
+    }
+
+    async fn set_tc_config(&mut self, value: String) -> Result<()> {
+        self.as_mut().set_tc_config(value).await
     }
 
     async fn commit(&mut self) -> Result<()> {

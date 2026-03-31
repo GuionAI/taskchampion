@@ -69,6 +69,18 @@ pub struct FfiTask {
     /// Recurrence expiry as Unix epoch seconds. `None` if not set.
     /// Parsed from the `until` UDA string; `None` if missing or not a valid i64.
     pub until: Option<i64>,
+    /// Extended status name (e.g. `"blocked"`), or `None` if not set.
+    ///
+    /// Stored as UDA `"xstatus"` in the task. Definitions live in `tc_config.xstatus`.
+    pub xstatus: Option<String>,
+    /// Project name (e.g. `"work"`), or `None` if unassigned.
+    ///
+    /// Resolved from the `projects` table JOIN at query time.
+    pub project: Option<String>,
+    /// Project UUID string, or `None` if unassigned.
+    ///
+    /// Raw value from `tc_tasks.project_id` — same JOIN as `project`.
+    pub project_id: Option<String>,
     /// User-defined attributes not covered by dedicated fields.
     ///
     /// Keys are the raw TaskMap keys (e.g. `"custom_field"`).
@@ -76,8 +88,8 @@ pub struct FfiTask {
     /// Empty if the task has no UDAs.
     ///
     /// Keys excluded from this map: `"scheduled"`, `"is_full_day"`, `"estimate"`,
-    /// `"recur"`, `"mask"`, `"imask"`, `"until"` — all have typed accessor fields
-    /// above. See [`DEDICATED_UDA_FIELDS`] for the authoritative list.
+    /// `"recur"`, `"mask"`, `"imask"`, `"until"`, `"xstatus"` — all have typed
+    /// accessor fields above. See [`DEDICATED_UDA_FIELDS`] for the authoritative list.
     pub remaining_data: std::collections::HashMap<String, String>,
 }
 
@@ -94,6 +106,7 @@ pub(crate) const DEDICATED_UDA_FIELDS: &[&str] = &[
     "mask",
     "imask",
     "until",
+    "xstatus",
 ];
 
 /// A node in the task tree (parent/child hierarchy).
@@ -222,6 +235,12 @@ pub enum TaskMutation {
     SetUntil {
         epoch: Option<i64>,
     },
+    /// Set the project by name. `None` clears the project assignment.
+    ///
+    /// The storage layer resolves (or creates) the project UUID automatically.
+    SetProject {
+        value: Option<String>,
+    },
     /// Generic escape hatch for setting arbitrary UDA values.
     ///
     /// `key` is the raw TaskMap key. `value` is `None` to remove.
@@ -233,37 +252,20 @@ pub enum TaskMutation {
     },
 }
 
-/// Tag metadata — typed view of the `tc_tag_metadata.data` JSONB column.
-#[derive(uniffi::Record)]
-pub struct FfiTagMetadata {
-    /// Hex color string (e.g. "#ff0000"), or empty if not set.
-    pub color: String,
-    /// Whether this tag represents a status category.
-    pub is_status: bool,
-    /// Icon identifier, or `None` if not set.
-    pub icon: Option<i64>,
-}
-
-/// Internal serde helper — deserializes the JSONB `data` column.
-/// Fields use Option so missing keys deserialize as None/false/empty.
-#[derive(serde::Deserialize, serde::Serialize, Default)]
-pub(crate) struct TagMetadataJson {
-    #[serde(default)]
-    pub color: String,
-    #[serde(default)]
-    pub is_status: bool,
-    #[serde(default)]
-    pub icon: Option<i64>,
-}
-
-impl From<TagMetadataJson> for FfiTagMetadata {
-    fn from(j: TagMetadataJson) -> Self {
-        Self {
-            color: j.color,
-            is_status: j.is_status,
-            icon: j.icon,
-        }
-    }
+/// Target position when reparenting a task.
+///
+/// Passed to `reparent()` to specify where the task should be inserted
+/// among the new parent's children.
+#[derive(uniffi::Enum)]
+pub enum ReparentPosition {
+    /// Insert as the first child of the new parent.
+    Beginning,
+    /// Insert as the last child of the new parent.
+    End,
+    /// Insert immediately after the sibling identified by `anchor` UUID.
+    After { anchor: String },
+    /// Insert immediately before the sibling identified by `anchor` UUID.
+    Before { anchor: String },
 }
 
 /// Error type returned by all FFI functions.
@@ -283,6 +285,20 @@ pub enum FfiError {
     Storage { message: String },
     /// Unexpected internal error (bug, catch-all).
     Internal { message: String },
+    /// Reparent would create a cycle (uuid cannot be a descendant of parent).
+    CircularParent { uuid: String, parent: String },
+    /// Reorder anchor is not under the same parent as the task.
+    NotASibling { uuid: String, anchor: String },
+    /// Reorder/reparent anchor exists in the DB but has no position field.
+    ///
+    /// Use a positioned task as anchor, or call `SetPosition` first.
+    AnchorHasNoPosition { uuid: String },
+    /// delete_tag / rename_tag on a tag name not present in tc_config.
+    TagNotFound { name: String },
+    /// rename_tag target already exists in tc_config.
+    TagAlreadyExists { name: String },
+    /// set_xstatus with a name not in tc_config.xstatus definitions.
+    UnknownXStatus { name: String },
 }
 
 impl std::fmt::Display for FfiError {
@@ -293,6 +309,24 @@ impl std::fmt::Display for FfiError {
             FfiError::InvalidInput { message } => write!(f, "Invalid input: {message}"),
             FfiError::Storage { message } => write!(f, "Storage error: {message}"),
             FfiError::Internal { message } => write!(f, "Internal error: {message}"),
+            FfiError::CircularParent { uuid, parent } => {
+                write!(
+                    f,
+                    "Circular parent: {uuid} cannot be a descendant of {parent}"
+                )
+            }
+            FfiError::NotASibling { uuid, anchor } => {
+                write!(
+                    f,
+                    "Not a sibling: {uuid} and {anchor} have different parents"
+                )
+            }
+            FfiError::AnchorHasNoPosition { uuid } => {
+                write!(f, "Anchor has no position: {uuid}")
+            }
+            FfiError::TagNotFound { name } => write!(f, "Tag not found: {name}"),
+            FfiError::TagAlreadyExists { name } => write!(f, "Tag already exists: {name}"),
+            FfiError::UnknownXStatus { name } => write!(f, "Unknown xstatus: {name}"),
         }
     }
 }

@@ -234,33 +234,6 @@ pub(crate) fn remove_operation_stmt(id: &str) -> SqlStatement {
     }
 }
 
-/// Generate a SQL statement for setting tag metadata.
-///
-/// If `existing_id` is `Some`, updates the existing row. Otherwise, inserts a new row.
-pub(crate) fn set_tag_metadata_stmt(
-    name: &str,
-    data: &str,
-    existing_id: Option<&str>,
-) -> SqlStatement {
-    match existing_id {
-        Some(id) => SqlStatement {
-            sql: "UPDATE tc_tag_metadata SET data = ? WHERE id = ?".into(),
-            params: vec![
-                SqlParam::Text(data.to_string()),
-                SqlParam::Text(id.to_string()),
-            ],
-        },
-        None => SqlStatement {
-            sql: "INSERT INTO tc_tag_metadata (id, name, data) VALUES (?, ?, ?)".into(),
-            params: vec![
-                SqlParam::Text(Uuid::now_v7().to_string()),
-                SqlParam::Text(name.to_string()),
-                SqlParam::Text(data.to_string()),
-            ],
-        },
-    }
-}
-
 /// Generate SQL statement for inserting a new project.
 #[cfg(feature = "storage-external")]
 pub(crate) fn insert_project_stmt(id: &Uuid, name: &str) -> SqlStatement {
@@ -273,7 +246,17 @@ pub(crate) fn insert_project_stmt(id: &Uuid, name: &str) -> SqlStatement {
     }
 }
 
+/// Generate SQL statement for setting tc_config (upsert singleton row).
+pub(crate) fn set_tc_config_stmt(value: &str) -> SqlStatement {
+    SqlStatement {
+        sql: "INSERT OR REPLACE INTO tc_settings (id, key, value) VALUES ('tc_config', 'tc_config', ?)".into(),
+        params: vec![SqlParam::Text(value.to_string())],
+    }
+}
+
 // ── Read SQL constants ─────────────────────────────────────────────────────
+
+pub(crate) const TC_CONFIG_READ_SQL: &str = "SELECT value FROM tc_settings WHERE id = 'tc_config'";
 
 pub(crate) const TASK_EXISTS_SQL: &str =
     "SELECT EXISTS(SELECT 1 FROM tc_tasks WHERE id = ?) AS exists_flag";
@@ -287,8 +270,6 @@ pub(crate) const ALL_OPS_WITH_ID_DESC_SQL: &str =
 pub(crate) const LAST_OPERATION_SQL: &str =
     "SELECT id, data FROM tc_operations ORDER BY id DESC LIMIT 1";
 pub(crate) const ALL_TASK_UUIDS_SQL: &str = "SELECT id FROM tc_tasks";
-pub(crate) const TAG_METADATA_READ_SQL: &str =
-    "SELECT id, data FROM tc_tag_metadata WHERE name = ? ORDER BY created_at DESC LIMIT 1";
 pub(crate) const ALL_TAGS_SQL: &str = "SELECT DISTINCT substr(j.key, 5) as name \
      FROM tc_tasks, json_each(tc_tasks.data) as j \
      WHERE j.key LIKE 'tag_%' \
