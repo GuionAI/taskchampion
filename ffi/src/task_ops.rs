@@ -28,6 +28,31 @@ impl FfiSession {
                 .map_err(FfiError::from)?
                 .ok_or_else(|| FfiError::TaskNotFound { uuid: uuid.clone() })?;
 
+            // Pre-validate all AddTag mutations against tc_config (one config read per batch).
+            let add_tag_names: Vec<&str> = mutations
+                .iter()
+                .filter_map(|m| {
+                    if let TaskMutation::AddTag { tag } = m {
+                        Some(tag.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            if !add_tag_names.is_empty() {
+                let config = replica
+                    .get_tc_config_parsed()
+                    .await
+                    .map_err(FfiError::from)?;
+                for name in add_tag_names {
+                    if !config.has_tag(name) {
+                        return Err(FfiError::TagNotFound {
+                            name: name.to_string(),
+                        });
+                    }
+                }
+            }
+
             let mut ops = Operations::new();
             ops.push(Operation::UndoPoint);
 
