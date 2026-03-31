@@ -290,6 +290,26 @@ impl<S: Storage> Replica<S> {
         Ok(count)
     }
 
+    /// Add `tag` to `task`, first validating that the tag is registered in tc_config.
+    ///
+    /// Returns `Err(Error::Usage(...))` if the tag is not in `tc_config.tags`.
+    /// The tag is not added to the task in that case.
+    ///
+    /// This is the preferred entry point for external callers (e.g. cxx bridge).
+    /// The UniFFI path uses batch pre-validation in `mutate_task` for efficiency.
+    pub async fn add_tag_validated(
+        &mut self,
+        task: &mut Task,
+        tag: &Tag,
+        ops: &mut Operations,
+    ) -> Result<()> {
+        let config = self.get_tc_config_parsed().await?;
+        if !config.has_tag(tag.as_ref()) {
+            return Err(Error::Usage(format!("Tag not found in config: {tag}")));
+        }
+        task.add_tag(tag, ops)
+    }
+
     /// Get the dependency map for all pending tasks.
     ///
     /// A task dependency is recognized when a task in the working set depends on a task with
@@ -1274,5 +1294,63 @@ mod tests {
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("Tag already exists"), "unexpected: {msg}");
+    }
+
+    // ── add_tag_validated ─────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn add_tag_validated_returns_error_for_unregistered_tag() {
+        let mut replica = Replica::new(InMemoryStorage::new());
+        // No tags registered in config — adding any tag should fail.
+        let task_uuid = Uuid::new_v4();
+        let mut ops = Operations::new();
+        let mut task = replica
+            .create_task(task_uuid, &mut ops)
+            .await
+            .unwrap();
+        replica.commit_operations(ops).await.unwrap();
+
+        let tag: Tag = "work".try_into().unwrap();
+        let mut ops2 = Operations::new();
+        let err = replica
+            .add_tag_validated(&mut task, &tag, &mut ops2)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, Error::Usage(_)),
+            "expected Error::Usage, got: {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn add_tag_validated_succeeds_for_registered_tag() {
+        let mut replica = Replica::new(InMemoryStorage::new());
+        // Register 'work' in config.
+        let mut config = crate::storage::tc_config::TcConfig::default();
+        config.add_tag("work");
+        replica.set_tc_config_parsed(&config).await.unwrap();
+
+        let task_uuid = Uuid::new_v4();
+        let mut ops = Operations::new();
+        let mut task = replica
+            .create_task(task_uuid, &mut ops)
+            .await
+            .unwrap();
+        replica.commit_operations(ops).await.unwrap();
+
+        let tag: Tag = "work".try_into().unwrap();
+        let mut ops2 = Operations::new();
+        ops2.push(Operation::UndoPoint);
+        replica
+            .add_tag_validated(&mut task, &tag, &mut ops2)
+            .await
+            .unwrap();
+        replica.commit_operations(ops2).await.unwrap();
+
+        let updated = replica.get_task(task_uuid).await.unwrap().unwrap();
+        assert!(
+            updated.get_value("tag_work").is_some(),
+            "tag_work should be set on the task"
+        );
     }
 }
