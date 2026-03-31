@@ -1527,6 +1527,69 @@ async fn test_reorder_nonexistent_anchor() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Reorder to beginning / end tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_reorder_to_beginning_and_end() {
+    let session = make_session();
+    let pos = sequential_positions(3);
+
+    let a = create_positioned(&session, "A", &pos[0]).await;
+    let b = create_positioned(&session, "B", &pos[1]).await;
+    let c = create_positioned(&session, "C", &pos[2]).await;
+
+    // Move A to end → A's position > C's.
+    let moved = session.reorder_to_end(a.clone()).await.unwrap();
+    let c_task = session.get_task(c.clone()).await.unwrap().unwrap();
+    assert!(
+        moved.position.as_ref().unwrap() > c_task.position.as_ref().unwrap(),
+        "A's position should be after C"
+    );
+
+    // Move C to beginning → C's position < B's.
+    let moved = session.reorder_to_beginning(c.clone()).await.unwrap();
+    let b_task = session.get_task(b.clone()).await.unwrap().unwrap();
+    assert!(
+        moved.position.as_ref().unwrap() < b_task.position.as_ref().unwrap(),
+        "C's position should be before B"
+    );
+}
+
+#[tokio::test]
+async fn test_reorder_to_end_nonexistent() {
+    let session = make_session();
+    let ghost = Uuid::new_v4().to_string();
+
+    let result = session.reorder_to_end(ghost).await;
+    assert!(
+        matches!(result, Err(FfiError::TaskNotFound { .. })),
+        "expected TaskNotFound"
+    );
+}
+
+#[tokio::test]
+async fn test_reorder_to_beginning_already_first() {
+    let session = make_session();
+    let pos = sequential_positions(2);
+
+    let a = create_positioned(&session, "A", &pos[0]).await;
+    let _b = create_positioned(&session, "B", &pos[1]).await;
+
+    // Move A to beginning (already first) — should succeed idempotently.
+    let moved = session.reorder_to_beginning(a.clone()).await.unwrap();
+    assert!(
+        moved.position.is_some(),
+        "should have a position after reorder"
+    );
+    // New position should be less than original.
+    assert!(
+        moved.position.as_ref().unwrap() < &pos[0],
+        "new position should be less than original first position"
+    );
+}
+
 #[tokio::test]
 async fn test_set_value_rejects_project_keys() {
     let session = make_session();

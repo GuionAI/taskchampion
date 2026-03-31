@@ -570,6 +570,57 @@ impl FfiSession {
 }
 
 // ---------------------------------------------------------------------------
+// Reorder to beginning/end methods
+// ---------------------------------------------------------------------------
+
+#[uniffi::export]
+impl FfiSession {
+    /// Move `uuid` to the first position among its current siblings.
+    ///
+    /// Returns `TaskNotFound` if the UUID does not exist.
+    pub async fn reorder_to_beginning(&self, uuid: String) -> Result<FfiTask, FfiError> {
+        self.with_replica(|mut replica| async move {
+            let uuid_parsed = parse_uuid(&uuid)?;
+            let task = replica
+                .get_task(uuid_parsed)
+                .await
+                .map_err(FfiError::from)?
+                .ok_or_else(|| FfiError::TaskNotFound { uuid: uuid.clone() })?;
+
+            let tm = replica.tree_map().await.map_err(FfiError::from)?;
+            let siblings = sorted_sibling_positions(&tm, task.get_parent(), Some(uuid_parsed));
+            let first_pos = siblings.first().map(|(_, p)| p.as_str());
+            let new_pos = prepend_position(first_pos)
+                .map_err(|e| FfiError::InvalidInput { message: e.to_string() })?;
+            apply_position(&mut replica, uuid_parsed, new_pos).await
+        })
+        .await
+    }
+
+    /// Move `uuid` to the last position among its current siblings.
+    ///
+    /// Returns `TaskNotFound` if the UUID does not exist.
+    pub async fn reorder_to_end(&self, uuid: String) -> Result<FfiTask, FfiError> {
+        self.with_replica(|mut replica| async move {
+            let uuid_parsed = parse_uuid(&uuid)?;
+            let task = replica
+                .get_task(uuid_parsed)
+                .await
+                .map_err(FfiError::from)?
+                .ok_or_else(|| FfiError::TaskNotFound { uuid: uuid.clone() })?;
+
+            let tm = replica.tree_map().await.map_err(FfiError::from)?;
+            let siblings = sorted_sibling_positions(&tm, task.get_parent(), Some(uuid_parsed));
+            let last_pos = siblings.last().map(|(_, p)| p.as_str());
+            let new_pos = append_position(last_pos)
+                .map_err(|e| FfiError::InvalidInput { message: e.to_string() })?;
+            apply_position(&mut replica, uuid_parsed, new_pos).await
+        })
+        .await
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Reparent and ancestor methods
 // ---------------------------------------------------------------------------
 
