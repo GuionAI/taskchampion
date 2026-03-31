@@ -1265,6 +1265,86 @@ async fn test_set_project_round_trip() {
 }
 
 // ---------------------------------------------------------------------------
+// SetProjectId tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_set_project_id_round_trip() {
+    let (session, mock) = make_session_with_executor();
+    let uuid = Uuid::new_v4().to_string();
+
+    // Pre-seed a project and grab its UUID.
+    let project_id = mock.inject_project("inbox");
+
+    session
+        .create_task(uuid.clone(), "ProjectId test".into())
+        .await
+        .expect("create");
+
+    // Set project by UUID.
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetProjectId {
+                value: Some(project_id.clone()),
+            }],
+        )
+        .await
+        .expect("set project_id");
+
+    let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
+    assert_eq!(
+        task.project_id.as_deref(),
+        Some(project_id.as_str()),
+        "project_id should match injected UUID"
+    );
+    // project name should be cleared by SetProjectId.
+    assert_eq!(task.project, None, "project name cleared by SetProjectId");
+
+    // Clear with None.
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetProjectId { value: None }],
+        )
+        .await
+        .expect("clear project_id");
+
+    let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
+    assert_eq!(task.project_id, None, "project_id cleared");
+}
+
+#[tokio::test]
+async fn test_set_project_id_nonexistent_uuid() {
+    let session = make_session();
+    let uuid = Uuid::new_v4().to_string();
+
+    session
+        .create_task(uuid.clone(), "ProjectId nonexistent".into())
+        .await
+        .expect("create");
+
+    // SetProjectId with a random UUID should succeed (no validation).
+    let random_id = Uuid::new_v4().to_string();
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetProjectId {
+                value: Some(random_id.clone()),
+            }],
+        )
+        .await
+        .expect("set nonexistent project_id should succeed");
+
+    let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
+    assert_eq!(
+        task.project_id.as_deref(),
+        Some(random_id.as_str()),
+        "project_id set to random UUID"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Reorder tests
 // ---------------------------------------------------------------------------
 

@@ -226,10 +226,10 @@ impl StorageTxn for ExternalStorageTxn<'_> {
         self.task_write_cache.insert(uuid, task.clone());
         let prepared = prepare_task(task)?;
 
-        // Resolve project (uses local cache for buffered projects).
+        // Resolve project: name-based lookup takes precedence; fall back to raw UUID.
         let project_id: Option<String> = match &prepared.project_name {
             Some(name) => Some(self.resolve_project_id(name).await?),
-            None => None,
+            None => prepared.project_id_raw.clone(),
         };
 
         // Check existence: pending_creates first, then host DB.

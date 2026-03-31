@@ -241,6 +241,14 @@ pub enum TaskMutation {
     SetProject {
         value: Option<String>,
     },
+    /// Set the project by UUID. `None` clears the project assignment.
+    ///
+    /// Unlike `SetProject` (which resolves by name), this writes the
+    /// `project_id` column directly. The caller is responsible for
+    /// passing a valid project UUID — no existence check is performed.
+    SetProjectId {
+        value: Option<String>,
+    },
     /// Generic escape hatch for setting arbitrary UDA values.
     ///
     /// `key` is the raw TaskMap key. `value` is `None` to remove.

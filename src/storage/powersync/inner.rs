@@ -249,12 +249,13 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
     async fn set_task(&mut self, uuid: Uuid, task: TaskMap) -> Result<()> {
         let prepared = prepare_task(task)?;
 
-        // Resolve project name → project_id (look up or create in projects table).
+        // Resolve project: name-based lookup takes precedence; fall back to raw UUID.
         let project_id: Option<String> = prepared
             .project_name
             .as_ref()
             .map(|name| self.resolve_project_id(name))
-            .transpose()?;
+            .transpose()?
+            .or_else(|| prepared.project_id_raw.clone());
 
         // PowerSync views don't support UPSERT (INSERT ... ON CONFLICT DO UPDATE).
         // INSTEAD OF triggers also report 0 rows changed regardless of success,
