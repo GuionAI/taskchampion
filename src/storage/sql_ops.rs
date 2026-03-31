@@ -234,18 +234,6 @@ pub(crate) fn remove_operation_stmt(id: &str) -> SqlStatement {
     }
 }
 
-/// Generate SQL statement for inserting a new project.
-#[cfg(feature = "storage-external")]
-pub(crate) fn insert_project_stmt(id: &Uuid, name: &str) -> SqlStatement {
-    SqlStatement {
-        sql: "INSERT OR IGNORE INTO projects (id, name) VALUES (?, ?)".into(),
-        params: vec![
-            SqlParam::Text(id.to_string()),
-            SqlParam::Text(name.to_string()),
-        ],
-    }
-}
-
 /// Generate SQL statement for setting tc_config (upsert singleton row).
 pub(crate) fn set_tc_config_stmt(value: &str) -> SqlStatement {
     SqlStatement {

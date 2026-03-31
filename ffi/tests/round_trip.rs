@@ -99,6 +99,18 @@ impl MockFfiSqlExecutor {
         .unwrap_or_default()
     }
 
+    /// Insert a project into the projects table and return its UUID string.
+    fn inject_project(&self, name: &str) -> String {
+        let conn = self.conn.lock().unwrap();
+        let id = Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO projects (id, name) VALUES (?, ?)",
+            rusqlite::params![&id, name],
+        )
+        .expect("inject_project");
+        id
+    }
+
     /// Convert FfiSqlParam to a rusqlite-compatible value.
     fn bind_params(params: &[FfiSqlParam]) -> Vec<Box<dyn rusqlite::types::ToSql>> {
         params
@@ -1194,8 +1206,11 @@ async fn test_set_value_rejects_recurrence_dedicated_keys() {
 
 #[tokio::test]
 async fn test_set_project_round_trip() {
-    let session = make_session();
+    let (session, mock) = make_session_with_executor();
     let uuid = Uuid::new_v4().to_string();
+
+    // Pre-seed project so SetProject can resolve it.
+    mock.inject_project("work");
 
     session
         .create_task(uuid.clone(), "Project test".into())
@@ -1220,13 +1235,26 @@ async fn test_set_project_round_trip() {
 
     let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
     assert_eq!(task.project.as_deref(), Some("work"), "project name set");
-    // project_id should be populated (auto-created by storage layer).
     assert!(
         task.project_id.is_some(),
         "project_id should be populated after set"
     );
 
-    // Clear project.
+    // SetProject with nonexistent name should fail with ProjectNotFound.
+    let result = session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetProject {
+                value: Some("nonexistent".into()),
+            }],
+        )
+        .await;
+    assert!(
+        matches!(result, Err(FfiError::ProjectNotFound { .. })),
+        "expected ProjectNotFound for unknown project, got: {result:?}"
+    );
+
+    // Clear project (None) still works — bypasses resolve_project_id.
     session
         .mutate_task(uuid.clone(), vec![TaskMutation::SetProject { value: None }])
         .await
@@ -1234,9 +1262,6 @@ async fn test_set_project_round_trip() {
 
     let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
     assert_eq!(task.project, None, "project cleared");
-    // Note: project_id is a separate FK column managed by the storage layer;
-    // it is not automatically cleared when the project name is removed.
-    // Tracking this as a known storage-layer limitation.
 }
 
 // ---------------------------------------------------------------------------
