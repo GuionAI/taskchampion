@@ -1304,10 +1304,7 @@ mod tests {
         // No tags registered in config — adding any tag should fail.
         let task_uuid = Uuid::new_v4();
         let mut ops = Operations::new();
-        let mut task = replica
-            .create_task(task_uuid, &mut ops)
-            .await
-            .unwrap();
+        let mut task = replica.create_task(task_uuid, &mut ops).await.unwrap();
         replica.commit_operations(ops).await.unwrap();
 
         let tag: Tag = "work".try_into().unwrap();
@@ -1332,10 +1329,7 @@ mod tests {
 
         let task_uuid = Uuid::new_v4();
         let mut ops = Operations::new();
-        let mut task = replica
-            .create_task(task_uuid, &mut ops)
-            .await
-            .unwrap();
+        let mut task = replica.create_task(task_uuid, &mut ops).await.unwrap();
         replica.commit_operations(ops).await.unwrap();
 
         let tag: Tag = "work".try_into().unwrap();

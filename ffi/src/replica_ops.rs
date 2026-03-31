@@ -253,9 +253,12 @@ impl FfiSession {
     pub async fn create_tag(&self, name: String) -> Result<(), FfiError> {
         self.with_replica(|mut replica| async move {
             // Validate tag name first — fail fast before reading config.
-            let _: Tag = name.as_str().try_into().map_err(|e| FfiError::InvalidInput {
-                message: format!("Invalid tag name: {e}"),
-            })?;
+            let _: Tag = name
+                .as_str()
+                .try_into()
+                .map_err(|e| FfiError::InvalidInput {
+                    message: format!("Invalid tag name: {e}"),
+                })?;
 
             let mut config = replica
                 .get_tc_config_parsed()
