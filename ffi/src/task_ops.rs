@@ -28,6 +28,44 @@ impl FfiSession {
                 .map_err(FfiError::from)?
                 .ok_or_else(|| FfiError::TaskNotFound { uuid: uuid.clone() })?;
 
+            // Pre-validate all AddTag mutations against tc_config (one config read per batch).
+            // Collect raw name strings from AddTag variants for validation.
+            let add_tag_names: Vec<&str> = mutations
+                .iter()
+                .filter_map(|m| {
+                    if let TaskMutation::AddTag { tag } = m {
+                        Some(tag.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            if !add_tag_names.is_empty() {
+                let config = replica
+                    .get_tc_config_parsed()
+                    .await
+                    .map_err(FfiError::from)?;
+                for name in add_tag_names {
+                    // Validate tag format first — a malformed name returns
+                    // InvalidInput (matching apply_mutation's behaviour),
+                    // not TagNotFound.
+                    let tag: Tag = name.try_into().map_err(|e| FfiError::InvalidInput {
+                        message: format!("Invalid tag: {e}"),
+                    })?;
+                    // Synthetic tags (e.g. "WAITING") cannot be user-managed.
+                    if tag.is_synthetic() {
+                        return Err(FfiError::InvalidInput {
+                            message: format!("'{name}' is a synthetic tag and cannot be added"),
+                        });
+                    }
+                    if !config.has_tag(name) {
+                        return Err(FfiError::TagNotFound {
+                            name: name.to_string(),
+                        });
+                    }
+                }
+            }
+
             let mut ops = Operations::new();
             ops.push(Operation::UndoPoint);
 

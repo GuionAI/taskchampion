@@ -66,7 +66,7 @@ impl TcConfig {
 
     /// Return `true` if the given tag name is in the config.
     pub fn has_tag(&self, name: &str) -> bool {
-        self.tag_list().iter().any(|t| t == name)
+        self.tags.split(',').any(|t| t.trim() == name)
     }
 
     /// Remove `name` from the tag list. Returns `false` if not present.
@@ -78,6 +78,22 @@ impl TcConfig {
             return false;
         }
         self.tags = list.join(",");
+        true
+    }
+
+    /// Add `name` to the tag list.
+    ///
+    /// Returns `false` if the tag already exists (no-op); `true` if it was added.
+    pub fn add_tag(&mut self, name: &str) -> bool {
+        if self.has_tag(name) {
+            return false;
+        }
+        if self.tags.is_empty() {
+            self.tags = name.to_string();
+        } else {
+            self.tags.push(',');
+            self.tags.push_str(name);
+        }
         true
     }
 
@@ -157,6 +173,30 @@ mod tests {
     fn tag_list_trims_whitespace() {
         let cfg = config_with_tags(" work , home ");
         assert_eq!(cfg.tag_list(), vec!["home", "work"]);
+    }
+
+    // ── add_tag ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn add_tag_to_empty_config() {
+        let mut cfg = TcConfig::default();
+        assert!(cfg.add_tag("work"));
+        assert_eq!(cfg.tag_list(), vec!["work"]);
+    }
+
+    #[test]
+    fn add_tag_appends_to_existing() {
+        let mut cfg = config_with_tags("home");
+        assert!(cfg.add_tag("work"));
+        assert!(cfg.has_tag("work"));
+        assert!(cfg.has_tag("home"));
+    }
+
+    #[test]
+    fn add_tag_dedup_returns_false() {
+        let mut cfg = config_with_tags("work");
+        assert!(!cfg.add_tag("work"), "duplicate should return false");
+        assert_eq!(cfg.tag_list(), vec!["work"], "list unchanged");
     }
 
     // ── remove_tag ────────────────────────────────────────────────────────────
