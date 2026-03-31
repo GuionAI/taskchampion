@@ -556,6 +556,13 @@ public protocol FfiSessionProtocol: AnyObject, Sendable {
     func allTasks() async throws  -> [FfiTask]
     
     /**
+     * Clear the xstatus UDA on a task, and auto-set status to `Pending`.
+     *
+     * Returns the task unchanged (no undo point) if xstatus is already `None`.
+     */
+    func clearXstatus(taskUuid: String) async throws  -> FfiTask
+    
+    /**
      * Create a new task with the given UUID and description.
      *
      * The task is immediately committed with `status: Pending` and `entry: now`.
@@ -563,23 +570,18 @@ public protocol FfiSessionProtocol: AnyObject, Sendable {
     func createTask(uuid: String, description: String) async throws  -> FfiTask
     
     /**
+     * Remove `name` from tc_config.tags and strip `tag_{name}` from all tasks.
+     *
+     * Task operations are committed first (undoable), then the config is persisted.
+     * Returns the number of tasks that had the tag removed.
+     * Returns `TagNotFound` if the tag is not in tc_config.
+     */
+    func deleteTag(name: String) async throws  -> UInt32
+    
+    /**
      * Return all dependency edges as `(from_uuid depends_on to_uuid)` pairs.
      */
     func dependencyMap() async throws  -> [FfiDependencyEdge]
-    
-    /**
-     * Get all unique tag names across all tasks, sorted alphabetically.
-     */
-    func getAllTags() async throws  -> [String]
-    
-    /**
-     * Get the metadata for a tag by name.
-     *
-     * Returns a typed record with color, is_status, and icon fields.
-     * All fields default to empty/false/None if no metadata exists or
-     * if the stored JSON is missing fields.
-     */
-    func getTagMetadata(name: String) async throws  -> FfiTagMetadata
     
     /**
      * Fetch a single task by UUID. Returns `None` if not found.
@@ -587,36 +589,73 @@ public protocol FfiSessionProtocol: AnyObject, Sendable {
     func getTask(uuid: String) async throws  -> FfiTask?
     
     /**
+     * Return `true` if `ancestor_uuid` is an ancestor of `uuid` in the task tree.
+     *
+     * Used for UI hints such as greying out invalid drag-and-drop targets.
+     * The `reparent` method performs this check internally — callers do not need
+     * to call `is_ancestor` for safety.
+     *
+     * Returns `false` if either UUID does not exist or is not in the tree.
+     */
+    func isAncestor(uuid: String, ancestorUuid: String) async throws  -> Bool
+    
+    /**
      * Return pending tasks only.
      */
     func pendingTasks() async throws  -> [FfiTask]
     
     /**
-     * Set the color for a tag. Reads existing metadata, patches color, writes back.
+     * Rename `old` to `new` in tc_config.tags and across all task keys.
      *
-     * Note: concurrent calls to any setter for the same tag interleave at the
-     * whole-metadata level (last-write-wins). Set all fields in a single call
-     * sequence, not in parallel, if consistency matters.
+     * Task operations are committed first (undoable), then the config is persisted.
+     * Returns the number of tasks updated.
+     * Returns `TagNotFound` if `old` is not in tc_config.
+     * Returns `TagAlreadyExists` if `new` is already in tc_config.
+     * Returns `InvalidInput` if `new` is not a valid tag name.
      */
-    func setTagColor(name: String, color: String) async throws 
+    func renameTag(old: String, new: String) async throws  -> UInt32
     
     /**
-     * Set the icon for a tag. Pass `None` to clear. Reads existing metadata, patches icon, writes back.
+     * Move `uuid` to a position immediately after `anchor_uuid` among their shared siblings.
      *
-     * Note: concurrent calls to any setter for the same tag interleave at the
-     * whole-metadata level (last-write-wins). Set all fields in a single call
-     * sequence, not in parallel, if consistency matters.
+     * Both tasks must have the same parent (or both be root tasks).
+     * Returns `TaskNotFound` if either UUID does not exist in the database.
+     * Returns `AnchorHasNoPosition` if the anchor exists but has no position field.
+     * Returns `NotASibling` if the two tasks have different parents.
      */
-    func setTagIcon(name: String, icon: Int64?) async throws 
+    func reorderAfter(uuid: String, anchorUuid: String) async throws  -> FfiTask
     
     /**
-     * Set whether a tag is a status tag. Reads existing metadata, patches is_status, writes back.
+     * Move `uuid` to a position immediately before `anchor_uuid` among their shared siblings.
      *
-     * Note: concurrent calls to any setter for the same tag interleave at the
-     * whole-metadata level (last-write-wins). Set all fields in a single call
-     * sequence, not in parallel, if consistency matters.
+     * Both tasks must have the same parent (or both be root tasks).
+     * Returns `TaskNotFound` if either UUID does not exist in the database.
+     * Returns `AnchorHasNoPosition` if the anchor exists but has no position field.
+     * Returns `NotASibling` if the two tasks have different parents.
      */
-    func setTagIsStatus(name: String, value: Bool) async throws 
+    func reorderBefore(uuid: String, anchorUuid: String) async throws  -> FfiTask
+    
+    /**
+     * Move `uuid` to a new parent with the specified position among siblings.
+     *
+     * Verifies that the move would not create a cycle (returns `CircularParent`
+     * if `new_parent` is a descendant of `uuid`).
+     *
+     * Returns `TaskNotFound` if `uuid` or `new_parent` do not exist.
+     * Returns `AnchorHasNoPosition` if an `After`/`Before` anchor exists but
+     * has no `position` field. Note: a malformed anchor UUID returns `InvalidInput`,
+     * not `TaskNotFound`.
+     * Returns `CircularParent` if the move would create a cycle.
+     */
+    func reparent(uuid: String, newParent: String?, position: ReparentPosition) async throws  -> FfiTask
+    
+    /**
+     * Set the xstatus UDA on a task. Validates that `name` is in tc_config.xstatus.
+     *
+     * Also auto-sets status to `Pending` if the task is not already pending.
+     * Returns `UnknownXStatus` if `name` is not in tc_config.xstatus definitions.
+     */
+    func setXstatus(taskUuid: String, name: String) async throws  -> FfiTask
     
     /**
      * Return the task tree as a flat list of [`FfiTreeNode`]s.
@@ -737,6 +776,28 @@ open func allTasks()async throws  -> [FfiTask]  {
 }
     
     /**
+     * Clear the xstatus UDA on a task, and auto-set status to `Pending`.
+     *
+     * Returns the task unchanged (no undo point) if xstatus is already `None`.
+     */
+open func clearXstatus(taskUuid: String)async throws  -> FfiTask  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_taskchampion_ffi_fn_method_ffisession_clear_xstatus(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(taskUuid)
+                )
+            },
+            pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeFfiTask_lift,
+            errorHandler: FfiConverterTypeFfiError_lift
+        )
+}
+    
+    /**
      * Create a new task with the given UUID and description.
      *
      * The task is immediately committed with `status: Pending` and `entry: now`.
@@ -754,6 +815,30 @@ open func createTask(uuid: String, description: String)async throws  -> FfiTask 
             completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeFfiTask_lift,
+            errorHandler: FfiConverterTypeFfiError_lift
+        )
+}
+    
+    /**
+     * Remove `name` from tc_config.tags and strip `tag_{name}` from all tasks.
+     *
+     * Task operations are committed first (undoable), then the config is persisted.
+     * Returns the number of tasks that had the tag removed.
+     * Returns `TagNotFound` if the tag is not in tc_config.
+     */
+open func deleteTag(name: String)async throws  -> UInt32  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_taskchampion_ffi_fn_method_ffisession_delete_tag(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(name)
+                )
+            },
+            pollFunc: ffi_taskchampion_ffi_rust_future_poll_u32,
+            completeFunc: ffi_taskchampion_ffi_rust_future_complete_u32,
+            freeFunc: ffi_taskchampion_ffi_rust_future_free_u32,
+            liftFunc: FfiConverterUInt32.lift,
             errorHandler: FfiConverterTypeFfiError_lift
         )
 }
@@ -779,50 +864,6 @@ open func dependencyMap()async throws  -> [FfiDependencyEdge]  {
 }
     
     /**
-     * Get all unique tag names across all tasks, sorted alphabetically.
-     */
-open func getAllTags()async throws  -> [String]  {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_taskchampion_ffi_fn_method_ffisession_get_all_tags(
-                    self.uniffiCloneHandle()
-                    
-                )
-            },
-            pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
-            completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
-            freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterSequenceString.lift,
-            errorHandler: FfiConverterTypeFfiError_lift
-        )
-}
-    
-    /**
-     * Get the metadata for a tag by name.
-     *
-     * Returns a typed record with color, is_status, and icon fields.
-     * All fields default to empty/false/None if no metadata exists or
-     * if the stored JSON is missing fields.
-     */
-open func getTagMetadata(name: String)async throws  -> FfiTagMetadata  {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_taskchampion_ffi_fn_method_ffisession_get_tag_metadata(
-                    self.uniffiCloneHandle(),
-                    FfiConverterString.lower(name)
-                )
-            },
-            pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
-            completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
-            freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterTypeFfiTagMetadata_lift,
-            errorHandler: FfiConverterTypeFfiError_lift
-        )
-}
-    
-    /**
      * Fetch a single task by UUID. Returns `None` if not found.
      */
 open func getTask(uuid: String)async throws  -> FfiTask?  {
@@ -838,6 +879,32 @@ open func getTask(uuid: String)async throws  -> FfiTask?  {
             completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
             liftFunc: FfiConverterOptionTypeFfiTask.lift,
+            errorHandler: FfiConverterTypeFfiError_lift
+        )
+}
+    
+    /**
+     * Return `true` if `ancestor_uuid` is an ancestor of `uuid` in the task tree.
+     *
+     * Used for UI hints such as greying out invalid drag-and-drop targets.
+     * The `reparent` method performs this check internally — callers do not need
+     * to call `is_ancestor` for safety.
+     *
+     * Returns `false` if either UUID does not exist or is not in the tree.
+     */
+open func isAncestor(uuid: String, ancestorUuid: String)async throws  -> Bool  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_taskchampion_ffi_fn_method_ffisession_is_ancestor(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(uuid),FfiConverterString.lower(ancestorUuid)
+                )
+            },
+            pollFunc: ffi_taskchampion_ffi_rust_future_poll_i8,
+            completeFunc: ffi_taskchampion_ffi_rust_future_complete_i8,
+            freeFunc: ffi_taskchampion_ffi_rust_future_free_i8,
+            liftFunc: FfiConverterBool.lift,
             errorHandler: FfiConverterTypeFfiError_lift
         )
 }
@@ -863,73 +930,129 @@ open func pendingTasks()async throws  -> [FfiTask]  {
 }
     
     /**
-     * Set the color for a tag. Reads existing metadata, patches color, writes back.
+     * Rename `old` to `new` in tc_config.tags and across all task keys.
      *
-     * Note: concurrent calls to any setter for the same tag interleave at the
-     * whole-metadata level (last-write-wins). Set all fields in a single call
-     * sequence, not in parallel, if consistency matters.
+     * Task operations are committed first (undoable), then the config is persisted.
+     * Returns the number of tasks updated.
+     * Returns `TagNotFound` if `old` is not in tc_config.
+     * Returns `TagAlreadyExists` if `new` is already in tc_config.
+     * Returns `InvalidInput` if `new` is not a valid tag name.
      */
-open func setTagColor(name: String, color: String)async throws   {
+open func renameTag(old: String, new: String)async throws  -> UInt32  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_taskchampion_ffi_fn_method_ffisession_set_tag_color(
+                uniffi_taskchampion_ffi_fn_method_ffisession_rename_tag(
                     self.uniffiCloneHandle(),
-                    FfiConverterString.lower(name),FfiConverterString.lower(color)
+                    FfiConverterString.lower(old),FfiConverterString.lower(new)
                 )
             },
-            pollFunc: ffi_taskchampion_ffi_rust_future_poll_void,
-            completeFunc: ffi_taskchampion_ffi_rust_future_complete_void,
-            freeFunc: ffi_taskchampion_ffi_rust_future_free_void,
-            liftFunc: { $0 },
+            pollFunc: ffi_taskchampion_ffi_rust_future_poll_u32,
+            completeFunc: ffi_taskchampion_ffi_rust_future_complete_u32,
+            freeFunc: ffi_taskchampion_ffi_rust_future_free_u32,
+            liftFunc: FfiConverterUInt32.lift,
             errorHandler: FfiConverterTypeFfiError_lift
         )
 }
     
     /**
-     * Set the icon for a tag. Pass `None` to clear. Reads existing metadata, patches icon, writes back.
+     * Move `uuid` to a position immediately after `anchor_uuid` among their shared siblings.
      *
-     * Note: concurrent calls to any setter for the same tag interleave at the
-     * whole-metadata level (last-write-wins). Set all fields in a single call
-     * sequence, not in parallel, if consistency matters.
+     * Both tasks must have the same parent (or both be root tasks).
+     * Returns `TaskNotFound` if either UUID does not exist in the database.
+     * Returns `AnchorHasNoPosition` if the anchor exists but has no position field.
+     * Returns `NotASibling` if the two tasks have different parents.
      */
-open func setTagIcon(name: String, icon: Int64?)async throws   {
+open func reorderAfter(uuid: String, anchorUuid: String)async throws  -> FfiTask  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_taskchampion_ffi_fn_method_ffisession_set_tag_icon(
+                uniffi_taskchampion_ffi_fn_method_ffisession_reorder_after(
                     self.uniffiCloneHandle(),
-                    FfiConverterString.lower(name),FfiConverterOptionInt64.lower(icon)
+                    FfiConverterString.lower(uuid),FfiConverterString.lower(anchorUuid)
                 )
             },
-            pollFunc: ffi_taskchampion_ffi_rust_future_poll_void,
-            completeFunc: ffi_taskchampion_ffi_rust_future_complete_void,
-            freeFunc: ffi_taskchampion_ffi_rust_future_free_void,
-            liftFunc: { $0 },
+            pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeFfiTask_lift,
             errorHandler: FfiConverterTypeFfiError_lift
         )
 }
     
     /**
-     * Set whether a tag is a status tag. Reads existing metadata, patches is_status, writes back.
+     * Move `uuid` to a position immediately before `anchor_uuid` among their shared siblings.
      *
-     * Note: concurrent calls to any setter for the same tag interleave at the
-     * whole-metadata level (last-write-wins). Set all fields in a single call
-     * sequence, not in parallel, if consistency matters.
+     * Both tasks must have the same parent (or both be root tasks).
+     * Returns `TaskNotFound` if either UUID does not exist in the database.
+     * Returns `AnchorHasNoPosition` if the anchor exists but has no position field.
+     * Returns `NotASibling` if the two tasks have different parents.
      */
-open func setTagIsStatus(name: String, value: Bool)async throws   {
+open func reorderBefore(uuid: String, anchorUuid: String)async throws  -> FfiTask  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_taskchampion_ffi_fn_method_ffisession_set_tag_is_status(
+                uniffi_taskchampion_ffi_fn_method_ffisession_reorder_before(
                     self.uniffiCloneHandle(),
-                    FfiConverterString.lower(name),FfiConverterBool.lower(value)
+                    FfiConverterString.lower(uuid),FfiConverterString.lower(anchorUuid)
                 )
             },
-            pollFunc: ffi_taskchampion_ffi_rust_future_poll_void,
-            completeFunc: ffi_taskchampion_ffi_rust_future_complete_void,
-            freeFunc: ffi_taskchampion_ffi_rust_future_free_void,
-            liftFunc: { $0 },
+            pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeFfiTask_lift,
+            errorHandler: FfiConverterTypeFfiError_lift
+        )
+}
+    
+    /**
+     * Move `uuid` to a new parent with the specified position among siblings.
+     *
+     * Verifies that the move would not create a cycle (returns `CircularParent`
+     * if `new_parent` is a descendant of `uuid`).
+     *
+     * Returns `TaskNotFound` if `uuid` or `new_parent` do not exist.
+     * Returns `AnchorHasNoPosition` if an `After`/`Before` anchor exists but
+     * has no `position` field. Note: a malformed anchor UUID returns `InvalidInput`,
+     * not `TaskNotFound`.
+     * Returns `CircularParent` if the move would create a cycle.
+     */
+open func reparent(uuid: String, newParent: String?, position: ReparentPosition)async throws  -> FfiTask  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_taskchampion_ffi_fn_method_ffisession_reparent(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(uuid),FfiConverterOptionString.lower(newParent),FfiConverterTypeReparentPosition_lower(position)
+                )
+            },
+            pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeFfiTask_lift,
+            errorHandler: FfiConverterTypeFfiError_lift
+        )
+}
+    
+    /**
+     * Set the xstatus UDA on a task. Validates that `name` is in tc_config.xstatus.
+     *
+     * Also auto-sets status to `Pending` if the task is not already pending.
+     * Returns `UnknownXStatus` if `name` is not in tc_config.xstatus definitions.
+     */
+open func setXstatus(taskUuid: String, name: String)async throws  -> FfiTask  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_taskchampion_ffi_fn_method_ffisession_set_xstatus(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(taskUuid),FfiConverterString.lower(name)
+                )
+            },
+            pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeFfiTask_lift,
             errorHandler: FfiConverterTypeFfiError_lift
         )
 }
@@ -2193,85 +2316,6 @@ public func FfiConverterTypeFfiSqlStatement_lower(_ value: FfiSqlStatement) -> R
 
 
 /**
- * Tag metadata — typed view of the `tc_tag_metadata.data` JSONB column.
- */
-public struct FfiTagMetadata: Equatable, Hashable {
-    /**
-     * Hex color string (e.g. "#ff0000"), or empty if not set.
-     */
-    public var color: String
-    /**
-     * Whether this tag represents a status category.
-     */
-    public var isStatus: Bool
-    /**
-     * Icon identifier, or `None` if not set.
-     */
-    public var icon: Int64?
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(
-        /**
-         * Hex color string (e.g. "#ff0000"), or empty if not set.
-         */color: String, 
-        /**
-         * Whether this tag represents a status category.
-         */isStatus: Bool, 
-        /**
-         * Icon identifier, or `None` if not set.
-         */icon: Int64?) {
-        self.color = color
-        self.isStatus = isStatus
-        self.icon = icon
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension FfiTagMetadata: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeFfiTagMetadata: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiTagMetadata {
-        return
-            try FfiTagMetadata(
-                color: FfiConverterString.read(from: &buf), 
-                isStatus: FfiConverterBool.read(from: &buf), 
-                icon: FfiConverterOptionInt64.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: FfiTagMetadata, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.color, into: &buf)
-        FfiConverterBool.write(value.isStatus, into: &buf)
-        FfiConverterOptionInt64.write(value.icon, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFfiTagMetadata_lift(_ buf: RustBuffer) throws -> FfiTagMetadata {
-    return try FfiConverterTypeFfiTagMetadata.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFfiTagMetadata_lower(_ value: FfiTagMetadata) -> RustBuffer {
-    return FfiConverterTypeFfiTagMetadata.lower(value)
-}
-
-
-/**
  * Flat representation of a task suitable for FFI transfer.
  */
 public struct FfiTask: Equatable, Hashable {
@@ -2340,6 +2384,24 @@ public struct FfiTask: Equatable, Hashable {
      */
     public var until: Int64?
     /**
+     * Extended status name (e.g. `"blocked"`), or `None` if not set.
+     *
+     * Stored as UDA `"xstatus"` in the task. Definitions live in `tc_config.xstatus`.
+     */
+    public var xstatus: String?
+    /**
+     * Project name (e.g. `"work"`), or `None` if unassigned.
+     *
+     * Resolved from the `projects` table JOIN at query time.
+     */
+    public var project: String?
+    /**
+     * Project UUID string, or `None` if unassigned.
+     *
+     * Raw value from `tc_tasks.project_id` — same JOIN as `project`.
+     */
+    public var projectId: String?
+    /**
      * User-defined attributes not covered by dedicated fields.
      *
      * Keys are the raw TaskMap keys (e.g. `"custom_field"`).
@@ -2347,8 +2409,8 @@ public struct FfiTask: Equatable, Hashable {
      * Empty if the task has no UDAs.
      *
      * Keys excluded from this map: `"scheduled"`, `"is_full_day"`, `"estimate"`,
-     * `"recur"`, `"mask"`, `"imask"`, `"until"` — all have typed accessor fields
-     * above. See [`DEDICATED_UDA_FIELDS`] for the authoritative list.
+     * `"recur"`, `"mask"`, `"imask"`, `"until"`, `"xstatus"` — all have typed
+     * accessor fields above. See [`DEDICATED_UDA_FIELDS`] for the authoritative list.
      */
     public var remainingData: [String: String]
 
@@ -2395,6 +2457,21 @@ public struct FfiTask: Equatable, Hashable {
          * Parsed from the `until` UDA string; `None` if missing or not a valid i64.
          */until: Int64?, 
         /**
+         * Extended status name (e.g. `"blocked"`), or `None` if not set.
+         *
+         * Stored as UDA `"xstatus"` in the task. Definitions live in `tc_config.xstatus`.
+         */xstatus: String?, 
+        /**
+         * Project name (e.g. `"work"`), or `None` if unassigned.
+         *
+         * Resolved from the `projects` table JOIN at query time.
+         */project: String?, 
+        /**
+         * Project UUID string, or `None` if unassigned.
+         *
+         * Raw value from `tc_tasks.project_id` — same JOIN as `project`.
+         */projectId: String?, 
+        /**
          * User-defined attributes not covered by dedicated fields.
          *
          * Keys are the raw TaskMap keys (e.g. `"custom_field"`).
@@ -2402,8 +2479,8 @@ public struct FfiTask: Equatable, Hashable {
          * Empty if the task has no UDAs.
          *
          * Keys excluded from this map: `"scheduled"`, `"is_full_day"`, `"estimate"`,
-         * `"recur"`, `"mask"`, `"imask"`, `"until"` — all have typed accessor fields
-         * above. See [`DEDICATED_UDA_FIELDS`] for the authoritative list.
+         * `"recur"`, `"mask"`, `"imask"`, `"until"`, `"xstatus"` — all have typed
+         * accessor fields above. See [`DEDICATED_UDA_FIELDS`] for the authoritative list.
          */remainingData: [String: String]) {
         self.uuid = uuid
         self.status = status
@@ -2430,6 +2507,9 @@ public struct FfiTask: Equatable, Hashable {
         self.mask = mask
         self.imask = imask
         self.until = until
+        self.xstatus = xstatus
+        self.project = project
+        self.projectId = projectId
         self.remainingData = remainingData
     }
 
@@ -2474,6 +2554,9 @@ public struct FfiConverterTypeFfiTask: FfiConverterRustBuffer {
                 mask: FfiConverterOptionString.read(from: &buf), 
                 imask: FfiConverterOptionUInt32.read(from: &buf), 
                 until: FfiConverterOptionInt64.read(from: &buf), 
+                xstatus: FfiConverterOptionString.read(from: &buf), 
+                project: FfiConverterOptionString.read(from: &buf), 
+                projectId: FfiConverterOptionString.read(from: &buf), 
                 remainingData: FfiConverterDictionaryStringString.read(from: &buf)
         )
     }
@@ -2504,6 +2587,9 @@ public struct FfiConverterTypeFfiTask: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.mask, into: &buf)
         FfiConverterOptionUInt32.write(value.imask, into: &buf)
         FfiConverterOptionInt64.write(value.until, into: &buf)
+        FfiConverterOptionString.write(value.xstatus, into: &buf)
+        FfiConverterOptionString.write(value.project, into: &buf)
+        FfiConverterOptionString.write(value.projectId, into: &buf)
         FfiConverterDictionaryStringString.write(value.remainingData, into: &buf)
     }
 }
@@ -2815,6 +2901,38 @@ public enum FfiError: Swift.Error, Equatable, Hashable, Foundation.LocalizedErro
      */
     case Internal(message: String
     )
+    /**
+     * Reparent would create a cycle (uuid cannot be a descendant of parent).
+     */
+    case CircularParent(uuid: String, parent: String
+    )
+    /**
+     * Reorder anchor is not under the same parent as the task.
+     */
+    case NotASibling(uuid: String, anchor: String
+    )
+    /**
+     * Reorder/reparent anchor exists in the DB but has no position field.
+     *
+     * Use a positioned task as anchor, or call `SetPosition` first.
+     */
+    case AnchorHasNoPosition(uuid: String
+    )
+    /**
+     * delete_tag / rename_tag on a tag name not present in tc_config.
+     */
+    case TagNotFound(name: String
+    )
+    /**
+     * rename_tag target already exists in tc_config.
+     */
+    case TagAlreadyExists(name: String
+    )
+    /**
+     * set_xstatus with a name not in tc_config.xstatus definitions.
+     */
+    case UnknownXStatus(name: String
+    )
 
     
 
@@ -2859,6 +2977,26 @@ public struct FfiConverterTypeFfiError: FfiConverterRustBuffer {
         case 5: return .Internal(
             message: try FfiConverterString.read(from: &buf)
             )
+        case 6: return .CircularParent(
+            uuid: try FfiConverterString.read(from: &buf), 
+            parent: try FfiConverterString.read(from: &buf)
+            )
+        case 7: return .NotASibling(
+            uuid: try FfiConverterString.read(from: &buf), 
+            anchor: try FfiConverterString.read(from: &buf)
+            )
+        case 8: return .AnchorHasNoPosition(
+            uuid: try FfiConverterString.read(from: &buf)
+            )
+        case 9: return .TagNotFound(
+            name: try FfiConverterString.read(from: &buf)
+            )
+        case 10: return .TagAlreadyExists(
+            name: try FfiConverterString.read(from: &buf)
+            )
+        case 11: return .UnknownXStatus(
+            name: try FfiConverterString.read(from: &buf)
+            )
 
          default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -2894,6 +3032,38 @@ public struct FfiConverterTypeFfiError: FfiConverterRustBuffer {
         case let .Internal(message):
             writeInt(&buf, Int32(5))
             FfiConverterString.write(message, into: &buf)
+            
+        
+        case let .CircularParent(uuid,parent):
+            writeInt(&buf, Int32(6))
+            FfiConverterString.write(uuid, into: &buf)
+            FfiConverterString.write(parent, into: &buf)
+            
+        
+        case let .NotASibling(uuid,anchor):
+            writeInt(&buf, Int32(7))
+            FfiConverterString.write(uuid, into: &buf)
+            FfiConverterString.write(anchor, into: &buf)
+            
+        
+        case let .AnchorHasNoPosition(uuid):
+            writeInt(&buf, Int32(8))
+            FfiConverterString.write(uuid, into: &buf)
+            
+        
+        case let .TagNotFound(name):
+            writeInt(&buf, Int32(9))
+            FfiConverterString.write(name, into: &buf)
+            
+        
+        case let .TagAlreadyExists(name):
+            writeInt(&buf, Int32(10))
+            FfiConverterString.write(name, into: &buf)
+            
+        
+        case let .UnknownXStatus(name):
+            writeInt(&buf, Int32(11))
+            FfiConverterString.write(name, into: &buf)
             
         }
     }
@@ -3630,6 +3800,111 @@ public func FfiConverterTypeFfiStatus_lower(_ value: FfiStatus) -> RustBuffer {
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
+ * Target position when reparenting a task.
+ *
+ * Passed to `reparent()` to specify where the task should be inserted
+ * among the new parent's children.
+ */
+
+public enum ReparentPosition: Equatable, Hashable {
+    
+    /**
+     * Insert as the first child of the new parent.
+     */
+    case beginning
+    /**
+     * Insert as the last child of the new parent.
+     */
+    case end
+    /**
+     * Insert immediately after the sibling identified by `anchor` UUID.
+     */
+    case after(anchor: String
+    )
+    /**
+     * Insert immediately before the sibling identified by `anchor` UUID.
+     */
+    case before(anchor: String
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension ReparentPosition: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeReparentPosition: FfiConverterRustBuffer {
+    typealias SwiftType = ReparentPosition
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ReparentPosition {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .beginning
+        
+        case 2: return .end
+        
+        case 3: return .after(anchor: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 4: return .before(anchor: try FfiConverterString.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: ReparentPosition, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .beginning:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .end:
+            writeInt(&buf, Int32(2))
+        
+        
+        case let .after(anchor):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(anchor, into: &buf)
+            
+        
+        case let .before(anchor):
+            writeInt(&buf, Int32(4))
+            FfiConverterString.write(anchor, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeReparentPosition_lift(_ buf: RustBuffer) throws -> ReparentPosition {
+    return try FfiConverterTypeReparentPosition.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeReparentPosition_lower(_ value: ReparentPosition) -> RustBuffer {
+    return FfiConverterTypeReparentPosition.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
  * Enum of all supported task mutations.
  *
  * Pass a `Vec<TaskMutation>` to `mutate_task` — all mutations are applied in
@@ -3738,6 +4013,13 @@ public enum TaskMutation: Equatable, Hashable {
     case setUntil(epoch: Int64?
     )
     /**
+     * Set the project by name. `None` clears the project assignment.
+     *
+     * The storage layer resolves (or creates) the project UUID automatically.
+     */
+    case setProject(value: String?
+    )
+    /**
      * Generic escape hatch for setting arbitrary UDA values.
      *
      * `key` is the raw TaskMap key. `value` is `None` to remove.
@@ -3841,7 +4123,10 @@ public struct FfiConverterTypeTaskMutation: FfiConverterRustBuffer {
         case 26: return .setUntil(epoch: try FfiConverterOptionInt64.read(from: &buf)
         )
         
-        case 27: return .setValue(key: try FfiConverterString.read(from: &buf), value: try FfiConverterOptionString.read(from: &buf)
+        case 27: return .setProject(value: try FfiConverterOptionString.read(from: &buf)
+        )
+        
+        case 28: return .setValue(key: try FfiConverterString.read(from: &buf), value: try FfiConverterOptionString.read(from: &buf)
         )
         
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -3979,8 +4264,13 @@ public struct FfiConverterTypeTaskMutation: FfiConverterRustBuffer {
             FfiConverterOptionInt64.write(epoch, into: &buf)
             
         
-        case let .setValue(key,value):
+        case let .setProject(value):
             writeInt(&buf, Int32(27))
+            FfiConverterOptionString.write(value, into: &buf)
+            
+        
+        case let .setValue(key,value):
+            writeInt(&buf, Int32(28))
             FfiConverterString.write(key, into: &buf)
             FfiConverterOptionString.write(value, into: &buf)
             
@@ -4743,18 +5033,6 @@ public func allTaskTablesSql() -> String  {
 })
 }
 /**
- * SQL that covers the tag metadata table.
- *
- * Pass this to `db.watch()` so PowerSync re-runs your query whenever a
- * `tc_tag_metadata` row changes (e.g. metadata set on another device via sync).
- */
-public func tagMetadataTablesSql() -> String  {
-    return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_taskchampion_ffi_fn_func_tagmetadatatablessql($0
-    )
-})
-}
-/**
  * Generate due dates for a recurrence template.
  *
  * - `base_due_epoch`: the initial due date (Unix epoch seconds)
@@ -4909,9 +5187,6 @@ private let initializationResult: InitializationResult = {
     if (uniffi_taskchampion_ffi_checksum_func_alltasktablessql() != 45498) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_func_tagmetadatatablessql() != 42248) {
-        return InitializationResult.apiChecksumMismatch
-    }
     if (uniffi_taskchampion_ffi_checksum_func_generate_due_dates() != 26948) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -4942,31 +5217,40 @@ private let initializationResult: InitializationResult = {
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_all_tasks() != 57965) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_clear_xstatus() != 15503) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_create_task() != 18352) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_delete_tag() != 34645) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_dependency_map() != 18621) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_method_ffisession_get_all_tags() != 42592) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_taskchampion_ffi_checksum_method_ffisession_get_tag_metadata() != 48489) {
-        return InitializationResult.apiChecksumMismatch
-    }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_get_task() != 45469) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_is_ancestor() != 58227) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_pending_tasks() != 10449) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_method_ffisession_set_tag_color() != 9789) {
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_rename_tag() != 64411) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_method_ffisession_set_tag_icon() != 6198) {
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_reorder_after() != 52718) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_method_ffisession_set_tag_is_status() != 35084) {
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_reorder_before() != 32752) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_reparent() != 24128) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_set_xstatus() != 52144) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_tree_map() != 45281) {
