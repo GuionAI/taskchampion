@@ -563,6 +563,17 @@ public protocol FfiSessionProtocol: AnyObject, Sendable {
     func clearXstatus(taskUuid: String) async throws  -> FfiTask
     
     /**
+     * Register `name` as a new tag in tc_config.
+     *
+     * Returns `TagAlreadyExists` if the tag is already in tc_config.
+     * Returns `InvalidInput` if `name` is not a valid tag name.
+     *
+     * Swift callers should call this before `mutate_task(AddTag)` to register
+     * new tags. Pairs with the CLI `task tag add` command on the tw side.
+     */
+    func createTag(name: String) async throws 
+    
+    /**
      * Create a new task with the given UUID and description.
      *
      * The task is immediately committed with `status: Pending` and `entry: now`.
@@ -793,6 +804,32 @@ open func clearXstatus(taskUuid: String)async throws  -> FfiTask  {
             completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
             freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeFfiTask_lift,
+            errorHandler: FfiConverterTypeFfiError_lift
+        )
+}
+    
+    /**
+     * Register `name` as a new tag in tc_config.
+     *
+     * Returns `TagAlreadyExists` if the tag is already in tc_config.
+     * Returns `InvalidInput` if `name` is not a valid tag name.
+     *
+     * Swift callers should call this before `mutate_task(AddTag)` to register
+     * new tags. Pairs with the CLI `task tag add` command on the tw side.
+     */
+open func createTag(name: String)async throws   {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_taskchampion_ffi_fn_method_ffisession_create_tag(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(name)
+                )
+            },
+            pollFunc: ffi_taskchampion_ffi_rust_future_poll_void,
+            completeFunc: ffi_taskchampion_ffi_rust_future_complete_void,
+            freeFunc: ffi_taskchampion_ffi_rust_future_free_void,
+            liftFunc: { $0 },
             errorHandler: FfiConverterTypeFfiError_lift
         )
 }
@@ -5218,6 +5255,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_clear_xstatus() != 15503) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_create_tag() != 60183) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_create_task() != 18352) {
