@@ -6,7 +6,7 @@
 //! is needed.
 
 use std::sync::Arc;
-use taskchampion::{ExternalStorage, Operation, Operations, Replica, Status};
+use taskchampion::{storage::tc_config::TcConfig, ExternalStorage, Operation, Operations, Replica, Status};
 use uuid::Uuid;
 
 use chrono::Utc;
@@ -249,6 +249,118 @@ impl FfiSession {
                 .await
                 .map_err(FfiError::from)?;
             Ok(count)
+        })
+        .await
+    }
+}
+
+/// Load tc_config from replica, returning a default if absent.
+async fn load_tc_config(replica: &mut Replica<ExternalStorage>) -> Result<TcConfig, FfiError> {
+    replica
+        .get_tc_config_parsed()
+        .await
+        .map_err(FfiError::from)
+}
+
+// ---------------------------------------------------------------------------
+// xstatus methods
+// ---------------------------------------------------------------------------
+
+#[uniffi::export]
+impl FfiSession {
+    /// Set the xstatus UDA on a task. Validates that `name` is in tc_config.xstatus.
+    ///
+    /// Also auto-sets status to `Pending` if the task is not already pending.
+    /// Returns `UnknownXStatus` if `name` is not in tc_config.xstatus definitions.
+    pub async fn set_xstatus(
+        &self,
+        task_uuid: String,
+        name: String,
+    ) -> Result<FfiTask, FfiError> {
+        self.with_replica(|mut replica| async move {
+            let uuid = parse_uuid(&task_uuid)?;
+            let config = load_tc_config(&mut replica).await?;
+            if !config.has_xstatus(&name) {
+                return Err(FfiError::UnknownXStatus { name });
+            }
+
+            let mut task = replica
+                .get_task(uuid)
+                .await
+                .map_err(FfiError::from)?
+                .ok_or_else(|| FfiError::TaskNotFound {
+                    uuid: task_uuid.clone(),
+                })?;
+
+            let mut ops = Operations::new();
+            ops.push(Operation::UndoPoint);
+
+            // Set xstatus UDA.
+            task.set_value("xstatus", Some(name), &mut ops)
+                .map_err(FfiError::from)?;
+
+            // Auto-set status to pending if not already pending.
+            if task.get_status() != taskchampion::Status::Pending {
+                task.set_status(Status::Pending, &mut ops)
+                    .map_err(FfiError::from)?;
+            }
+
+            replica
+                .commit_operations(ops)
+                .await
+                .map_err(FfiError::from)?;
+
+            let updated = replica
+                .get_task(uuid)
+                .await
+                .map_err(FfiError::from)?
+                .ok_or_else(|| FfiError::Internal {
+                    message: "Task missing after set_xstatus".into(),
+                })?;
+            Ok(FfiTask::from(&updated))
+        })
+        .await
+    }
+
+    /// Clear the xstatus UDA on a task, and auto-set status to `Pending`.
+    pub async fn clear_xstatus(&self, task_uuid: String) -> Result<FfiTask, FfiError> {
+        self.with_replica(|mut replica| async move {
+            let uuid = parse_uuid(&task_uuid)?;
+
+            let mut task = replica
+                .get_task(uuid)
+                .await
+                .map_err(FfiError::from)?
+                .ok_or_else(|| FfiError::TaskNotFound {
+                    uuid: task_uuid.clone(),
+                })?;
+
+            let mut ops = Operations::new();
+            ops.push(Operation::UndoPoint);
+
+            // Clear xstatus UDA.
+            task.set_value("xstatus", None::<String>, &mut ops)
+                .map_err(FfiError::from)?;
+
+            // Auto-set status to pending.
+            if task.get_status() != taskchampion::Status::Pending {
+                task.set_status(Status::Pending, &mut ops)
+                    .map_err(FfiError::from)?;
+            }
+
+            replica
+                .commit_operations(ops)
+                .await
+                .map_err(FfiError::from)?;
+
+            let updated = replica
+                .get_task(uuid)
+                .await
+                .map_err(FfiError::from)?
+                .ok_or_else(|| FfiError::Internal {
+                    message: "Task missing after clear_xstatus".into(),
+                })?;
+            Ok(FfiTask::from(&updated))
         })
         .await
     }

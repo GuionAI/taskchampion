@@ -43,10 +43,10 @@ impl MockFfiSqlExecutor {
                 id TEXT PRIMARY KEY, name TEXT,
                 created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
             );
-            CREATE TABLE IF NOT EXISTS tc_tag_metadata (
-                id TEXT PRIMARY KEY, name TEXT NOT NULL,
-                data TEXT NOT NULL DEFAULT '{}',
-                created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
+            CREATE TABLE IF NOT EXISTS tc_settings (
+                id TEXT PRIMARY KEY,
+                key TEXT NOT NULL,
+                value TEXT NOT NULL DEFAULT '{}'
             );",
         )
         .expect("create tables");
@@ -77,14 +77,14 @@ impl MockFfiSqlExecutor {
         Ok(FfiSqlRow { columns, values })
     }
 
-    /// Inject a raw row into tc_tag_metadata for testing (e.g. malformed JSON).
-    fn inject_raw_tag_metadata(&self, name: &str, data: &str) {
+    /// Inject a tc_config JSON value into tc_settings for testing.
+    fn inject_tc_config(&self, json: &str) {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO tc_tag_metadata (id, name, data) VALUES (?, ?, ?)",
-            rusqlite::params![Uuid::new_v4().to_string(), name, data],
+            "INSERT OR REPLACE INTO tc_settings (id, key, value) VALUES ('tc_config', 'tc_config', ?)",
+            rusqlite::params![json],
         )
-        .expect("inject_raw_tag_metadata");
+        .expect("inject_tc_config");
     }
 
     /// Convert FfiSqlParam to a rusqlite-compatible value.
@@ -500,53 +500,6 @@ async fn test_create_duplicate_returns_task_already_exists() {
 }
 
 #[tokio::test]
-async fn test_get_all_tags() {
-    let session = make_session();
-
-    // Empty — no tasks yet.
-    let tags = session.get_all_tags().await.unwrap();
-    assert!(tags.is_empty());
-
-    // Create two tasks with overlapping tags.
-    let uuid1 = Uuid::new_v4().to_string();
-    session
-        .create_task(uuid1.clone(), "Task 1".into())
-        .await
-        .unwrap();
-    session
-        .mutate_task(
-            uuid1.clone(),
-            vec![
-                TaskMutation::AddTag { tag: "work".into() },
-                TaskMutation::AddTag {
-                    tag: "urgent".into(),
-                },
-            ],
-        )
-        .await
-        .unwrap();
-
-    let uuid2 = Uuid::new_v4().to_string();
-    session
-        .create_task(uuid2.clone(), "Task 2".into())
-        .await
-        .unwrap();
-    session
-        .mutate_task(
-            uuid2.clone(),
-            vec![
-                TaskMutation::AddTag { tag: "work".into() },
-                TaskMutation::AddTag { tag: "home".into() },
-            ],
-        )
-        .await
-        .unwrap();
-
-    let tags = session.get_all_tags().await.unwrap();
-    assert_eq!(tags, vec!["home", "urgent", "work"]);
-}
-
-#[tokio::test]
 async fn test_position_numeric_string_round_trip() {
     let session = make_session();
     let uuid = Uuid::new_v4().to_string();
@@ -575,158 +528,253 @@ async fn test_position_numeric_string_round_trip() {
 }
 
 #[tokio::test]
-async fn test_get_tag_metadata_returns_defaults_when_unset() {
-    let session = make_session();
-
-    let meta = session.get_tag_metadata("work".into()).await.unwrap();
-    assert_eq!(meta.color, "");
-    assert!(!meta.is_status);
-    assert_eq!(meta.icon, None);
-}
-
-#[tokio::test]
-async fn test_set_tag_color_round_trip() {
-    let session = make_session();
-
-    session
-        .set_tag_color("work".into(), "#ff0000".into())
-        .await
-        .unwrap();
-
-    let meta = session.get_tag_metadata("work".into()).await.unwrap();
-    assert_eq!(meta.color, "#ff0000");
-    assert!(!meta.is_status, "other fields should remain default");
-    assert_eq!(meta.icon, None);
-}
-
-#[tokio::test]
-async fn test_set_tag_is_status_round_trip() {
-    let session = make_session();
-
-    session
-        .set_tag_is_status("next".into(), true)
-        .await
-        .unwrap();
-
-    let meta = session.get_tag_metadata("next".into()).await.unwrap();
-    assert!(meta.is_status);
-    assert_eq!(meta.color, "", "other fields should remain default");
-}
-
-#[tokio::test]
-async fn test_set_tag_icon_round_trip() {
-    let session = make_session();
-
-    session.set_tag_icon("home".into(), Some(42)).await.unwrap();
-
-    let meta = session.get_tag_metadata("home".into()).await.unwrap();
-    assert_eq!(meta.icon, Some(42));
-    assert_eq!(meta.color, "");
-}
-
-#[tokio::test]
-async fn test_granular_mutations_preserve_other_fields() {
-    let session = make_session();
-
-    // Set all three fields on one tag.
-    session
-        .set_tag_color("work".into(), "#ff0000".into())
-        .await
-        .unwrap();
-    session
-        .set_tag_is_status("work".into(), true)
-        .await
-        .unwrap();
-    session.set_tag_icon("work".into(), Some(7)).await.unwrap();
-
-    // Verify all fields survived.
-    let meta = session.get_tag_metadata("work".into()).await.unwrap();
-    assert_eq!(meta.color, "#ff0000");
-    assert!(meta.is_status);
-    assert_eq!(meta.icon, Some(7));
-
-    // Update only color — other fields must survive.
-    session
-        .set_tag_color("work".into(), "#00ff00".into())
-        .await
-        .unwrap();
-
-    let meta = session.get_tag_metadata("work".into()).await.unwrap();
-    assert_eq!(meta.color, "#00ff00");
-    assert!(meta.is_status, "is_status must survive color update");
-    assert_eq!(meta.icon, Some(7), "icon must survive color update");
-}
-
-#[tokio::test]
-async fn test_set_tag_icon_clear() {
-    let session = make_session();
-
-    session.set_tag_icon("work".into(), Some(42)).await.unwrap();
-    session
-        .set_tag_is_status("work".into(), true)
-        .await
-        .unwrap();
-
-    // Clear icon — other fields must survive.
-    session.set_tag_icon("work".into(), None).await.unwrap();
-
-    let meta = session.get_tag_metadata("work".into()).await.unwrap();
-    assert_eq!(meta.icon, None, "icon should be cleared");
-    assert!(meta.is_status, "is_status must survive icon clear");
-}
-
-#[test]
-fn test_tag_metadata_tables_sql_references_correct_table() {
-    let sql = taskchampion_ffi::queries::tag_metadata_tables_sql();
-    assert!(
-        sql.contains("tc_tag_metadata"),
-        "watch SQL must reference tc_tag_metadata, got: {sql}"
-    );
-    assert!(
-        sql.contains("data"),
-        "watch SQL must select data column, got: {sql}"
-    );
-}
-
-#[tokio::test]
-async fn test_get_tag_metadata_malformed_json_falls_back_to_defaults() {
+async fn test_delete_tag_removes_from_config_and_tasks() {
     let (session, mock) = make_session_with_executor();
-    // Inject a malformed row directly — simulates corrupted sync data.
-    mock.inject_raw_tag_metadata("broken", "NOT VALID JSON");
+    mock.inject_tc_config(r#"{"tags":"work,home"}"#);
 
-    let meta = session.get_tag_metadata("broken".into()).await.unwrap();
-    assert_eq!(
-        meta.color, "",
-        "malformed JSON should fall back to empty color"
-    );
-    assert!(!meta.is_status, "malformed JSON should fall back to false");
-    assert_eq!(meta.icon, None, "malformed JSON should fall back to None");
+    let uuid = Uuid::new_v4().to_string();
+    session
+        .create_task(uuid.clone(), "Tag delete test".into())
+        .await
+        .unwrap();
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![
+                TaskMutation::AddTag { tag: "work".into() },
+                TaskMutation::AddTag { tag: "home".into() },
+            ],
+        )
+        .await
+        .unwrap();
+
+    let count = session.delete_tag("work".into()).await.unwrap();
+    assert_eq!(count, 1, "one task had 'work' removed");
+
+    let task = session.get_task(uuid).await.unwrap().unwrap();
+    assert!(!task.tags.contains(&"work".to_string()), "work tag removed");
+    assert!(task.tags.contains(&"home".to_string()), "home tag intact");
 }
 
 #[tokio::test]
-async fn test_set_tag_color_with_malformed_json_returns_error() {
+async fn test_delete_tag_not_found() {
     let (session, mock) = make_session_with_executor();
-    // Inject a malformed row — setter must error, not silently overwrite.
-    mock.inject_raw_tag_metadata("broken", "NOT VALID JSON");
+    mock.inject_tc_config(r#"{"tags":"work"}"#);
+
+    let result = session.delete_tag("ghost".into()).await;
+    assert!(
+        matches!(result, Err(FfiError::TagNotFound { .. })),
+        "expected TagNotFound, got: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_rename_tag_success() {
+    let (session, mock) = make_session_with_executor();
+    mock.inject_tc_config(r#"{"tags":"oldtag,home"}"#);
+
+    let uuid = Uuid::new_v4().to_string();
+    session
+        .create_task(uuid.clone(), "Rename test".into())
+        .await
+        .unwrap();
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::AddTag {
+                tag: "oldtag".into(),
+            }],
+        )
+        .await
+        .unwrap();
+
+    let count = session
+        .rename_tag("oldtag".into(), "newtag".into())
+        .await
+        .unwrap();
+    assert_eq!(count, 1, "one task had tag renamed");
+
+    let task = session.get_task(uuid).await.unwrap().unwrap();
+    assert!(task.tags.contains(&"newtag".to_string()));
+    assert!(!task.tags.contains(&"oldtag".to_string()));
+}
+
+#[tokio::test]
+async fn test_rename_tag_not_found() {
+    let (session, mock) = make_session_with_executor();
+    mock.inject_tc_config(r#"{"tags":"work"}"#);
 
     let result = session
-        .set_tag_color("broken".into(), "#ff0000".into())
+        .rename_tag("ghost".into(), "other".into())
         .await;
     assert!(
-        result.is_err(),
-        "setter against corrupt metadata must return an error, not silently overwrite"
+        matches!(result, Err(FfiError::TagNotFound { .. })),
+        "expected TagNotFound, got: {result:?}"
     );
 }
 
 #[tokio::test]
-async fn test_set_tag_icon_zero_round_trip() {
-    let session = make_session();
+async fn test_rename_tag_already_exists() {
+    let (session, mock) = make_session_with_executor();
+    mock.inject_tc_config(r#"{"tags":"old,new"}"#);
 
-    // Some(0) is a valid icon — must not be confused with None.
-    session.set_tag_icon("work".into(), Some(0)).await.unwrap();
+    let result = session.rename_tag("old".into(), "new".into()).await;
+    assert!(
+        matches!(result, Err(FfiError::TagAlreadyExists { .. })),
+        "expected TagAlreadyExists, got: {result:?}"
+    );
+}
 
-    let meta = session.get_tag_metadata("work".into()).await.unwrap();
-    assert_eq!(meta.icon, Some(0), "icon=0 must round-trip correctly");
+#[tokio::test]
+async fn test_xstatus_set_and_clear() {
+    let (session, mock) = make_session_with_executor();
+    mock.inject_tc_config(r#"{"xstatus":[{"name":"blocked","icon":128721}]}"#);
+
+    let uuid = Uuid::new_v4().to_string();
+    session
+        .create_task(uuid.clone(), "Xstatus test".into())
+        .await
+        .unwrap();
+
+    // Set xstatus.
+    let task = session
+        .set_xstatus(uuid.clone(), "blocked".into())
+        .await
+        .unwrap();
+    assert_eq!(task.xstatus.as_deref(), Some("blocked"));
+    assert!(matches!(task.status, FfiStatus::Pending));
+
+    // Clear xstatus.
+    let task = session.clear_xstatus(uuid.clone()).await.unwrap();
+    assert_eq!(task.xstatus, None);
+    assert!(matches!(task.status, FfiStatus::Pending));
+}
+
+#[tokio::test]
+async fn test_xstatus_unknown_name_rejected() {
+    let (session, mock) = make_session_with_executor();
+    mock.inject_tc_config(r#"{"xstatus":[{"name":"blocked","icon":128721}]}"#);
+
+    let uuid = Uuid::new_v4().to_string();
+    session
+        .create_task(uuid.clone(), "Unknown xstatus".into())
+        .await
+        .unwrap();
+
+    let result = session
+        .set_xstatus(uuid.clone(), "nonexistent".into())
+        .await;
+    assert!(
+        matches!(result, Err(FfiError::UnknownXStatus { .. })),
+        "expected UnknownXStatus"
+    );
+}
+
+#[tokio::test]
+async fn test_xstatus_auto_clears_on_done() {
+    let (session, mock) = make_session_with_executor();
+    mock.inject_tc_config(r#"{"xstatus":[{"name":"blocked","icon":128721}]}"#);
+
+    let uuid = Uuid::new_v4().to_string();
+    session
+        .create_task(uuid.clone(), "Auto clear test".into())
+        .await
+        .unwrap();
+
+    session
+        .set_xstatus(uuid.clone(), "blocked".into())
+        .await
+        .unwrap();
+
+    // Mark done — xstatus should auto-clear.
+    let task = session
+        .mutate_task(uuid.clone(), vec![TaskMutation::Done])
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(task.xstatus, None, "xstatus must clear on Done");
+    assert!(matches!(task.status, FfiStatus::Completed));
+}
+
+#[tokio::test]
+async fn test_xstatus_auto_clears_on_delete() {
+    let (session, mock) = make_session_with_executor();
+    mock.inject_tc_config(r#"{"xstatus":[{"name":"blocked","icon":128721}]}"#);
+
+    let uuid = Uuid::new_v4().to_string();
+    session
+        .create_task(uuid.clone(), "Auto clear delete test".into())
+        .await
+        .unwrap();
+
+    session
+        .set_xstatus(uuid.clone(), "blocked".into())
+        .await
+        .unwrap();
+
+    // Soft delete — xstatus should auto-clear.
+    let task = session
+        .mutate_task(uuid.clone(), vec![TaskMutation::Delete])
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(task.xstatus, None, "xstatus must clear on Delete");
+    assert!(matches!(task.status, FfiStatus::Deleted));
+}
+
+#[tokio::test]
+async fn test_xstatus_set_on_non_pending_restores_pending() {
+    let (session, mock) = make_session_with_executor();
+    mock.inject_tc_config(r#"{"xstatus":[{"name":"blocked","icon":128721}]}"#);
+
+    let uuid = Uuid::new_v4().to_string();
+    session
+        .create_task(uuid.clone(), "Non-pending restore test".into())
+        .await
+        .unwrap();
+
+    // Complete the task.
+    session
+        .mutate_task(uuid.clone(), vec![TaskMutation::Done])
+        .await
+        .unwrap();
+
+    // set_xstatus on a completed task should restore it to pending.
+    let task = session
+        .set_xstatus(uuid.clone(), "blocked".into())
+        .await
+        .unwrap();
+
+    assert!(
+        matches!(task.status, FfiStatus::Pending),
+        "set_xstatus should restore pending status"
+    );
+    assert_eq!(task.xstatus.as_deref(), Some("blocked"));
+}
+
+#[tokio::test]
+async fn test_xstatus_not_in_remaining_data() {
+    let (session, mock) = make_session_with_executor();
+    mock.inject_tc_config(r#"{"xstatus":[{"name":"blocked","icon":128721}]}"#);
+
+    let uuid = Uuid::new_v4().to_string();
+    session
+        .create_task(uuid.clone(), "Remaining data test".into())
+        .await
+        .unwrap();
+
+    session
+        .set_xstatus(uuid.clone(), "blocked".into())
+        .await
+        .unwrap();
+
+    let task = session.get_task(uuid).await.unwrap().unwrap();
+    assert!(
+        !task.remaining_data.contains_key("xstatus"),
+        "xstatus must not appear in remaining_data"
+    );
 }
 
 #[tokio::test]

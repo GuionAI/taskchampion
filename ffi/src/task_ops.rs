@@ -58,8 +58,13 @@ fn apply_mutation(
             task.set_description(value, ops).map_err(FfiError::from)?;
         }
         TaskMutation::SetStatus { status } => {
-            task.set_status(Status::from(status), ops)
-                .map_err(FfiError::from)?;
+            let new_status = Status::from(status);
+            // Auto-clear xstatus when transitioning to non-pending status.
+            if new_status != Status::Pending && task.get_value("xstatus").is_some() {
+                task.set_value("xstatus", None::<String>, ops)
+                    .map_err(FfiError::from)?;
+            }
+            task.set_status(new_status, ops).map_err(FfiError::from)?;
         }
         TaskMutation::SetPriority { value } => {
             task.set_priority(value, ops).map_err(FfiError::from)?;
@@ -130,6 +135,11 @@ fn apply_mutation(
             task.remove_dependency(dep, ops).map_err(FfiError::from)?;
         }
         TaskMutation::Done => {
+            // Auto-clear xstatus before marking done.
+            if task.get_value("xstatus").is_some() {
+                task.set_value("xstatus", None::<String>, ops)
+                    .map_err(FfiError::from)?;
+            }
             task.done(ops).map_err(FfiError::from)?;
         }
         TaskMutation::Start => {
@@ -140,7 +150,11 @@ fn apply_mutation(
         }
         TaskMutation::Delete => {
             // Soft delete: sets status to `Deleted`. The task still exists and
-            // can be re-fetched with `get_task`.
+            // can be re-fetched with `get_task`. Auto-clear xstatus.
+            if task.get_value("xstatus").is_some() {
+                task.set_value("xstatus", None::<String>, ops)
+                    .map_err(FfiError::from)?;
+            }
             task.set_status(Status::Deleted, ops)
                 .map_err(FfiError::from)?;
         }

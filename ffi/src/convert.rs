@@ -59,6 +59,7 @@ impl From<&Task> for FfiTask {
             // Callers that need imask should treat None as "not a recurring child".
             imask: task.get_value("imask").and_then(|v| v.parse::<u32>().ok()),
             until: task.get_value("until").and_then(|v| v.parse::<i64>().ok()),
+            xstatus: task.get_value("xstatus").map(|v| v.to_string()),
             remaining_data: {
                 task.get_user_defined_attributes()
                     .filter(|(k, _)| !DEDICATED_UDA_FIELDS.contains(k))

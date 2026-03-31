@@ -69,6 +69,10 @@ pub struct FfiTask {
     /// Recurrence expiry as Unix epoch seconds. `None` if not set.
     /// Parsed from the `until` UDA string; `None` if missing or not a valid i64.
     pub until: Option<i64>,
+    /// Extended status name (e.g. `"blocked"`), or `None` if not set.
+    ///
+    /// Stored as UDA `"xstatus"` in the task. Definitions live in `tc_config.xstatus`.
+    pub xstatus: Option<String>,
     /// User-defined attributes not covered by dedicated fields.
     ///
     /// Keys are the raw TaskMap keys (e.g. `"custom_field"`).
@@ -76,8 +80,8 @@ pub struct FfiTask {
     /// Empty if the task has no UDAs.
     ///
     /// Keys excluded from this map: `"scheduled"`, `"is_full_day"`, `"estimate"`,
-    /// `"recur"`, `"mask"`, `"imask"`, `"until"` — all have typed accessor fields
-    /// above. See [`DEDICATED_UDA_FIELDS`] for the authoritative list.
+    /// `"recur"`, `"mask"`, `"imask"`, `"until"`, `"xstatus"` — all have typed
+    /// accessor fields above. See [`DEDICATED_UDA_FIELDS`] for the authoritative list.
     pub remaining_data: std::collections::HashMap<String, String>,
 }
 
@@ -94,6 +98,7 @@ pub(crate) const DEDICATED_UDA_FIELDS: &[&str] = &[
     "mask",
     "imask",
     "until",
+    "xstatus",
 ];
 
 /// A node in the task tree (parent/child hierarchy).
