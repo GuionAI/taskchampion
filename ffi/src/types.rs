@@ -252,6 +252,22 @@ pub enum TaskMutation {
     },
 }
 
+/// Target position when reparenting a task.
+///
+/// Passed to `reparent()` to specify where the task should be inserted
+/// among the new parent's children.
+#[derive(uniffi::Enum)]
+pub enum ReparentPosition {
+    /// Insert as the first child of the new parent.
+    Beginning,
+    /// Insert as the last child of the new parent.
+    End,
+    /// Insert immediately after the sibling identified by `anchor` UUID.
+    After { anchor: String },
+    /// Insert immediately before the sibling identified by `anchor` UUID.
+    Before { anchor: String },
+}
+
 /// Error type returned by all FFI functions.
 ///
 /// Variants are designed for programmatic matching on the Swift/Kotlin side.

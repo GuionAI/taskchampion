@@ -16,7 +16,7 @@ use uuid::Uuid;
 use chrono::Utc;
 
 use crate::convert::{tree_map_to_ffi, FfiSqlExecutorAdapter};
-use crate::types::{FfiDependencyEdge, FfiError, FfiSqlExecutor, FfiTask, FfiTreeNode};
+use crate::types::{FfiDependencyEdge, FfiError, FfiSqlExecutor, FfiTask, FfiTreeNode, ReparentPosition};
 
 // ---------------------------------------------------------------------------
 // TCSession (FfiSession)
@@ -560,6 +560,187 @@ impl FfiSession {
                     message: "Task missing after reorder_before".into(),
                 })?;
             Ok(FfiTask::from(&updated))
+        })
+        .await
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Reparent and ancestor methods
+// ---------------------------------------------------------------------------
+
+#[uniffi::export]
+impl FfiSession {
+    /// Move `uuid` to a new parent with the specified position among siblings.
+    ///
+    /// Verifies that the move would not create a cycle (returns `CircularParent`
+    /// if `new_parent` is a descendant of `uuid`).
+    ///
+    /// Returns `TaskNotFound` if `uuid` or `new_parent` do not exist.
+    /// Returns `TaskNotFound` if an `After`/`Before` anchor does not exist
+    /// under `new_parent`.
+    /// Returns `CircularParent` if the move would create a cycle.
+    pub async fn reparent(
+        &self,
+        uuid: String,
+        new_parent: Option<String>,
+        position: ReparentPosition,
+    ) -> Result<FfiTask, FfiError> {
+        self.with_replica(|mut replica| async move {
+            let uuid_parsed = parse_uuid_ctx(&uuid, "uuid")?;
+            let new_parent_parsed: Option<Uuid> = new_parent
+                .as_deref()
+                .map(|s| parse_uuid_ctx(s, "new_parent"))
+                .transpose()?;
+
+            // Load uuid task to verify it exists.
+            replica
+                .get_task(uuid_parsed)
+                .await
+                .map_err(FfiError::from)?
+                .ok_or_else(|| FfiError::TaskNotFound { uuid: uuid.clone() })?;
+
+            // Verify new_parent exists (if provided).
+            if let Some(np_uuid) = new_parent_parsed {
+                replica
+                    .get_task(np_uuid)
+                    .await
+                    .map_err(FfiError::from)?
+                    .ok_or_else(|| FfiError::TaskNotFound {
+                        uuid: new_parent.clone().unwrap_or_default(),
+                    })?;
+            }
+
+            // Cycle check: is new_parent a descendant of uuid?
+            let tm = replica.tree_map().await.map_err(FfiError::from)?;
+            if let Some(np_uuid) = new_parent_parsed {
+                if tm.is_ancestor(np_uuid, uuid_parsed) {
+                    return Err(FfiError::CircularParent {
+                        uuid: uuid.clone(),
+                        parent: new_parent.clone().unwrap_or_default(),
+                    });
+                }
+            }
+
+            // Compute new position under new_parent.
+            let siblings = tm.sibling_positions(new_parent_parsed, None);
+            let new_pos: Option<String> = match &position {
+                ReparentPosition::End => {
+                    let last_pos = siblings.last().map(|(_, p)| p.as_str());
+                    Some(
+                        append_position(last_pos).map_err(|e| FfiError::InvalidInput {
+                            message: e.to_string(),
+                        })?,
+                    )
+                }
+                ReparentPosition::Beginning => {
+                    let first_pos = siblings.first().map(|(_, p)| p.as_str());
+                    Some(
+                        prepend_position(first_pos).map_err(|e| FfiError::InvalidInput {
+                            message: e.to_string(),
+                        })?,
+                    )
+                }
+                ReparentPosition::After { anchor } => {
+                    let anchor_parsed = parse_uuid_ctx(anchor, "anchor")?;
+                    let anchor_idx = siblings
+                        .iter()
+                        .position(|(u, _)| *u == anchor_parsed)
+                        .ok_or_else(|| FfiError::TaskNotFound {
+                            uuid: anchor.clone(),
+                        })?;
+                    let anchor_pos = &siblings[anchor_idx].1;
+                    Some(if anchor_idx + 1 == siblings.len() {
+                        append_position(Some(anchor_pos.as_str())).map_err(|e| {
+                            FfiError::InvalidInput {
+                                message: e.to_string(),
+                            }
+                        })?
+                    } else {
+                        let next_pos = &siblings[anchor_idx + 1].1;
+                        between_position(anchor_pos.as_str(), next_pos.as_str()).map_err(|e| {
+                            FfiError::InvalidInput {
+                                message: e.to_string(),
+                            }
+                        })?
+                    })
+                }
+                ReparentPosition::Before { anchor } => {
+                    let anchor_parsed = parse_uuid_ctx(anchor, "anchor")?;
+                    let anchor_idx = siblings
+                        .iter()
+                        .position(|(u, _)| *u == anchor_parsed)
+                        .ok_or_else(|| FfiError::TaskNotFound {
+                            uuid: anchor.clone(),
+                        })?;
+                    let anchor_pos = &siblings[anchor_idx].1;
+                    Some(if anchor_idx == 0 {
+                        prepend_position(Some(anchor_pos.as_str())).map_err(|e| {
+                            FfiError::InvalidInput {
+                                message: e.to_string(),
+                            }
+                        })?
+                    } else {
+                        let prev_pos = &siblings[anchor_idx - 1].1;
+                        between_position(prev_pos.as_str(), anchor_pos.as_str()).map_err(|e| {
+                            FfiError::InvalidInput {
+                                message: e.to_string(),
+                            }
+                        })?
+                    })
+                }
+            };
+
+            // Apply parent + position atomically.
+            let mut ops = Operations::new();
+            ops.push(Operation::UndoPoint);
+            let mut task_mut = replica
+                .get_task(uuid_parsed)
+                .await
+                .map_err(FfiError::from)?
+                .ok_or_else(|| FfiError::Internal {
+                    message: "Task missing before reparent".into(),
+                })?;
+            task_mut
+                .set_parent(new_parent_parsed, &mut ops)
+                .map_err(FfiError::from)?;
+            task_mut
+                .set_position(new_pos, &mut ops)
+                .map_err(FfiError::from)?;
+            replica
+                .commit_operations(ops)
+                .await
+                .map_err(FfiError::from)?;
+
+            let updated = replica
+                .get_task(uuid_parsed)
+                .await
+                .map_err(FfiError::from)?
+                .ok_or_else(|| FfiError::Internal {
+                    message: "Task missing after reparent".into(),
+                })?;
+            Ok(FfiTask::from(&updated))
+        })
+        .await
+    }
+
+    /// Return `true` if `ancestor_uuid` is an ancestor of `uuid` in the task tree.
+    ///
+    /// Used for UI hints such as greying out invalid drag-and-drop targets.
+    /// The `reparent` method performs this check internally — callers do not need
+    /// to call `is_ancestor` for safety.
+    ///
+    /// Returns `false` if either UUID does not exist or is not in the tree.
+    pub async fn is_ancestor(
+        &self,
+        uuid: String,
+        ancestor_uuid: String,
+    ) -> Result<bool, FfiError> {
+        self.with_replica(|mut replica| async move {
+            let uuid_parsed = parse_uuid_ctx(&uuid, "uuid")?;
+            let ancestor_parsed = parse_uuid_ctx(&ancestor_uuid, "ancestor_uuid")?;
+            let tm = replica.tree_map().await.map_err(FfiError::from)?;
+            Ok(tm.is_ancestor(uuid_parsed, ancestor_parsed))
         })
         .await
     }
