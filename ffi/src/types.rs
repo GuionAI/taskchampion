@@ -293,6 +293,8 @@ pub enum FfiError {
     ///
     /// Use a positioned task as anchor, or call `SetPosition` first.
     AnchorHasNoPosition { uuid: String },
+    /// The referenced project does not exist (SetProject with unknown name).
+    ProjectNotFound { name: String },
     /// delete_tag / rename_tag on a tag name not present in tc_config.
     TagNotFound { name: String },
     /// rename_tag target already exists in tc_config.
@@ -324,6 +326,7 @@ impl std::fmt::Display for FfiError {
             FfiError::AnchorHasNoPosition { uuid } => {
                 write!(f, "Anchor has no position: {uuid}")
             }
+            FfiError::ProjectNotFound { name } => write!(f, "Project not found: {name}"),
             FfiError::TagNotFound { name } => write!(f, "Tag not found: {name}"),
             FfiError::TagAlreadyExists { name } => write!(f, "Tag already exists: {name}"),
             FfiError::UnknownXStatus { name } => write!(f, "Unknown xstatus: {name}"),

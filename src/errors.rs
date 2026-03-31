@@ -17,6 +17,9 @@ pub enum Error {
     /// A task already exists with this UUID
     #[error("Task already exists: {0}")]
     TaskAlreadyExists(uuid::Uuid),
+    /// A referenced project was not found.
+    #[error("Project not found: {0}")]
+    ProjectNotFound(String),
     /// A general error.
     #[error(transparent)]
     Other(#[from] anyhow::Error),
