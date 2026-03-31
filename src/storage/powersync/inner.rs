@@ -4,7 +4,7 @@ use crate::storage::send_wrapper::{WrappedStorage, WrappedStorageTxn};
 use crate::storage::TaskMap;
 use anyhow::Context;
 use async_trait::async_trait;
-use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
 use std::path::Path;
 use uuid::Uuid;
 
@@ -166,23 +166,8 @@ impl<'t> PowerSyncTxn<'t> {
             return Ok(id);
         }
 
-        // INSTEAD OF triggers on PowerSync views report 0 rows changed,
-        // so we can't rely on t.changes() to detect INSERT OR IGNORE behavior.
-        let new_id = Uuid::new_v4().to_string();
-        t.execute(
-            "INSERT OR IGNORE INTO projects (id, name) VALUES (?, ?)",
-            params![&new_id, name],
-        )?;
-
-        // Re-query to get the authoritative ID — either the one we just inserted
-        // or the existing one if INSERT was ignored.
-        t.query_row(
-            "SELECT id FROM projects WHERE name = ? ORDER BY created_at LIMIT 1",
-            [name],
-            |r| r.get(0),
-        )
-        .optional()?
-        .ok_or_else(|| Error::Database(format!("Failed to resolve project id for {name:?}")))
+        // Not found — project must exist; fail with ProjectNotFound.
+        Err(Error::ProjectNotFound(name.to_string()))
     }
 }
 
@@ -264,12 +249,13 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
     async fn set_task(&mut self, uuid: Uuid, task: TaskMap) -> Result<()> {
         let prepared = prepare_task(task)?;
 
-        // Resolve project name → project_id (look up or create in projects table).
+        // Resolve project: name-based lookup takes precedence; fall back to raw UUID.
         let project_id: Option<String> = prepared
             .project_name
             .as_ref()
             .map(|name| self.resolve_project_id(name))
-            .transpose()?;
+            .transpose()?
+            .or_else(|| prepared.project_id_raw.clone());
 
         // PowerSync views don't support UPSERT (INSERT ... ON CONFLICT DO UPDATE).
         // INSTEAD OF triggers also report 0 rows changed regardless of success,

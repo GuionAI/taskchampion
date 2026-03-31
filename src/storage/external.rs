@@ -13,10 +13,10 @@ use crate::errors::{Error, Result};
 use crate::operation::Operation;
 use crate::storage::columns::{raw_to_task, RawTaskRow, TASK_SELECT_COLS};
 use crate::storage::sql_ops::{
-    add_operation_stmt, create_task_stmt, delete_task_stmts, insert_project_stmt, prepare_task,
-    remove_operation_stmt, set_task_stmts, set_tc_config_stmt, SqlParam, SqlStatement,
-    ALL_OPERATIONS_SQL, ALL_OPS_WITH_ID_DESC_SQL, ALL_TAGS_SQL, ALL_TASK_UUIDS_SQL,
-    PROJECT_LOOKUP_SQL, TASK_EXISTS_SQL, TC_CONFIG_READ_SQL,
+    add_operation_stmt, create_task_stmt, delete_task_stmts, prepare_task, remove_operation_stmt,
+    set_task_stmts, set_tc_config_stmt, SqlParam, SqlStatement, ALL_OPERATIONS_SQL,
+    ALL_OPS_WITH_ID_DESC_SQL, ALL_TAGS_SQL, ALL_TASK_UUIDS_SQL, PROJECT_LOOKUP_SQL,
+    TASK_EXISTS_SQL, TC_CONFIG_READ_SQL,
 };
 use crate::storage::{Storage, StorageTxn, TaskMap};
 
@@ -114,13 +114,8 @@ impl ExternalStorageTxn<'_> {
             return Ok(id);
         }
 
-        // Not found — generate ID, buffer INSERT, cache it.
-        let new_id = Uuid::new_v4();
-        self.write_buffer.push(insert_project_stmt(&new_id, name));
-        let new_id_str = new_id.to_string();
-        self.project_cache
-            .insert(name.to_string(), new_id_str.clone());
-        Ok(new_id_str)
+        // Not found — project must exist; fail with ProjectNotFound.
+        Err(Error::ProjectNotFound(name.to_string()))
     }
 
     /// Parse a JSON row into a `RawTaskRow`.
@@ -231,10 +226,10 @@ impl StorageTxn for ExternalStorageTxn<'_> {
         self.task_write_cache.insert(uuid, task.clone());
         let prepared = prepare_task(task)?;
 
-        // Resolve project (uses local cache for buffered projects).
+        // Resolve project: name-based lookup takes precedence; fall back to raw UUID.
         let project_id: Option<String> = match &prepared.project_name {
             Some(name) => Some(self.resolve_project_id(name).await?),
-            None => None,
+            None => prepared.project_id_raw.clone(),
         };
 
         // Check existence: pending_creates first, then host DB.
@@ -642,6 +637,21 @@ mod test {
     #[tokio::test]
     async fn test_external_project_round_trip() {
         let mut storage = storage().await;
+
+        // Pre-seed the "home" project so SetProject can resolve it.
+        {
+            let executor = &storage.executor;
+            executor
+                .execute_batch(&[SqlStatement {
+                    sql: "INSERT INTO projects (id, name) VALUES (?, ?)".into(),
+                    params: vec![
+                        SqlParam::Text(Uuid::new_v4().to_string()),
+                        SqlParam::Text("home".into()),
+                    ],
+                }])
+                .await
+                .unwrap();
+        }
 
         let uuid1 = Uuid::new_v4();
         let uuid2 = Uuid::new_v4();

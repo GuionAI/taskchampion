@@ -279,7 +279,14 @@ mod test {
     /// projects table, and get_task JOINs it back into the returned TaskMap.
     #[tokio::test]
     async fn test_project_round_trip() -> Result<()> {
-        let mut storage = storage().await?;
+        let mut storage = PowerSyncStorageInner::new_for_test()?;
+
+        // Pre-seed the "home" project so resolve_project_id can find it.
+        storage.conn.execute(
+            "INSERT INTO projects (id, name) VALUES (?, ?)",
+            rusqlite::params![Uuid::new_v4().to_string(), "home"],
+        )?;
+
         let mut txn = storage.txn().await?;
 
         let uuid = Uuid::new_v4();

@@ -640,6 +640,72 @@ impl FfiSession {
 }
 
 // ---------------------------------------------------------------------------
+// Reorder to beginning/end methods
+// ---------------------------------------------------------------------------
+
+/// Shared implementation for `reorder_to_beginning` and `reorder_to_end`.
+///
+/// `pick_edge` selects the reference position from sorted siblings and computes
+/// the new position string (prepend for beginning, append for end).
+async fn reorder_to_edge<F>(
+    replica: &mut Replica<ExternalStorage>,
+    uuid_str: &str,
+    pick_edge: F,
+) -> Result<FfiTask, FfiError>
+where
+    F: FnOnce(&[(uuid::Uuid, String)]) -> Result<String, FfiError>,
+{
+    let uuid_parsed = parse_uuid(uuid_str)?;
+    let task = replica
+        .get_task(uuid_parsed)
+        .await
+        .map_err(FfiError::from)?
+        .ok_or_else(|| FfiError::TaskNotFound {
+            uuid: uuid_str.to_string(),
+        })?;
+
+    let tm = replica.tree_map().await.map_err(FfiError::from)?;
+    let siblings = sorted_sibling_positions(&tm, task.get_parent(), Some(uuid_parsed));
+    let new_pos = pick_edge(&siblings)?;
+    apply_position(replica, uuid_parsed, new_pos).await
+}
+
+#[uniffi::export]
+impl FfiSession {
+    /// Move `uuid` to the first position among its current siblings.
+    ///
+    /// Returns `TaskNotFound` if the UUID does not exist.
+    pub async fn reorder_to_beginning(&self, uuid: String) -> Result<FfiTask, FfiError> {
+        self.with_replica(|mut replica| async move {
+            reorder_to_edge(&mut replica, &uuid, |siblings| {
+                let first_pos = siblings.first().map(|(_, p)| p.as_str());
+                prepend_position(first_pos).map_err(|e| FfiError::InvalidInput {
+                    message: e.to_string(),
+                })
+            })
+            .await
+        })
+        .await
+    }
+
+    /// Move `uuid` to the last position among its current siblings.
+    ///
+    /// Returns `TaskNotFound` if the UUID does not exist.
+    pub async fn reorder_to_end(&self, uuid: String) -> Result<FfiTask, FfiError> {
+        self.with_replica(|mut replica| async move {
+            reorder_to_edge(&mut replica, &uuid, |siblings| {
+                let last_pos = siblings.last().map(|(_, p)| p.as_str());
+                append_position(last_pos).map_err(|e| FfiError::InvalidInput {
+                    message: e.to_string(),
+                })
+            })
+            .await
+        })
+        .await
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Reparent and ancestor methods
 // ---------------------------------------------------------------------------
 
