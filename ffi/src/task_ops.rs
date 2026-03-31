@@ -203,6 +203,10 @@ fn apply_mutation(
             task.set_value("until", epoch.map(|e| e.to_string()), ops)
                 .map_err(FfiError::from)?;
         }
+        TaskMutation::SetProject { value } => {
+            task.set_value("project", value, ops)
+                .map_err(FfiError::from)?;
+        }
         TaskMutation::SetValue { key, value } => {
             // Guard: reject known TaskChampion core keys and dedicated UDA
             // fields — callers should use the typed mutation variant instead.
@@ -218,6 +222,8 @@ fn apply_mutation(
                 "parent_id",
                 "position",
                 "start",
+                "project",
+                "project_id",
             ];
             if core_keys.contains(&key.as_str())
                 || DEDICATED_UDA_FIELDS.contains(&key.as_str())

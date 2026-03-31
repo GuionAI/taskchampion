@@ -73,6 +73,14 @@ pub struct FfiTask {
     ///
     /// Stored as UDA `"xstatus"` in the task. Definitions live in `tc_config.xstatus`.
     pub xstatus: Option<String>,
+    /// Project name (e.g. `"work"`), or `None` if unassigned.
+    ///
+    /// Resolved from the `projects` table JOIN at query time.
+    pub project: Option<String>,
+    /// Project UUID string, or `None` if unassigned.
+    ///
+    /// Raw value from `tc_tasks.project_id` — same JOIN as `project`.
+    pub project_id: Option<String>,
     /// User-defined attributes not covered by dedicated fields.
     ///
     /// Keys are the raw TaskMap keys (e.g. `"custom_field"`).
@@ -226,6 +234,12 @@ pub enum TaskMutation {
     /// Stored as a Unix epoch seconds string in TaskMap.
     SetUntil {
         epoch: Option<i64>,
+    },
+    /// Set the project by name. `None` clears the project assignment.
+    ///
+    /// The storage layer resolves (or creates) the project UUID automatically.
+    SetProject {
+        value: Option<String>,
     },
     /// Generic escape hatch for setting arbitrary UDA values.
     ///

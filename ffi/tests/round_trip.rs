@@ -1180,3 +1180,77 @@ async fn test_set_value_rejects_recurrence_dedicated_keys() {
         );
     }
 }
+
+#[tokio::test]
+async fn test_set_project_round_trip() {
+    let session = make_session();
+    let uuid = Uuid::new_v4().to_string();
+
+    session
+        .create_task(uuid.clone(), "Project test".into())
+        .await
+        .expect("create");
+
+    // Default: no project.
+    let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
+    assert_eq!(task.project, None);
+    assert_eq!(task.project_id, None);
+
+    // Set project.
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetProject {
+                value: Some("work".into()),
+            }],
+        )
+        .await
+        .expect("set project");
+
+    let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
+    assert_eq!(task.project.as_deref(), Some("work"), "project name set");
+    // project_id should be populated (auto-created by storage layer).
+    assert!(
+        task.project_id.is_some(),
+        "project_id should be populated after set"
+    );
+
+    // Clear project.
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetProject { value: None }],
+        )
+        .await
+        .expect("clear project");
+
+    let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
+    assert_eq!(task.project, None, "project cleared");
+}
+
+#[tokio::test]
+async fn test_set_value_rejects_project_keys() {
+    let session = make_session();
+    let uuid = Uuid::new_v4().to_string();
+
+    session
+        .create_task(uuid.clone(), "Project key guard".into())
+        .await
+        .expect("create");
+
+    for key in &["project", "project_id"] {
+        let result = session
+            .mutate_task(
+                uuid.clone(),
+                vec![TaskMutation::SetValue {
+                    key: (*key).into(),
+                    value: Some("test".into()),
+                }],
+            )
+            .await;
+        assert!(
+            matches!(result, Err(FfiError::InvalidInput { .. })),
+            "'{key}' should be rejected by SetValue"
+        );
+    }
+}
