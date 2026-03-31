@@ -319,9 +319,7 @@ impl FfiSession {
     pub async fn delete_xstatus(&self, name: String) -> Result<u32, FfiError> {
         self.with_replica(|mut replica| async move {
             replica.delete_xstatus(&name).await.map_err(|e| match e {
-                taskchampion::Error::Usage(ref msg)
-                    if msg.starts_with("XStatus not found") =>
-                {
+                taskchampion::Error::Usage(ref msg) if msg.starts_with("XStatus not found") => {
                     FfiError::XStatusNotFound { name: name.clone() }
                 }
                 other => FfiError::from(other),
@@ -342,9 +340,7 @@ impl FfiSession {
                 .rename_xstatus(&old, &new)
                 .await
                 .map_err(|e| match e {
-                    taskchampion::Error::Usage(ref msg)
-                        if msg.starts_with("XStatus not found") =>
-                    {
+                    taskchampion::Error::Usage(ref msg) if msg.starts_with("XStatus not found") => {
                         FfiError::XStatusNotFound { name: old.clone() }
                     }
                     taskchampion::Error::Usage(ref msg)

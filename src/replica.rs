@@ -1432,9 +1432,7 @@ mod tests {
 
     // ── xstatus lifecycle helpers ─────────────────────────────────────────
 
-    async fn make_replica_with_xstatus(
-        name: &str,
-    ) -> (Replica<InMemoryStorage>, Uuid) {
+    async fn make_replica_with_xstatus(name: &str) -> (Replica<InMemoryStorage>, Uuid) {
         use crate::storage::tc_config::XStatusDef;
 
         let mut replica = Replica::new(InMemoryStorage::new());
@@ -1551,10 +1549,7 @@ mod tests {
     #[tokio::test]
     async fn rename_xstatus_nonexistent_old() {
         let mut replica = Replica::new(InMemoryStorage::new());
-        let err = replica
-            .rename_xstatus("ghost", "new")
-            .await
-            .unwrap_err();
+        let err = replica.rename_xstatus("ghost", "new").await.unwrap_err();
         assert!(
             matches!(err, Error::Usage(_)),
             "expected Error::Usage, got: {err:?}"
@@ -1577,10 +1572,7 @@ mod tests {
         });
         replica.set_tc_config_parsed(&config).await.unwrap();
 
-        let err = replica
-            .rename_xstatus("old", "new")
-            .await
-            .unwrap_err();
+        let err = replica.rename_xstatus("old", "new").await.unwrap_err();
         assert!(
             matches!(err, Error::Usage(_)),
             "expected Error::Usage, got: {err:?}"

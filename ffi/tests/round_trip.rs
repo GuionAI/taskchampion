@@ -2179,7 +2179,10 @@ async fn test_reorder_anchor_with_no_position_returns_error() {
 #[tokio::test]
 async fn test_create_xstatus_success() {
     let (session, mock) = make_session_with_executor();
-    session.create_xstatus("blocked".into(), 128721).await.unwrap();
+    session
+        .create_xstatus("blocked".into(), 128721)
+        .await
+        .unwrap();
     let config: serde_json::Value = serde_json::from_str(&mock.read_tc_config()).unwrap();
     let xs = config["xstatus"].as_array().unwrap();
     assert_eq!(xs.len(), 1);
@@ -2272,9 +2275,7 @@ async fn test_rename_xstatus_success() {
 #[tokio::test]
 async fn test_rename_xstatus_not_found() {
     let (session, _mock) = make_session_with_executor();
-    let result = session
-        .rename_xstatus("ghost".into(), "new".into())
-        .await;
+    let result = session.rename_xstatus("ghost".into(), "new".into()).await;
     assert!(
         matches!(result, Err(FfiError::XStatusNotFound { .. })),
         "expected XStatusNotFound, got: {result:?}"
