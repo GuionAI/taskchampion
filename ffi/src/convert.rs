@@ -278,9 +278,7 @@ fn ffi_error_to_core(e: FfiError) -> taskchampion::Error {
             Ok(u) => taskchampion::Error::TaskAlreadyExists(u),
             Err(_) => taskchampion::Error::Database(format!("Task already exists: {uuid}")),
         },
-        FfiError::ProjectNotFound { name } => {
-            taskchampion::Error::Database(format!("Project not found: {name}"))
-        }
+        FfiError::ProjectNotFound { name } => taskchampion::Error::ProjectNotFound(name),
         FfiError::Storage { message } => taskchampion::Error::Database(message),
         FfiError::InvalidInput { message } => taskchampion::Error::Usage(message),
         FfiError::Internal { message } => {

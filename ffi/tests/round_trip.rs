@@ -1262,6 +1262,7 @@ async fn test_set_project_round_trip() {
 
     let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
     assert_eq!(task.project, None, "project cleared");
+    assert_eq!(task.project_id, None, "project_id cleared with project");
 }
 
 // ---------------------------------------------------------------------------
@@ -1345,6 +1346,78 @@ async fn test_set_project_id_nonexistent_uuid() {
         task.project_id.as_deref(),
         Some(random_id.as_str()),
         "project_id set to random UUID"
+    );
+}
+
+#[tokio::test]
+async fn test_set_project_id_then_set_project_clears_old_id() {
+    let (session, mock) = make_session_with_executor();
+    let uuid = Uuid::new_v4().to_string();
+    let project_id = mock.inject_project("work");
+    mock.inject_project("personal");
+
+    session
+        .create_task(uuid.clone(), "Cross-set test".into())
+        .await
+        .expect("create");
+
+    // Set project by UUID first.
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetProjectId {
+                value: Some(project_id.clone()),
+            }],
+        )
+        .await
+        .expect("set project_id");
+
+    // Overwrite with SetProject by name.
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetProject {
+                value: Some("personal".into()),
+            }],
+        )
+        .await
+        .expect("set project by name");
+
+    let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
+    assert_eq!(
+        task.project.as_deref(),
+        Some("personal"),
+        "project name resolved from new name"
+    );
+    // project_id should now point to "personal", not the old "work" UUID.
+    assert_ne!(
+        task.project_id.as_deref(),
+        Some(project_id.as_str()),
+        "project_id should no longer be the old UUID"
+    );
+}
+
+#[tokio::test]
+async fn test_set_project_id_invalid_uuid_rejected() {
+    let session = make_session();
+    let uuid = Uuid::new_v4().to_string();
+
+    session
+        .create_task(uuid.clone(), "Invalid UUID test".into())
+        .await
+        .expect("create");
+
+    let result = session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetProjectId {
+                value: Some("not-a-uuid".into()),
+            }],
+        )
+        .await;
+    assert!(
+        matches!(result, Err(FfiError::InvalidInput { .. })),
+        "expected InvalidInput for malformed UUID"
     );
 }
 
