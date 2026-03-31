@@ -6,7 +6,11 @@
 //! is needed.
 
 use std::sync::Arc;
-use taskchampion::{storage::tc_config::TcConfig, ExternalStorage, Operation, Operations, Replica, Status};
+use taskchampion::{
+    position::{append_position, between_position, prepend_position},
+    storage::tc_config::TcConfig,
+    ExternalStorage, Operation, Operations, Replica, Status,
+};
 use uuid::Uuid;
 
 use chrono::Utc;
@@ -359,6 +363,201 @@ impl FfiSession {
                 .map_err(FfiError::from)?
                 .ok_or_else(|| FfiError::Internal {
                     message: "Task missing after clear_xstatus".into(),
+                })?;
+            Ok(FfiTask::from(&updated))
+        })
+        .await
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Reorder methods
+// ---------------------------------------------------------------------------
+
+#[uniffi::export]
+impl FfiSession {
+    /// Move `uuid` to a position immediately after `anchor_uuid` among their shared siblings.
+    ///
+    /// Both tasks must have the same parent (or both be root tasks).
+    /// Returns `TaskNotFound` if either UUID does not exist or has no position.
+    /// Returns `NotASibling` if the two tasks have different parents.
+    pub async fn reorder_after(
+        &self,
+        uuid: String,
+        anchor_uuid: String,
+    ) -> Result<FfiTask, FfiError> {
+        self.with_replica(|mut replica| async move {
+            let uuid_parsed = parse_uuid(&uuid)?;
+            let anchor_parsed = parse_uuid(&anchor_uuid)?;
+
+            // Load both tasks to verify existence and parent.
+            let task = replica
+                .get_task(uuid_parsed)
+                .await
+                .map_err(FfiError::from)?
+                .ok_or_else(|| FfiError::TaskNotFound { uuid: uuid.clone() })?;
+            let anchor_task = replica
+                .get_task(anchor_parsed)
+                .await
+                .map_err(FfiError::from)?
+                .ok_or_else(|| FfiError::TaskNotFound {
+                    uuid: anchor_uuid.clone(),
+                })?;
+
+            // Verify same parent.
+            if task.get_parent() != anchor_task.get_parent() {
+                return Err(FfiError::NotASibling {
+                    uuid: uuid.clone(),
+                    anchor: anchor_uuid.clone(),
+                });
+            }
+
+            // Get siblings excluding uuid (in position order).
+            let tm = replica.tree_map().await.map_err(FfiError::from)?;
+            let siblings = tm.sibling_positions(task.get_parent(), Some(uuid_parsed));
+
+            // Find anchor's index and position.
+            let anchor_idx = siblings
+                .iter()
+                .position(|(u, _)| *u == anchor_parsed)
+                .ok_or_else(|| FfiError::TaskNotFound {
+                    uuid: anchor_uuid.clone(),
+                })?;
+            let anchor_pos = &siblings[anchor_idx].1;
+
+            // Compute new position.
+            let new_pos = if anchor_idx + 1 == siblings.len() {
+                // Anchor is last sibling — append after it.
+                append_position(Some(anchor_pos.as_str())).map_err(|e| FfiError::InvalidInput {
+                    message: e.to_string(),
+                })?
+            } else {
+                let next_pos = &siblings[anchor_idx + 1].1;
+                between_position(anchor_pos.as_str(), next_pos.as_str()).map_err(|e| {
+                    FfiError::InvalidInput {
+                        message: e.to_string(),
+                    }
+                })?
+            };
+
+            // Apply the new position.
+            let mut ops = Operations::new();
+            ops.push(Operation::UndoPoint);
+            let mut task_mut = replica
+                .get_task(uuid_parsed)
+                .await
+                .map_err(FfiError::from)?
+                .ok_or_else(|| FfiError::Internal {
+                    message: "Task missing before set_position".into(),
+                })?;
+            task_mut
+                .set_position(Some(new_pos), &mut ops)
+                .map_err(FfiError::from)?;
+            replica
+                .commit_operations(ops)
+                .await
+                .map_err(FfiError::from)?;
+
+            let updated = replica
+                .get_task(uuid_parsed)
+                .await
+                .map_err(FfiError::from)?
+                .ok_or_else(|| FfiError::Internal {
+                    message: "Task missing after reorder_after".into(),
+                })?;
+            Ok(FfiTask::from(&updated))
+        })
+        .await
+    }
+
+    /// Move `uuid` to a position immediately before `anchor_uuid` among their shared siblings.
+    ///
+    /// Both tasks must have the same parent (or both be root tasks).
+    /// Returns `TaskNotFound` if either UUID does not exist or has no position.
+    /// Returns `NotASibling` if the two tasks have different parents.
+    pub async fn reorder_before(
+        &self,
+        uuid: String,
+        anchor_uuid: String,
+    ) -> Result<FfiTask, FfiError> {
+        self.with_replica(|mut replica| async move {
+            let uuid_parsed = parse_uuid(&uuid)?;
+            let anchor_parsed = parse_uuid(&anchor_uuid)?;
+
+            // Load both tasks to verify existence and parent.
+            let task = replica
+                .get_task(uuid_parsed)
+                .await
+                .map_err(FfiError::from)?
+                .ok_or_else(|| FfiError::TaskNotFound { uuid: uuid.clone() })?;
+            let anchor_task = replica
+                .get_task(anchor_parsed)
+                .await
+                .map_err(FfiError::from)?
+                .ok_or_else(|| FfiError::TaskNotFound {
+                    uuid: anchor_uuid.clone(),
+                })?;
+
+            // Verify same parent.
+            if task.get_parent() != anchor_task.get_parent() {
+                return Err(FfiError::NotASibling {
+                    uuid: uuid.clone(),
+                    anchor: anchor_uuid.clone(),
+                });
+            }
+
+            // Get siblings excluding uuid (in position order).
+            let tm = replica.tree_map().await.map_err(FfiError::from)?;
+            let siblings = tm.sibling_positions(task.get_parent(), Some(uuid_parsed));
+
+            // Find anchor's index and position.
+            let anchor_idx = siblings
+                .iter()
+                .position(|(u, _)| *u == anchor_parsed)
+                .ok_or_else(|| FfiError::TaskNotFound {
+                    uuid: anchor_uuid.clone(),
+                })?;
+            let anchor_pos = &siblings[anchor_idx].1;
+
+            // Compute new position.
+            let new_pos = if anchor_idx == 0 {
+                // Anchor is first sibling — prepend before it.
+                prepend_position(Some(anchor_pos.as_str())).map_err(|e| FfiError::InvalidInput {
+                    message: e.to_string(),
+                })?
+            } else {
+                let prev_pos = &siblings[anchor_idx - 1].1;
+                between_position(prev_pos.as_str(), anchor_pos.as_str()).map_err(|e| {
+                    FfiError::InvalidInput {
+                        message: e.to_string(),
+                    }
+                })?
+            };
+
+            // Apply the new position.
+            let mut ops = Operations::new();
+            ops.push(Operation::UndoPoint);
+            let mut task_mut = replica
+                .get_task(uuid_parsed)
+                .await
+                .map_err(FfiError::from)?
+                .ok_or_else(|| FfiError::Internal {
+                    message: "Task missing before set_position".into(),
+                })?;
+            task_mut
+                .set_position(Some(new_pos), &mut ops)
+                .map_err(FfiError::from)?;
+            replica
+                .commit_operations(ops)
+                .await
+                .map_err(FfiError::from)?;
+
+            let updated = replica
+                .get_task(uuid_parsed)
+                .await
+                .map_err(FfiError::from)?
+                .ok_or_else(|| FfiError::Internal {
+                    message: "Task missing after reorder_before".into(),
                 })?;
             Ok(FfiTask::from(&updated))
         })

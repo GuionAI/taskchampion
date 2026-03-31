@@ -4,6 +4,7 @@
 use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
+use taskchampion::position::sequential_positions;
 use taskchampion_ffi::{
     replica_ops::FfiSession,
     types::{
@@ -1226,6 +1227,189 @@ async fn test_set_project_round_trip() {
 
     let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
     assert_eq!(task.project, None, "project cleared");
+}
+
+// ---------------------------------------------------------------------------
+// Reorder tests
+// ---------------------------------------------------------------------------
+
+/// Create a task with a position (position must be a valid fractional index string).
+async fn create_positioned(session: &FfiSession, desc: &str, pos: &str) -> String {
+    let uuid = Uuid::new_v4().to_string();
+    session
+        .create_task(uuid.clone(), desc.into())
+        .await
+        .expect("create");
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetPosition {
+                value: Some(pos.into()),
+            }],
+        )
+        .await
+        .expect("set position");
+    uuid
+}
+
+#[tokio::test]
+async fn test_reorder_after_middle_sibling() {
+    let session = make_session();
+    let pos = sequential_positions(3);
+
+    // Three siblings A(pos[0]) < B(pos[1]) < C(pos[2]). Move A after B → B < A < C.
+    let a = create_positioned(&session, "A", &pos[0]).await;
+    let b = create_positioned(&session, "B", &pos[1]).await;
+    let c = create_positioned(&session, "C", &pos[2]).await;
+
+    let task = session
+        .reorder_after(a.clone(), b.clone())
+        .await
+        .expect("reorder_after");
+
+    let new_pos = task.position.as_deref().expect("position set");
+    assert!(new_pos > pos[1].as_str(), "A should be after B");
+    assert!(new_pos < pos[2].as_str(), "A should be before C");
+    let _ = c;
+}
+
+#[tokio::test]
+async fn test_reorder_after_last_sibling() {
+    let session = make_session();
+    let pos = sequential_positions(2);
+
+    // Two siblings A(pos[0]) < B(pos[1]). Move A after B → B < A.
+    let a = create_positioned(&session, "A", &pos[0]).await;
+    let b = create_positioned(&session, "B", &pos[1]).await;
+
+    let task = session
+        .reorder_after(a.clone(), b.clone())
+        .await
+        .expect("reorder_after last");
+
+    let new_pos = task.position.as_deref().expect("position set");
+    assert!(new_pos > pos[1].as_str(), "A should be after B");
+}
+
+#[tokio::test]
+async fn test_reorder_before_middle_sibling() {
+    let session = make_session();
+    let pos = sequential_positions(3);
+
+    // Three siblings A(pos[0]) < B(pos[1]) < C(pos[2]). Move C before B → A < C < B.
+    let a = create_positioned(&session, "A", &pos[0]).await;
+    let b = create_positioned(&session, "B", &pos[1]).await;
+    let c = create_positioned(&session, "C", &pos[2]).await;
+
+    let task = session
+        .reorder_before(c.clone(), b.clone())
+        .await
+        .expect("reorder_before");
+
+    let new_pos = task.position.as_deref().expect("position set");
+    assert!(new_pos > pos[0].as_str(), "C should be after A");
+    assert!(new_pos < pos[1].as_str(), "C should be before B");
+    let _ = a;
+}
+
+#[tokio::test]
+async fn test_reorder_before_first_sibling() {
+    let session = make_session();
+    let pos = sequential_positions(2);
+
+    // Two siblings A(pos[0]) < B(pos[1]). Move B before A → B < A.
+    let a = create_positioned(&session, "A", &pos[0]).await;
+    let b = create_positioned(&session, "B", &pos[1]).await;
+
+    let task = session
+        .reorder_before(b.clone(), a.clone())
+        .await
+        .expect("reorder_before first");
+
+    let new_pos = task.position.as_deref().expect("position set");
+    assert!(new_pos < pos[0].as_str(), "B should be before A");
+}
+
+#[tokio::test]
+async fn test_reorder_different_parent_rejected() {
+    let session = make_session();
+
+    // Two tasks with different parents.
+    let parent1 = create_positioned(&session, "Parent1", "10").await;
+    let parent2 = create_positioned(&session, "Parent2", "20").await;
+
+    let child1 = Uuid::new_v4().to_string();
+    session
+        .create_task(child1.clone(), "Child1".into())
+        .await
+        .unwrap();
+    session
+        .mutate_task(
+            child1.clone(),
+            vec![
+                TaskMutation::SetParent {
+                    uuid: Some(parent1.clone()),
+                },
+                TaskMutation::SetPosition {
+                    value: Some("10".into()),
+                },
+            ],
+        )
+        .await
+        .unwrap();
+
+    let child2 = Uuid::new_v4().to_string();
+    session
+        .create_task(child2.clone(), "Child2".into())
+        .await
+        .unwrap();
+    session
+        .mutate_task(
+            child2.clone(),
+            vec![
+                TaskMutation::SetParent {
+                    uuid: Some(parent2.clone()),
+                },
+                TaskMutation::SetPosition {
+                    value: Some("10".into()),
+                },
+            ],
+        )
+        .await
+        .unwrap();
+
+    let result = session.reorder_after(child1.clone(), child2.clone()).await;
+    assert!(
+        matches!(result, Err(FfiError::NotASibling { .. })),
+        "expected NotASibling"
+    );
+    let _ = (parent1, parent2);
+}
+
+#[tokio::test]
+async fn test_reorder_nonexistent_uuid() {
+    let session = make_session();
+    let ghost = Uuid::new_v4().to_string();
+    let anchor = create_positioned(&session, "Anchor", "10").await;
+
+    let result = session.reorder_after(ghost, anchor).await;
+    assert!(
+        matches!(result, Err(FfiError::TaskNotFound { .. })),
+        "expected TaskNotFound for missing uuid"
+    );
+}
+
+#[tokio::test]
+async fn test_reorder_nonexistent_anchor() {
+    let session = make_session();
+    let task = create_positioned(&session, "Task", "10").await;
+    let ghost_anchor = Uuid::new_v4().to_string();
+
+    let result = session.reorder_after(task, ghost_anchor).await;
+    assert!(
+        matches!(result, Err(FfiError::TaskNotFound { .. })),
+        "expected TaskNotFound for missing anchor"
+    );
 }
 
 #[tokio::test]
