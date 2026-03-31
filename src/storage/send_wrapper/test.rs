@@ -73,6 +73,14 @@ impl WrappedStorageTxn for Box<dyn StorageTxn + Send + '_> {
         self.as_mut().get_all_tags().await
     }
 
+    async fn get_tc_config(&mut self) -> Result<Option<String>> {
+        self.as_mut().get_tc_config().await
+    }
+
+    async fn set_tc_config(&mut self, value: String) -> Result<()> {
+        self.as_mut().set_tc_config(value).await
+    }
+
     async fn commit(&mut self) -> Result<()> {
         self.as_mut().commit().await
     }

@@ -273,7 +273,18 @@ pub(crate) fn insert_project_stmt(id: &Uuid, name: &str) -> SqlStatement {
     }
 }
 
+/// Generate SQL statement for setting tc_config (upsert singleton row).
+pub(crate) fn set_tc_config_stmt(value: &str) -> SqlStatement {
+    SqlStatement {
+        sql: "INSERT OR REPLACE INTO tc_settings (id, key, value) VALUES ('tc_config', 'tc_config', ?)".into(),
+        params: vec![SqlParam::Text(value.to_string())],
+    }
+}
+
 // ── Read SQL constants ─────────────────────────────────────────────────────
+
+pub(crate) const TC_CONFIG_READ_SQL: &str =
+    "SELECT value FROM tc_settings WHERE id = 'tc_config'";
 
 pub(crate) const TASK_EXISTS_SQL: &str =
     "SELECT EXISTS(SELECT 1 FROM tc_tasks WHERE id = ?) AS exists_flag";

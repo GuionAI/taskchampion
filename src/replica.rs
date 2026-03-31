@@ -178,6 +178,43 @@ impl<S: Storage> Replica<S> {
         self.taskdb.get_all_tags().await
     }
 
+    /// Get the raw JSON value of the `tc_settings` singleton row.
+    ///
+    /// Returns `None` if the row does not exist yet (first-use default).
+    pub async fn get_tc_config(&mut self) -> Result<Option<String>> {
+        self.taskdb.get_tc_config().await
+    }
+
+    /// Set the raw JSON value of the `tc_settings` singleton row.
+    pub async fn set_tc_config(&mut self, value: String) -> Result<()> {
+        self.taskdb.set_tc_config(value).await
+    }
+
+    /// Get the parsed [`TcConfig`] from storage.
+    ///
+    /// Returns the default config if the row does not exist yet.
+    /// Returns `Err` if the stored JSON is malformed.
+    pub async fn get_tc_config_parsed(
+        &mut self,
+    ) -> Result<crate::storage::tc_config::TcConfig> {
+        match self.taskdb.get_tc_config().await? {
+            None => Ok(crate::storage::tc_config::TcConfig::default()),
+            Some(json) => serde_json::from_str(&json).map_err(|e| {
+                crate::Error::Database(format!("Failed to parse tc_config JSON: {e}"))
+            }),
+        }
+    }
+
+    /// Set the config from a parsed [`TcConfig`] value.
+    pub async fn set_tc_config_parsed(
+        &mut self,
+        config: &crate::storage::tc_config::TcConfig,
+    ) -> Result<()> {
+        let json = serde_json::to_string(config)
+            .map_err(|e| crate::Error::Database(format!("Failed to serialize tc_config: {e}")))?;
+        self.taskdb.set_tc_config(json).await
+    }
+
     /// Get the dependency map for all pending tasks.
     ///
     /// A task dependency is recognized when a task in the working set depends on a task with

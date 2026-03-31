@@ -224,4 +224,12 @@ impl StorageTxn for WrapperTxn {
     async fn get_all_tags(&mut self) -> Result<Vec<String>> {
         self.call(TxnMessage::GetAllTags).await
     }
+
+    async fn get_tc_config(&mut self) -> Result<Option<String>> {
+        self.call(TxnMessage::GetTcConfig).await
+    }
+
+    async fn set_tc_config(&mut self, value: String) -> Result<()> {
+        self.call(|tx| TxnMessage::SetTcConfig(value, tx)).await
+    }
 }

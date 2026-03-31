@@ -13,8 +13,9 @@ use super::row_reader::{query_task_rows, read_raw_task_row};
 use crate::storage::columns::{raw_to_task, TASK_SELECT_COLS};
 use crate::storage::sql_ops::{
     add_operation_stmt, create_task_stmt, delete_task_stmts, prepare_task, remove_operation_stmt,
-    set_tag_metadata_stmt, set_task_stmts, SqlStatement, ALL_OPERATIONS_SQL, ALL_TAGS_SQL,
-    ALL_TASK_UUIDS_SQL, LAST_OPERATION_SQL, TAG_METADATA_READ_SQL, TASK_EXISTS_SQL,
+    set_tag_metadata_stmt, set_task_stmts, set_tc_config_stmt, SqlStatement, ALL_OPERATIONS_SQL,
+    ALL_TAGS_SQL, ALL_TASK_UUIDS_SQL, LAST_OPERATION_SQL, TAG_METADATA_READ_SQL, TASK_EXISTS_SQL,
+    TC_CONFIG_READ_SQL,
 };
 
 /// Execute a SqlStatement against a rusqlite Transaction.
@@ -118,6 +119,11 @@ impl PowerSyncStorageInner {
                 name TEXT NOT NULL,
                 data TEXT NOT NULL DEFAULT '{}',
                 created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
+            );
+            CREATE TABLE IF NOT EXISTS tc_settings (
+                id TEXT PRIMARY KEY,
+                key TEXT NOT NULL,
+                value TEXT NOT NULL DEFAULT '{}'
             );
         ",
         )
@@ -407,6 +413,18 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
             .context("get_all_tags: query")?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(|e| Error::Database(format!("get_all_tags: {e}")))
+    }
+
+    async fn get_tc_config(&mut self) -> Result<Option<String>> {
+        let t = self.get_txn()?;
+        t.query_row(TC_CONFIG_READ_SQL, [], |row| row.get::<_, String>(0))
+            .optional()
+            .map_err(|e| Error::Database(format!("get_tc_config: {e}")))
+    }
+
+    async fn set_tc_config(&mut self, value: String) -> Result<()> {
+        let t = self.get_txn()?;
+        execute_sql_stmt(t, &set_tc_config_stmt(&value))
     }
 
     async fn commit(&mut self) -> Result<()> {

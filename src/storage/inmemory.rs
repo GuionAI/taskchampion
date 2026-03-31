@@ -13,6 +13,7 @@ struct Data {
     tasks: HashMap<Uuid, TaskMap>,
     operations: Vec<Operation>,
     tag_metadata: HashMap<String, String>,
+    tc_config: Option<String>,
 }
 
 struct Txn<'t> {
@@ -153,6 +154,15 @@ impl StorageTxn for Txn<'_> {
         Ok(tags)
     }
 
+    async fn get_tc_config(&mut self) -> Result<Option<String>> {
+        Ok(self.data_ref().tc_config.clone())
+    }
+
+    async fn set_tc_config(&mut self, value: String) -> Result<()> {
+        self.mut_data_ref().tc_config = Some(value);
+        Ok(())
+    }
+
     async fn commit(&mut self) -> Result<()> {
         // copy the new_data back into storage to commit the transaction
         if let Some(data) = self.new_data.take() {
@@ -176,6 +186,7 @@ impl InMemoryStorage {
                 tasks: HashMap::new(),
                 operations: vec![],
                 tag_metadata: HashMap::new(),
+                tc_config: None,
             },
         }
     }

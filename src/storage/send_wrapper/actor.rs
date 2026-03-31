@@ -31,6 +31,8 @@ pub(super) enum TxnMessage {
     GetTagMetadata(String, oneshot::Sender<Result<Option<String>>>),
     SetTagMetadata(String, String, oneshot::Sender<Result<()>>),
     GetAllTags(oneshot::Sender<Result<Vec<String>>>),
+    GetTcConfig(oneshot::Sender<Result<Option<String>>>),
+    SetTcConfig(String, oneshot::Sender<Result<()>>),
 }
 
 /// State owned by the dedicated thread. It handles the various channels and
@@ -125,6 +127,12 @@ impl<S: WrappedStorage> ActorImpl<S> {
                 }
                 TxnMessage::GetAllTags(resp) => {
                     let _ = resp.send(txn.get_all_tags().await);
+                }
+                TxnMessage::GetTcConfig(resp) => {
+                    let _ = resp.send(txn.get_tc_config().await);
+                }
+                TxnMessage::SetTcConfig(value, resp) => {
+                    let _ = resp.send(txn.set_tc_config(value).await);
                 }
             };
         }

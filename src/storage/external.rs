@@ -14,9 +14,9 @@ use crate::operation::Operation;
 use crate::storage::columns::{raw_to_task, RawTaskRow, TASK_SELECT_COLS};
 use crate::storage::sql_ops::{
     add_operation_stmt, create_task_stmt, delete_task_stmts, insert_project_stmt, prepare_task,
-    remove_operation_stmt, set_tag_metadata_stmt, set_task_stmts, SqlParam, SqlStatement,
-    ALL_OPERATIONS_SQL, ALL_OPS_WITH_ID_DESC_SQL, ALL_TAGS_SQL, ALL_TASK_UUIDS_SQL,
-    PROJECT_LOOKUP_SQL, TAG_METADATA_READ_SQL, TASK_EXISTS_SQL,
+    remove_operation_stmt, set_tag_metadata_stmt, set_task_stmts, set_tc_config_stmt, SqlParam,
+    SqlStatement, ALL_OPERATIONS_SQL, ALL_OPS_WITH_ID_DESC_SQL, ALL_TAGS_SQL, ALL_TASK_UUIDS_SQL,
+    PROJECT_LOOKUP_SQL, TAG_METADATA_READ_SQL, TASK_EXISTS_SQL, TC_CONFIG_READ_SQL,
 };
 use crate::storage::{Storage, StorageTxn, TaskMap};
 
@@ -433,6 +433,19 @@ impl StorageTxn for ExternalStorageTxn<'_> {
             .collect()
     }
 
+    async fn get_tc_config(&mut self) -> Result<Option<String>> {
+        let row = self.executor.query_one(TC_CONFIG_READ_SQL, &[]).await?;
+        match row {
+            Some(json) => parse_json_string_field(&json, "value").map(Some),
+            None => Ok(None),
+        }
+    }
+
+    async fn set_tc_config(&mut self, value: String) -> Result<()> {
+        self.write_buffer.push(set_tc_config_stmt(&value));
+        Ok(())
+    }
+
     async fn commit(&mut self) -> Result<()> {
         if !self.write_buffer.is_empty() {
             self.executor
@@ -541,6 +554,11 @@ mod test {
                     name TEXT NOT NULL,
                     data TEXT NOT NULL DEFAULT '{}',
                     created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
+                );
+                CREATE TABLE IF NOT EXISTS tc_settings (
+                    id TEXT PRIMARY KEY,
+                    key TEXT NOT NULL,
+                    value TEXT NOT NULL DEFAULT '{}'
                 );",
             )
             .unwrap();

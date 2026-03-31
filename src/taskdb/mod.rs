@@ -132,6 +132,19 @@ impl<S: Storage> TaskDb<S> {
         txn.get_all_tags().await
     }
 
+    /// Get the raw JSON value of the `tc_settings` singleton row.
+    pub(crate) async fn get_tc_config(&mut self) -> Result<Option<String>> {
+        let mut txn = self.storage.txn().await?;
+        txn.get_tc_config().await
+    }
+
+    /// Set the raw JSON value of the `tc_settings` singleton row, committing immediately.
+    pub(crate) async fn set_tc_config(&mut self, value: String) -> Result<()> {
+        let mut txn = self.storage.txn().await?;
+        txn.set_tc_config(value).await?;
+        txn.commit().await
+    }
+
     // functions for supporting tests
 
     #[cfg(test)]

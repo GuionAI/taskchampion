@@ -28,6 +28,7 @@ pub mod sql_ops;
 pub(crate) mod sql_ops;
 #[cfg(test)]
 mod test;
+pub mod tc_config;
 
 pub use config::AccessMode;
 
@@ -114,6 +115,17 @@ pub trait StorageTxn: Send {
 
     /// Get all unique tag names across all tasks.
     async fn get_all_tags(&mut self) -> Result<Vec<String>>;
+
+    /// Get the raw JSON value of the `tc_settings` singleton row.
+    ///
+    /// Returns `None` if the row does not exist yet (first-use default).
+    async fn get_tc_config(&mut self) -> Result<Option<String>>;
+
+    /// Set the raw JSON value of the `tc_settings` singleton row.
+    ///
+    /// Uses `INSERT OR REPLACE` semantics — creates the row on first call,
+    /// overwrites it on subsequent calls.
+    async fn set_tc_config(&mut self, value: String) -> Result<()>;
 
     /// Check whether this storage is entirely empty
     #[allow(clippy::wrong_self_convention)] // mut is required here for storage access

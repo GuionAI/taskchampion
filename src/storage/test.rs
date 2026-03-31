@@ -77,6 +77,21 @@ macro_rules! storage_tests_no_sync {
         async fn get_all_tags() -> $crate::errors::Result<()> {
             $crate::storage::test::get_all_tags($storage).await
         }
+
+        #[tokio::test]
+        async fn tc_config_absent_returns_none() -> $crate::errors::Result<()> {
+            $crate::storage::test::tc_config_absent_returns_none($storage).await
+        }
+
+        #[tokio::test]
+        async fn tc_config_round_trip() -> $crate::errors::Result<()> {
+            $crate::storage::test::tc_config_round_trip($storage).await
+        }
+
+        #[tokio::test]
+        async fn tc_config_overwrite() -> $crate::errors::Result<()> {
+            $crate::storage::test::tc_config_overwrite($storage).await
+        }
     };
 }
 pub(crate) use storage_tests_no_sync;
@@ -424,5 +439,49 @@ pub(super) async fn task_operations(mut storage: impl Storage) -> Result<()> {
         );
     }
 
+    Ok(())
+}
+
+pub(super) async fn tc_config_absent_returns_none(mut storage: impl Storage) -> Result<()> {
+    let mut txn = storage.txn().await?;
+    assert_eq!(txn.get_tc_config().await?, None, "fresh storage should have no config");
+    Ok(())
+}
+
+pub(super) async fn tc_config_round_trip(mut storage: impl Storage) -> Result<()> {
+    let json = r#"{"xstatus":[{"name":"blocked","icon":128721}],"tags":"work,home"}"#;
+    {
+        let mut txn = storage.txn().await?;
+        txn.set_tc_config(json.to_string()).await?;
+        txn.commit().await?;
+    }
+    {
+        let mut txn = storage.txn().await?;
+        assert_eq!(txn.get_tc_config().await?, Some(json.to_string()));
+    }
+    Ok(())
+}
+
+pub(super) async fn tc_config_overwrite(mut storage: impl Storage) -> Result<()> {
+    let json1 = r#"{"tags":"work"}"#;
+    let json2 = r#"{"tags":"home,urgent"}"#;
+    {
+        let mut txn = storage.txn().await?;
+        txn.set_tc_config(json1.to_string()).await?;
+        txn.commit().await?;
+    }
+    {
+        let mut txn = storage.txn().await?;
+        txn.set_tc_config(json2.to_string()).await?;
+        txn.commit().await?;
+    }
+    {
+        let mut txn = storage.txn().await?;
+        assert_eq!(
+            txn.get_tc_config().await?,
+            Some(json2.to_string()),
+            "should return latest write"
+        );
+    }
     Ok(())
 }
