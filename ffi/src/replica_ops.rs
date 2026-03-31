@@ -590,8 +590,9 @@ impl FfiSession {
             let tm = replica.tree_map().await.map_err(FfiError::from)?;
             let siblings = sorted_sibling_positions(&tm, task.get_parent(), Some(uuid_parsed));
             let first_pos = siblings.first().map(|(_, p)| p.as_str());
-            let new_pos = prepend_position(first_pos)
-                .map_err(|e| FfiError::InvalidInput { message: e.to_string() })?;
+            let new_pos = prepend_position(first_pos).map_err(|e| FfiError::InvalidInput {
+                message: e.to_string(),
+            })?;
             apply_position(&mut replica, uuid_parsed, new_pos).await
         })
         .await
@@ -612,8 +613,9 @@ impl FfiSession {
             let tm = replica.tree_map().await.map_err(FfiError::from)?;
             let siblings = sorted_sibling_positions(&tm, task.get_parent(), Some(uuid_parsed));
             let last_pos = siblings.last().map(|(_, p)| p.as_str());
-            let new_pos = append_position(last_pos)
-                .map_err(|e| FfiError::InvalidInput { message: e.to_string() })?;
+            let new_pos = append_position(last_pos).map_err(|e| FfiError::InvalidInput {
+                message: e.to_string(),
+            })?;
             apply_position(&mut replica, uuid_parsed, new_pos).await
         })
         .await

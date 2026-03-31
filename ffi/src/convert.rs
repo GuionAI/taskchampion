@@ -113,9 +113,7 @@ impl From<taskchampion::Error> for FfiError {
             taskchampion::Error::TaskAlreadyExists(uuid) => FfiError::TaskAlreadyExists {
                 uuid: uuid.to_string(),
             },
-            taskchampion::Error::ProjectNotFound(name) => {
-                FfiError::ProjectNotFound { name }
-            }
+            taskchampion::Error::ProjectNotFound(name) => FfiError::ProjectNotFound { name },
             taskchampion::Error::Database(msg) => FfiError::Storage { message: msg },
             taskchampion::Error::Usage(msg) => FfiError::InvalidInput { message: msg },
             taskchampion::Error::Other(e) => FfiError::Internal {

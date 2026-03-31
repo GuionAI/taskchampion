@@ -14,9 +14,9 @@ use crate::operation::Operation;
 use crate::storage::columns::{raw_to_task, RawTaskRow, TASK_SELECT_COLS};
 use crate::storage::sql_ops::{
     add_operation_stmt, create_task_stmt, delete_task_stmts, prepare_task, remove_operation_stmt,
-    set_task_stmts, set_tc_config_stmt, SqlParam, SqlStatement,
-    ALL_OPERATIONS_SQL, ALL_OPS_WITH_ID_DESC_SQL, ALL_TAGS_SQL, ALL_TASK_UUIDS_SQL,
-    PROJECT_LOOKUP_SQL, TASK_EXISTS_SQL, TC_CONFIG_READ_SQL,
+    set_task_stmts, set_tc_config_stmt, SqlParam, SqlStatement, ALL_OPERATIONS_SQL,
+    ALL_OPS_WITH_ID_DESC_SQL, ALL_TAGS_SQL, ALL_TASK_UUIDS_SQL, PROJECT_LOOKUP_SQL,
+    TASK_EXISTS_SQL, TC_CONFIG_READ_SQL,
 };
 use crate::storage::{Storage, StorageTxn, TaskMap};
 
