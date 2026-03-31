@@ -61,30 +61,27 @@ pub fn parse_markdown(input: &str) -> Vec<Section> {
     let mut current_level: Option<usize> = None;
     let mut current_heading = String::new();
     let mut current_body = String::new();
-    let mut in_fenced_block = false;
-    let mut fence_char = '`';
-    let mut fence_len: usize = 0;
+    // `Some((char, min_closing_len))` while inside a fenced code block.
+    let mut active_fence: Option<(char, usize)> = None;
 
     for line in input.lines() {
         // Detect fence open/close before heading detection.
-        if let Some((ch, len)) = fence_marker(line) {
-            if !in_fenced_block {
-                in_fenced_block = true;
-                fence_char = ch;
-                fence_len = len;
-            } else if ch == fence_char && len >= fence_len {
-                in_fenced_block = false;
+        let is_fence_marker = if let Some((ch, len)) = fence_marker(line) {
+            if let Some((fc, fl)) = active_fence {
+                // Valid closer: same char, long enough, no trailing info string.
+                if ch == fc && len >= fl && line.trim_start()[len..].trim().is_empty() {
+                    active_fence = None;
+                }
+            } else {
+                active_fence = Some((ch, len));
             }
-            // Fence marker lines are body text (not headings).
-            if current_level.is_some() {
-                current_body.push_str(line);
-                current_body.push('\n');
-            }
-            continue;
-        }
+            true
+        } else {
+            false
+        };
 
-        if in_fenced_block {
-            // Inside a fenced block: skip heading detection, treat as body text.
+        // Fence markers and lines inside a fence are body text; skip heading detection.
+        if is_fence_marker || active_fence.is_some() {
             if current_level.is_some() {
                 current_body.push_str(line);
                 current_body.push('\n');
@@ -113,6 +110,12 @@ pub fn parse_markdown(input: &str) -> Vec<Section> {
             current_body.push_str(line);
             current_body.push('\n');
         }
+    }
+
+    if active_fence.is_some() {
+        log::warn!(
+            "unclosed fenced code block in plan input — subsequent headings may have been treated as body text"
+        );
     }
 
     // Save last section
@@ -427,13 +430,72 @@ mod tests {
 
     #[test]
     fn derive_attribute_inside_fence_is_body() {
-        // Regression: #[derive(Debug)] has no space after # so heading_level() already rejects
-        // it outside fences — confirm it also works correctly inside a fence.
+        // Note: #[derive(Debug)] has no space after # so heading_level() already rejects it
+        // outside fences too. This test confirms the body content is preserved inside a fence,
+        // not that fence tracking is what blocks heading detection for this specific input.
         let input = "## Step\n```rust\n#[derive(Debug)]\nstruct Foo;\n```";
         let sections = parse_markdown(input);
         assert_eq!(sections.len(), 1);
         assert_eq!(sections[0].heading, "Step");
         assert!(sections[0].body.contains("#[derive(Debug)]"));
+    }
+
+    #[test]
+    fn lang_tagged_closer_does_not_close_fence() {
+        // Regression for: fence_marker("```rust") returns Some(('`', 3)) which previously
+        // satisfied the closing condition, causing ```rust to close an open fence.
+        let input = "## Step\n```\n# comment\n```rust\nstill inside fence\n```\n## After";
+        let sections = parse_markdown(input);
+        assert_eq!(sections.len(), 2);
+        assert_eq!(sections[0].heading, "Step");
+        assert_eq!(sections[1].heading, "After");
+        // ```rust should NOT have closed the fence — "still inside fence" is body, not a heading
+        let body = &sections[0].body;
+        assert!(body.contains("# comment"));
+        assert!(body.contains("still inside fence"));
+    }
+
+    #[test]
+    fn longer_closing_fence_closes_shorter_opener() {
+        // 4-backtick closer is valid for a 3-backtick opener (len >= fence_len)
+        let input = "## Step\n```\ncode\n````\n## After";
+        let sections = parse_markdown(input);
+        assert_eq!(sections.len(), 2);
+        assert_eq!(sections[0].heading, "Step");
+        assert_eq!(sections[1].heading, "After");
+    }
+
+    #[test]
+    fn shorter_closing_fence_does_not_close_longer_opener() {
+        // 3-backtick closer does NOT close a 4-backtick opener
+        let input = "## Step\n````\ncode\n```\nstill inside\n````\n## After";
+        let sections = parse_markdown(input);
+        assert_eq!(sections.len(), 2);
+        assert_eq!(sections[0].heading, "Step");
+        assert_eq!(sections[1].heading, "After");
+        assert!(sections[0].body.contains("still inside"));
+    }
+
+    #[test]
+    fn mismatched_fence_chars_do_not_close() {
+        // ~~~ does not close a ``` fence and vice versa
+        let input = "## Step\n```\n# inside\n~~~\nstill inside\n```\n## After";
+        let sections = parse_markdown(input);
+        assert_eq!(sections.len(), 2);
+        assert_eq!(sections[0].heading, "Step");
+        assert_eq!(sections[1].heading, "After");
+        assert!(sections[0].body.contains("still inside"));
+    }
+
+    #[test]
+    fn fence_delimiter_lines_appear_in_body() {
+        // The ``` open and close lines themselves should be included in the section body.
+        let input = "## Step\n```\ncode\n```";
+        let sections = parse_markdown(input);
+        assert_eq!(sections.len(), 1);
+        let body = &sections[0].body;
+        assert!(body.contains("```"), "fence open line should be in body");
+        assert!(body.contains("code"));
     }
 
     #[test]
