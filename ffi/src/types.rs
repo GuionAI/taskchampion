@@ -250,6 +250,16 @@ pub enum FfiError {
     Storage { message: String },
     /// Unexpected internal error (bug, catch-all).
     Internal { message: String },
+    /// Reparent would create a cycle (uuid cannot be a descendant of parent).
+    CircularParent { uuid: String, parent: String },
+    /// Reorder anchor is not under the same parent as the task.
+    NotASibling { uuid: String, anchor: String },
+    /// delete_tag / rename_tag on a tag name not present in tc_config.
+    TagNotFound { name: String },
+    /// rename_tag target already exists in tc_config.
+    TagAlreadyExists { name: String },
+    /// set_xstatus with a name not in tc_config.xstatus definitions.
+    UnknownXStatus { name: String },
 }
 
 impl std::fmt::Display for FfiError {
@@ -260,6 +270,15 @@ impl std::fmt::Display for FfiError {
             FfiError::InvalidInput { message } => write!(f, "Invalid input: {message}"),
             FfiError::Storage { message } => write!(f, "Storage error: {message}"),
             FfiError::Internal { message } => write!(f, "Internal error: {message}"),
+            FfiError::CircularParent { uuid, parent } => {
+                write!(f, "Circular parent: {uuid} cannot be a descendant of {parent}")
+            }
+            FfiError::NotASibling { uuid, anchor } => {
+                write!(f, "Not a sibling: {uuid} and {anchor} have different parents")
+            }
+            FfiError::TagNotFound { name } => write!(f, "Tag not found: {name}"),
+            FfiError::TagAlreadyExists { name } => write!(f, "Tag already exists: {name}"),
+            FfiError::UnknownXStatus { name } => write!(f, "Unknown xstatus: {name}"),
         }
     }
 }

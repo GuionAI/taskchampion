@@ -279,6 +279,8 @@ fn ffi_error_to_core(e: FfiError) -> taskchampion::Error {
         FfiError::Internal { message } => {
             taskchampion::Error::Other(anyhow::anyhow!("{}", message))
         }
+        // New variants — these flow Rust→Swift only, but the match must be exhaustive.
+        e => taskchampion::Error::Other(anyhow::anyhow!("{}", e)),
     }
 }
 
