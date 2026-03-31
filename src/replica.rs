@@ -329,7 +329,6 @@ impl<S: Storage> Replica<S> {
         // Build task-clear operations: remove xstatus UDA from tasks matching this name.
         let all = self.taskdb.all_tasks().await?;
         let mut ops = Operations::new();
-        ops.push(Operation::UndoPoint);
         let mut count = 0u32;
         for (uuid, taskmap) in &all {
             if taskmap.get("xstatus").map(|v| v.as_str()) == Some(name) {
@@ -344,8 +343,11 @@ impl<S: Storage> Replica<S> {
             }
         }
 
-        // Commit task ops first; only persist config if that succeeds.
-        self.commit_operations(ops).await?;
+        // Only commit task ops (with undo point) if any tasks matched.
+        if count > 0 {
+            ops.insert(0, Operation::UndoPoint);
+            self.commit_operations(ops).await?;
+        }
         self.set_tc_config_parsed(&config).await?;
         Ok(count)
     }
@@ -366,7 +368,6 @@ impl<S: Storage> Replica<S> {
         // Build task-rename operations: update xstatus UDA value from old → new.
         let all = self.taskdb.all_tasks().await?;
         let mut ops = Operations::new();
-        ops.push(Operation::UndoPoint);
         let mut count = 0u32;
         for (uuid, taskmap) in &all {
             if taskmap.get("xstatus").map(|v| v.as_str()) == Some(old) {
@@ -381,8 +382,11 @@ impl<S: Storage> Replica<S> {
             }
         }
 
-        // Commit task ops first; only persist config if that succeeds.
-        self.commit_operations(ops).await?;
+        // Only commit task ops (with undo point) if any tasks matched.
+        if count > 0 {
+            ops.insert(0, Operation::UndoPoint);
+            self.commit_operations(ops).await?;
+        }
         self.set_tc_config_parsed(&config).await?;
         Ok(count)
     }
@@ -1530,7 +1534,46 @@ mod tests {
         assert_eq!(task_b.get_value("xstatus").unwrap(), "waiting");
     }
 
+    #[tokio::test]
+    async fn delete_xstatus_zero_tasks_still_updates_config() {
+        use crate::storage::tc_config::XStatusDef;
+
+        let mut replica = Replica::new(InMemoryStorage::new());
+        let mut config = crate::storage::tc_config::TcConfig::default();
+        config.add_xstatus(XStatusDef {
+            name: "blocked".into(),
+            icon: 1,
+        });
+        replica.set_tc_config_parsed(&config).await.unwrap();
+
+        // No tasks have xstatus=blocked, but the config def should still be removed.
+        let count = replica.delete_xstatus("blocked").await.unwrap();
+        assert_eq!(count, 0);
+        let config = replica.get_tc_config_parsed().await.unwrap();
+        assert!(!config.has_xstatus("blocked"));
+    }
+
     // ── rename_xstatus ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn rename_xstatus_zero_tasks_still_updates_config() {
+        use crate::storage::tc_config::XStatusDef;
+
+        let mut replica = Replica::new(InMemoryStorage::new());
+        let mut config = crate::storage::tc_config::TcConfig::default();
+        config.add_xstatus(XStatusDef {
+            name: "blocked".into(),
+            icon: 1,
+        });
+        replica.set_tc_config_parsed(&config).await.unwrap();
+
+        // No tasks have xstatus=blocked, but the config rename should still happen.
+        let count = replica.rename_xstatus("blocked", "waiting").await.unwrap();
+        assert_eq!(count, 0);
+        let config = replica.get_tc_config_parsed().await.unwrap();
+        assert!(!config.has_xstatus("blocked"));
+        assert!(config.has_xstatus("waiting"));
+    }
 
     #[tokio::test]
     async fn rename_xstatus_success() {
