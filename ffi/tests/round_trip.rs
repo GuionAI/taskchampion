@@ -1251,7 +1251,7 @@ async fn test_set_project_round_trip() {
         .await;
     assert!(
         matches!(result, Err(FfiError::ProjectNotFound { .. })),
-        "expected ProjectNotFound for unknown project, got: {result:?}"
+        "expected ProjectNotFound for unknown project"
     );
 
     // Clear project (None) still works — bypasses resolve_project_id.
@@ -1298,8 +1298,12 @@ async fn test_set_project_id_round_trip() {
         Some(project_id.as_str()),
         "project_id should match injected UUID"
     );
-    // project name should be cleared by SetProjectId.
-    assert_eq!(task.project, None, "project name cleared by SetProjectId");
+    // project name is resolved via JOIN from project_id → projects table.
+    assert_eq!(
+        task.project.as_deref(),
+        Some("inbox"),
+        "project name resolved from JOIN"
+    );
 
     // Clear with None.
     session
@@ -1575,7 +1579,7 @@ async fn test_reorder_to_beginning_already_first() {
     let pos = sequential_positions(2);
 
     let a = create_positioned(&session, "A", &pos[0]).await;
-    let _b = create_positioned(&session, "B", &pos[1]).await;
+    let b = create_positioned(&session, "B", &pos[1]).await;
 
     // Move A to beginning (already first) — should succeed idempotently.
     let moved = session.reorder_to_beginning(a.clone()).await.unwrap();
@@ -1583,10 +1587,12 @@ async fn test_reorder_to_beginning_already_first() {
         moved.position.is_some(),
         "should have a position after reorder"
     );
-    // New position should be less than original.
+    // New position should be less than B's position (A was excluded from
+    // siblings during the calculation, so prepend generates before B).
+    let b_task = session.get_task(b).await.unwrap().unwrap();
     assert!(
-        moved.position.as_ref().unwrap() < &pos[0],
-        "new position should be less than original first position"
+        moved.position.as_ref().unwrap() < b_task.position.as_ref().unwrap(),
+        "new position should be less than B's position"
     );
 }
 

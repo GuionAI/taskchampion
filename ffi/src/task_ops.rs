@@ -249,6 +249,12 @@ fn apply_mutation(
                 .map_err(FfiError::from)?;
         }
         TaskMutation::SetProject { value } => {
+            // When clearing project (None), also clear project_id to prevent
+            // the storage JOIN from resolving a stale name.
+            if value.is_none() {
+                task.set_value("project_id", None::<String>, ops)
+                    .map_err(FfiError::from)?;
+            }
             task.set_value("project", value, ops)
                 .map_err(FfiError::from)?;
         }
