@@ -253,12 +253,19 @@ impl FfiSession {
     pub async fn create_tag(&self, name: String) -> Result<(), FfiError> {
         self.with_replica(|mut replica| async move {
             // Validate tag name first — fail fast before reading config.
-            let _: Tag = name
+            // Also reject synthetic tags (e.g. "WAITING") — they are computed
+            // at runtime and cannot be stored in tc_config.
+            let tag: Tag = name
                 .as_str()
                 .try_into()
                 .map_err(|e| FfiError::InvalidInput {
                     message: format!("Invalid tag name: {e}"),
                 })?;
+            if tag.is_synthetic() {
+                return Err(FfiError::InvalidInput {
+                    message: format!("'{name}' is a synthetic tag and cannot be registered"),
+                });
+            }
 
             let mut config = replica
                 .get_tc_config_parsed()

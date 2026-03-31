@@ -66,7 +66,7 @@ impl TcConfig {
 
     /// Return `true` if the given tag name is in the config.
     pub fn has_tag(&self, name: &str) -> bool {
-        self.tag_list().iter().any(|t| t == name)
+        self.tags.split(',').any(|t| t.trim() == name)
     }
 
     /// Remove `name` from the tag list. Returns `false` if not present.

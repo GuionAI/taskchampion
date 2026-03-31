@@ -88,6 +88,17 @@ impl MockFfiSqlExecutor {
         .expect("inject_tc_config");
     }
 
+    /// Read the current tc_config JSON value from tc_settings.
+    fn read_tc_config(&self) -> String {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT value FROM tc_settings WHERE id = 'tc_config'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap_or_default()
+    }
+
     /// Convert FfiSqlParam to a rusqlite-compatible value.
     fn bind_params(params: &[FfiSqlParam]) -> Vec<Box<dyn rusqlite::types::ToSql>> {
         params
@@ -331,7 +342,8 @@ async fn test_undo_reverses_last_mutation() {
 
 #[tokio::test]
 async fn test_add_and_remove_tag() {
-    let session = make_session();
+    let (session, mock) = make_session_with_executor();
+    mock.inject_tc_config(r#"{"tags":"work"}"#);
     let uuid = Uuid::new_v4().to_string();
 
     session
@@ -1997,6 +2009,148 @@ async fn test_malformed_tc_settings_propagates_error() {
 // ---------------------------------------------------------------------------
 // Test gap #4: AnchorHasNoPosition error
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// create_tag tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_create_tag_success() {
+    let (session, mock) = make_session_with_executor();
+    // Start with no tags.
+    session.create_tag("work".into()).await.expect("create_tag");
+    // Config should now contain "work".
+    let config = mock.read_tc_config();
+    assert!(
+        config.contains("work"),
+        "config should contain 'work': {config}"
+    );
+}
+
+#[tokio::test]
+async fn test_create_tag_already_exists() {
+    let (session, mock) = make_session_with_executor();
+    mock.inject_tc_config(r#"{"tags":"work"}"#);
+
+    let result = session.create_tag("work".into()).await;
+    assert!(
+        matches!(result, Err(FfiError::TagAlreadyExists { .. })),
+        "expected TagAlreadyExists, got: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_create_tag_invalid_name() {
+    let session = make_session();
+    // Tag names cannot start with digits.
+    let result = session.create_tag("123bad".into()).await;
+    assert!(
+        matches!(result, Err(FfiError::InvalidInput { .. })),
+        "expected InvalidInput, got: {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_create_tag_rejects_synthetic() {
+    let session = make_session();
+    // "WAITING" is a synthetic tag — cannot be registered.
+    let result = session.create_tag("WAITING".into()).await;
+    assert!(
+        matches!(result, Err(FfiError::InvalidInput { .. })),
+        "expected InvalidInput for synthetic tag, got: {result:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// mutate_task AddTag pre-validation tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_mutate_task_add_tag_rejected_when_not_in_config() {
+    let session = make_session();
+    let uuid = Uuid::new_v4().to_string();
+    session
+        .create_task(uuid.clone(), "Tag test".into())
+        .await
+        .expect("create");
+
+    // "work" is not in tc_config — must return TagNotFound.
+    let result = session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::AddTag { tag: "work".into() }],
+        )
+        .await;
+    assert!(
+        matches!(result, Err(FfiError::TagNotFound { .. })),
+        "expected TagNotFound for unregistered tag"
+    );
+
+    // The task must be unchanged (no partial mutation committed).
+    let task = session.get_task(uuid).await.unwrap().unwrap();
+    assert!(
+        task.tags.is_empty(),
+        "no tags should be on task after rejection"
+    );
+}
+
+#[tokio::test]
+async fn test_mutate_task_add_tag_invalid_name_returns_invalid_input() {
+    let session = make_session();
+    let uuid = Uuid::new_v4().to_string();
+    session
+        .create_task(uuid.clone(), "Invalid tag name test".into())
+        .await
+        .expect("create");
+
+    let result = session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::AddTag { tag: "!bad".into() }],
+        )
+        .await;
+    assert!(
+        matches!(result, Err(FfiError::InvalidInput { .. })),
+        "expected InvalidInput for bad tag name"
+    );
+}
+
+#[tokio::test]
+async fn test_mutate_task_add_tag_batch_atomicity() {
+    // A batch with a valid mutation followed by an unregistered AddTag must
+    // commit nothing — the description change must not be persisted.
+    let session = make_session();
+    let uuid = Uuid::new_v4().to_string();
+    session
+        .create_task(uuid.clone(), "Original".into())
+        .await
+        .expect("create");
+
+    let result = session
+        .mutate_task(
+            uuid.clone(),
+            vec![
+                TaskMutation::SetDescription {
+                    value: "Changed".into(),
+                },
+                TaskMutation::AddTag {
+                    tag: "unregistered".into(),
+                },
+            ],
+        )
+        .await;
+    assert!(
+        matches!(result, Err(FfiError::TagNotFound { .. })),
+        "expected TagNotFound for unregistered tag in batch"
+    );
+
+    // Description must be unchanged — pre-validation aborts before any ops are built.
+    let task = session.get_task(uuid).await.unwrap().unwrap();
+    assert_eq!(
+        task.description, "Original",
+        "description must not change on pre-validation failure"
+    );
+}
 
 #[tokio::test]
 async fn test_reorder_anchor_with_no_position_returns_error() {

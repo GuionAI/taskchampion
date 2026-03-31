@@ -1317,6 +1317,11 @@ mod tests {
             matches!(err, Error::Usage(_)),
             "expected Error::Usage, got: {err:?}"
         );
+        // No partial operations should have been appended before the error.
+        assert!(
+            ops2.is_empty(),
+            "ops must be unmodified after validation failure"
+        );
     }
 
     #[tokio::test]
