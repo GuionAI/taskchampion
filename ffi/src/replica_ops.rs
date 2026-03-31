@@ -16,7 +16,9 @@ use uuid::Uuid;
 use chrono::Utc;
 
 use crate::convert::{tree_map_to_ffi, FfiSqlExecutorAdapter};
-use crate::types::{FfiDependencyEdge, FfiError, FfiSqlExecutor, FfiTask, FfiTreeNode, ReparentPosition};
+use crate::types::{
+    FfiDependencyEdge, FfiError, FfiSqlExecutor, FfiTask, FfiTreeNode, ReparentPosition,
+};
 
 // ---------------------------------------------------------------------------
 // TCSession (FfiSession)
@@ -240,11 +242,15 @@ impl FfiSession {
                     taskchampion::Error::Usage(ref msg) if msg.starts_with("tag not found") => {
                         FfiError::TagNotFound { name: old.clone() }
                     }
-                    taskchampion::Error::Usage(ref msg) if msg.starts_with("tag already exists") => {
+                    taskchampion::Error::Usage(ref msg)
+                        if msg.starts_with("tag already exists") =>
+                    {
                         FfiError::TagAlreadyExists { name: new.clone() }
                     }
                     taskchampion::Error::Usage(ref msg) if msg.starts_with("Invalid tag name") => {
-                        FfiError::InvalidInput { message: msg.clone() }
+                        FfiError::InvalidInput {
+                            message: msg.clone(),
+                        }
                     }
                     other => FfiError::from(other),
                 })?;
@@ -260,10 +266,7 @@ impl FfiSession {
 
 /// Load tc_config from replica, returning a default if absent.
 async fn load_tc_config(replica: &mut Replica<ExternalStorage>) -> Result<TcConfig, FfiError> {
-    replica
-        .get_tc_config_parsed()
-        .await
-        .map_err(FfiError::from)
+    replica.get_tc_config_parsed().await.map_err(FfiError::from)
 }
 
 // ---------------------------------------------------------------------------
@@ -276,11 +279,7 @@ impl FfiSession {
     ///
     /// Also auto-sets status to `Pending` if the task is not already pending.
     /// Returns `UnknownXStatus` if `name` is not in tc_config.xstatus definitions.
-    pub async fn set_xstatus(
-        &self,
-        task_uuid: String,
-        name: String,
-    ) -> Result<FfiTask, FfiError> {
+    pub async fn set_xstatus(&self, task_uuid: String, name: String) -> Result<FfiTask, FfiError> {
         self.with_replica(|mut replica| async move {
             let uuid = parse_uuid(&task_uuid)?;
             let config = load_tc_config(&mut replica).await?;
@@ -734,11 +733,7 @@ impl FfiSession {
     /// to call `is_ancestor` for safety.
     ///
     /// Returns `false` if either UUID does not exist or is not in the tree.
-    pub async fn is_ancestor(
-        &self,
-        uuid: String,
-        ancestor_uuid: String,
-    ) -> Result<bool, FfiError> {
+    pub async fn is_ancestor(&self, uuid: String, ancestor_uuid: String) -> Result<bool, FfiError> {
         self.with_replica(|mut replica| async move {
             let uuid_parsed = parse_uuid_ctx(&uuid, "uuid")?;
             let ancestor_parsed = parse_uuid_ctx(&ancestor_uuid, "ancestor_uuid")?;
@@ -768,4 +763,3 @@ pub(crate) fn parse_uuid_ctx(s: &str, ctx: &str) -> Result<Uuid, FfiError> {
         message: format!("invalid {ctx} '{s}': {e}"),
     })
 }
-

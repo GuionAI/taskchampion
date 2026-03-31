@@ -26,9 +26,9 @@ pub mod powersync;
 pub mod sql_ops;
 #[cfg(not(feature = "storage-external"))]
 pub(crate) mod sql_ops;
+pub mod tc_config;
 #[cfg(test)]
 mod test;
-pub mod tc_config;
 
 pub use config::AccessMode;
 

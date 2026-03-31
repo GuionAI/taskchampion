@@ -256,8 +256,7 @@ pub(crate) fn set_tc_config_stmt(value: &str) -> SqlStatement {
 
 // ── Read SQL constants ─────────────────────────────────────────────────────
 
-pub(crate) const TC_CONFIG_READ_SQL: &str =
-    "SELECT value FROM tc_settings WHERE id = 'tc_config'";
+pub(crate) const TC_CONFIG_READ_SQL: &str = "SELECT value FROM tc_settings WHERE id = 'tc_config'";
 
 pub(crate) const TASK_EXISTS_SQL: &str =
     "SELECT EXISTS(SELECT 1 FROM tc_tasks WHERE id = ?) AS exists_flag";

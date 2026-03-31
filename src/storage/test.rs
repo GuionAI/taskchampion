@@ -382,7 +382,11 @@ pub(super) async fn task_operations(mut storage: impl Storage) -> Result<()> {
 
 pub(super) async fn tc_config_absent_returns_none(mut storage: impl Storage) -> Result<()> {
     let mut txn = storage.txn().await?;
-    assert_eq!(txn.get_tc_config().await?, None, "fresh storage should have no config");
+    assert_eq!(
+        txn.get_tc_config().await?,
+        None,
+        "fresh storage should have no config"
+    );
     Ok(())
 }
 

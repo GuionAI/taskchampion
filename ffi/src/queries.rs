@@ -17,4 +17,3 @@ pub fn all_task_tables_sql() -> String {
      LEFT JOIN projects p ON p.id = t.project_id"
         .to_string()
 }
-

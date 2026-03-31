@@ -306,10 +306,16 @@ impl std::fmt::Display for FfiError {
             FfiError::Storage { message } => write!(f, "Storage error: {message}"),
             FfiError::Internal { message } => write!(f, "Internal error: {message}"),
             FfiError::CircularParent { uuid, parent } => {
-                write!(f, "Circular parent: {uuid} cannot be a descendant of {parent}")
+                write!(
+                    f,
+                    "Circular parent: {uuid} cannot be a descendant of {parent}"
+                )
             }
             FfiError::NotASibling { uuid, anchor } => {
-                write!(f, "Not a sibling: {uuid} and {anchor} have different parents")
+                write!(
+                    f,
+                    "Not a sibling: {uuid} and {anchor} have different parents"
+                )
             }
             FfiError::TagNotFound { name } => write!(f, "Tag not found: {name}"),
             FfiError::TagAlreadyExists { name } => write!(f, "Tag already exists: {name}"),

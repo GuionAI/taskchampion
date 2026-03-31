@@ -605,9 +605,7 @@ async fn test_rename_tag_not_found() {
     let (session, mock) = make_session_with_executor();
     mock.inject_tc_config(r#"{"tags":"work"}"#);
 
-    let result = session
-        .rename_tag("ghost".into(), "other".into())
-        .await;
+    let result = session.rename_tag("ghost".into(), "other".into()).await;
     assert!(
         matches!(result, Err(FfiError::TagNotFound { .. })),
         "expected TagNotFound, got: {result:?}"
@@ -1218,10 +1216,7 @@ async fn test_set_project_round_trip() {
 
     // Clear project.
     session
-        .mutate_task(
-            uuid.clone(),
-            vec![TaskMutation::SetProject { value: None }],
-        )
+        .mutate_task(uuid.clone(), vec![TaskMutation::SetProject { value: None }])
         .await
         .expect("clear project");
 
@@ -1453,21 +1448,37 @@ async fn test_reparent_to_end() {
     let pos = sequential_positions(2);
 
     let parent = Uuid::new_v4().to_string();
-    session.create_task(parent.clone(), "Parent".into()).await.unwrap();
+    session
+        .create_task(parent.clone(), "Parent".into())
+        .await
+        .unwrap();
 
     let child1 = create_positioned(&session, "Child1", &pos[0]).await;
     let child2 = create_positioned(&session, "Child2", &pos[1]).await;
     session
-        .mutate_task(child1.clone(), vec![TaskMutation::SetParent { uuid: Some(parent.clone()) }])
+        .mutate_task(
+            child1.clone(),
+            vec![TaskMutation::SetParent {
+                uuid: Some(parent.clone()),
+            }],
+        )
         .await
         .unwrap();
     session
-        .mutate_task(child2.clone(), vec![TaskMutation::SetParent { uuid: Some(parent.clone()) }])
+        .mutate_task(
+            child2.clone(),
+            vec![TaskMutation::SetParent {
+                uuid: Some(parent.clone()),
+            }],
+        )
         .await
         .unwrap();
 
     let mover = Uuid::new_v4().to_string();
-    session.create_task(mover.clone(), "Mover".into()).await.unwrap();
+    session
+        .create_task(mover.clone(), "Mover".into())
+        .await
+        .unwrap();
 
     let task = session
         .reparent(mover.clone(), Some(parent.clone()), ReparentPosition::End)
@@ -1485,19 +1496,34 @@ async fn test_reparent_to_beginning() {
     let pos = sequential_positions(1);
 
     let parent = Uuid::new_v4().to_string();
-    session.create_task(parent.clone(), "Parent".into()).await.unwrap();
+    session
+        .create_task(parent.clone(), "Parent".into())
+        .await
+        .unwrap();
 
     let existing_child = create_positioned(&session, "ExistingChild", &pos[0]).await;
     session
-        .mutate_task(existing_child.clone(), vec![TaskMutation::SetParent { uuid: Some(parent.clone()) }])
+        .mutate_task(
+            existing_child.clone(),
+            vec![TaskMutation::SetParent {
+                uuid: Some(parent.clone()),
+            }],
+        )
         .await
         .unwrap();
 
     let mover = Uuid::new_v4().to_string();
-    session.create_task(mover.clone(), "Mover".into()).await.unwrap();
+    session
+        .create_task(mover.clone(), "Mover".into())
+        .await
+        .unwrap();
 
     let task = session
-        .reparent(mover.clone(), Some(parent.clone()), ReparentPosition::Beginning)
+        .reparent(
+            mover.clone(),
+            Some(parent.clone()),
+            ReparentPosition::Beginning,
+        )
         .await
         .expect("reparent to Beginning");
     assert_eq!(task.parent.as_deref(), Some(parent.as_str()));
@@ -1511,12 +1537,23 @@ async fn test_reparent_to_root() {
     let session = make_session();
 
     let original_parent = Uuid::new_v4().to_string();
-    session.create_task(original_parent.clone(), "Parent".into()).await.unwrap();
+    session
+        .create_task(original_parent.clone(), "Parent".into())
+        .await
+        .unwrap();
 
     let child = Uuid::new_v4().to_string();
-    session.create_task(child.clone(), "Child".into()).await.unwrap();
     session
-        .mutate_task(child.clone(), vec![TaskMutation::SetParent { uuid: Some(original_parent.clone()) }])
+        .create_task(child.clone(), "Child".into())
+        .await
+        .unwrap();
+    session
+        .mutate_task(
+            child.clone(),
+            vec![TaskMutation::SetParent {
+                uuid: Some(original_parent.clone()),
+            }],
+        )
         .await
         .unwrap();
 
@@ -1533,11 +1570,22 @@ async fn test_reparent_circular_rejected() {
     let session = make_session();
 
     let parent = Uuid::new_v4().to_string();
-    session.create_task(parent.clone(), "Parent".into()).await.unwrap();
-    let child = Uuid::new_v4().to_string();
-    session.create_task(child.clone(), "Child".into()).await.unwrap();
     session
-        .mutate_task(child.clone(), vec![TaskMutation::SetParent { uuid: Some(parent.clone()) }])
+        .create_task(parent.clone(), "Parent".into())
+        .await
+        .unwrap();
+    let child = Uuid::new_v4().to_string();
+    session
+        .create_task(child.clone(), "Child".into())
+        .await
+        .unwrap();
+    session
+        .mutate_task(
+            child.clone(),
+            vec![TaskMutation::SetParent {
+                uuid: Some(parent.clone()),
+            }],
+        )
         .await
         .unwrap();
 
@@ -1556,27 +1604,45 @@ async fn test_reparent_with_after_anchor() {
     let pos = sequential_positions(2);
 
     let parent = Uuid::new_v4().to_string();
-    session.create_task(parent.clone(), "Parent".into()).await.unwrap();
+    session
+        .create_task(parent.clone(), "Parent".into())
+        .await
+        .unwrap();
 
     let anchor1 = create_positioned(&session, "Anchor1", &pos[0]).await;
     let anchor2 = create_positioned(&session, "Anchor2", &pos[1]).await;
     session
-        .mutate_task(anchor1.clone(), vec![TaskMutation::SetParent { uuid: Some(parent.clone()) }])
+        .mutate_task(
+            anchor1.clone(),
+            vec![TaskMutation::SetParent {
+                uuid: Some(parent.clone()),
+            }],
+        )
         .await
         .unwrap();
     session
-        .mutate_task(anchor2.clone(), vec![TaskMutation::SetParent { uuid: Some(parent.clone()) }])
+        .mutate_task(
+            anchor2.clone(),
+            vec![TaskMutation::SetParent {
+                uuid: Some(parent.clone()),
+            }],
+        )
         .await
         .unwrap();
 
     let mover = Uuid::new_v4().to_string();
-    session.create_task(mover.clone(), "Mover".into()).await.unwrap();
+    session
+        .create_task(mover.clone(), "Mover".into())
+        .await
+        .unwrap();
 
     let task = session
         .reparent(
             mover.clone(),
             Some(parent.clone()),
-            ReparentPosition::After { anchor: anchor1.clone() },
+            ReparentPosition::After {
+                anchor: anchor1.clone(),
+            },
         )
         .await
         .expect("reparent after anchor");
@@ -1601,7 +1667,10 @@ async fn test_reparent_nonexistent_uuid() {
 async fn test_reparent_nonexistent_parent() {
     let session = make_session();
     let task_uuid = Uuid::new_v4().to_string();
-    session.create_task(task_uuid.clone(), "Task".into()).await.unwrap();
+    session
+        .create_task(task_uuid.clone(), "Task".into())
+        .await
+        .unwrap();
     let ghost_parent = Uuid::new_v4().to_string();
     let result = session
         .reparent(task_uuid, Some(ghost_parent), ReparentPosition::End)
@@ -1617,33 +1686,64 @@ async fn test_is_ancestor_basic() {
     let session = make_session();
 
     let grandparent = Uuid::new_v4().to_string();
-    session.create_task(grandparent.clone(), "Grandparent".into()).await.unwrap();
-    let parent = Uuid::new_v4().to_string();
-    session.create_task(parent.clone(), "Parent".into()).await.unwrap();
     session
-        .mutate_task(parent.clone(), vec![TaskMutation::SetParent { uuid: Some(grandparent.clone()) }])
+        .create_task(grandparent.clone(), "Grandparent".into())
+        .await
+        .unwrap();
+    let parent = Uuid::new_v4().to_string();
+    session
+        .create_task(parent.clone(), "Parent".into())
+        .await
+        .unwrap();
+    session
+        .mutate_task(
+            parent.clone(),
+            vec![TaskMutation::SetParent {
+                uuid: Some(grandparent.clone()),
+            }],
+        )
         .await
         .unwrap();
     let child = Uuid::new_v4().to_string();
-    session.create_task(child.clone(), "Child".into()).await.unwrap();
     session
-        .mutate_task(child.clone(), vec![TaskMutation::SetParent { uuid: Some(parent.clone()) }])
+        .create_task(child.clone(), "Child".into())
+        .await
+        .unwrap();
+    session
+        .mutate_task(
+            child.clone(),
+            vec![TaskMutation::SetParent {
+                uuid: Some(parent.clone()),
+            }],
+        )
         .await
         .unwrap();
 
     assert!(
-        session.is_ancestor(child.clone(), grandparent.clone()).await.unwrap(),
+        session
+            .is_ancestor(child.clone(), grandparent.clone())
+            .await
+            .unwrap(),
         "grandparent is ancestor of child"
     );
     assert!(
-        !session.is_ancestor(grandparent.clone(), child.clone()).await.unwrap(),
+        !session
+            .is_ancestor(grandparent.clone(), child.clone())
+            .await
+            .unwrap(),
         "child is NOT ancestor of grandparent"
     );
 
     let unrelated = Uuid::new_v4().to_string();
-    session.create_task(unrelated.clone(), "Unrelated".into()).await.unwrap();
+    session
+        .create_task(unrelated.clone(), "Unrelated".into())
+        .await
+        .unwrap();
     assert!(
-        !session.is_ancestor(child.clone(), unrelated.clone()).await.unwrap(),
+        !session
+            .is_ancestor(child.clone(), unrelated.clone())
+            .await
+            .unwrap(),
         "unrelated is not ancestor of child"
     );
     let _ = (grandparent, parent, unrelated);
