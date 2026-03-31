@@ -18,8 +18,6 @@ pub(in crate::storage) trait WrappedStorageTxn {
     async fn all_operations(&mut self) -> Result<Vec<Operation>>;
     async fn add_operation(&mut self, op: Operation) -> Result<()>;
     async fn remove_operation(&mut self, op: Operation) -> Result<()>;
-    async fn get_tag_metadata(&mut self, name: String) -> Result<Option<String>>;
-    async fn set_tag_metadata(&mut self, name: String, data: String) -> Result<()>;
     async fn get_all_tags(&mut self) -> Result<Vec<String>>;
     async fn get_tc_config(&mut self) -> Result<Option<String>>;
     async fn set_tc_config(&mut self, value: String) -> Result<()>;

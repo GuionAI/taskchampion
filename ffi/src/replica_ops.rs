@@ -12,10 +12,7 @@ use uuid::Uuid;
 use chrono::Utc;
 
 use crate::convert::{tree_map_to_ffi, FfiSqlExecutorAdapter};
-use crate::types::{
-    FfiDependencyEdge, FfiError, FfiSqlExecutor, FfiTagMetadata, FfiTask, FfiTreeNode,
-    TagMetadataJson,
-};
+use crate::types::{FfiDependencyEdge, FfiError, FfiSqlExecutor, FfiTask, FfiTreeNode};
 
 // ---------------------------------------------------------------------------
 // TCSession (FfiSession)
@@ -176,76 +173,6 @@ impl FfiSession {
         .await
     }
 
-    /// Get the metadata for a tag by name.
-    ///
-    /// Returns a typed record with color, is_status, and icon fields.
-    /// All fields default to empty/false/None if no metadata exists or
-    /// if the stored JSON is missing fields.
-    pub async fn get_tag_metadata(&self, name: String) -> Result<FfiTagMetadata, FfiError> {
-        self.with_replica(|mut replica| async move {
-            let json_str = replica
-                .get_tag_metadata(name)
-                .await
-                .map_err(FfiError::from)?;
-            let parsed: TagMetadataJson = match json_str {
-                Some(s) => serde_json::from_str(&s).unwrap_or_default(),
-                None => TagMetadataJson::default(),
-            };
-            Ok(FfiTagMetadata::from(parsed))
-        })
-        .await
-    }
-
-    /// Set the color for a tag. Reads existing metadata, patches color, writes back.
-    ///
-    /// Note: concurrent calls to any setter for the same tag interleave at the
-    /// whole-metadata level (last-write-wins). Set all fields in a single call
-    /// sequence, not in parallel, if consistency matters.
-    pub async fn set_tag_color(&self, name: String, color: String) -> Result<(), FfiError> {
-        self.with_replica(|mut replica| async move {
-            let mut meta = read_tag_metadata(&mut replica, &name).await?;
-            meta.color = color;
-            write_tag_metadata(&mut replica, name, &meta).await
-        })
-        .await
-    }
-
-    /// Set whether a tag is a status tag. Reads existing metadata, patches is_status, writes back.
-    ///
-    /// Note: concurrent calls to any setter for the same tag interleave at the
-    /// whole-metadata level (last-write-wins). Set all fields in a single call
-    /// sequence, not in parallel, if consistency matters.
-    pub async fn set_tag_is_status(&self, name: String, value: bool) -> Result<(), FfiError> {
-        self.with_replica(|mut replica| async move {
-            let mut meta = read_tag_metadata(&mut replica, &name).await?;
-            meta.is_status = value;
-            write_tag_metadata(&mut replica, name, &meta).await
-        })
-        .await
-    }
-
-    /// Set the icon for a tag. Pass `None` to clear. Reads existing metadata, patches icon, writes back.
-    ///
-    /// Note: concurrent calls to any setter for the same tag interleave at the
-    /// whole-metadata level (last-write-wins). Set all fields in a single call
-    /// sequence, not in parallel, if consistency matters.
-    pub async fn set_tag_icon(&self, name: String, icon: Option<i64>) -> Result<(), FfiError> {
-        self.with_replica(|mut replica| async move {
-            let mut meta = read_tag_metadata(&mut replica, &name).await?;
-            meta.icon = icon;
-            write_tag_metadata(&mut replica, name, &meta).await
-        })
-        .await
-    }
-
-    /// Get all unique tag names across all tasks, sorted alphabetically.
-    pub async fn get_all_tags(&self) -> Result<Vec<String>, FfiError> {
-        self.with_replica(|mut replica| async move {
-            replica.get_all_tags().await.map_err(FfiError::from)
-        })
-        .await
-    }
-
     /// Atomically undo the last operation group.
     ///
     /// Returns `true` if an undo was performed, `false` if there is nothing to undo.
@@ -287,41 +214,3 @@ pub(crate) fn parse_uuid_ctx(s: &str, ctx: &str) -> Result<Uuid, FfiError> {
     })
 }
 
-// NOTE: Not atomic across concurrent calls — each granular setter opens an
-// ephemeral Replica, so two concurrent setters for the same tag can interleave.
-// This is intentional: matches the storage layer's LWW (last-write-wins) semantics.
-
-/// Read and deserialize tag metadata for a setter (strict: propagates parse errors).
-///
-/// Returns an error if the stored JSON is malformed to prevent silent data loss
-/// during read-modify-write. Missing rows return the default (empty) metadata.
-async fn read_tag_metadata(
-    replica: &mut Replica<ExternalStorage>,
-    name: &str,
-) -> Result<TagMetadataJson, FfiError> {
-    let json_str = replica
-        .get_tag_metadata(name.to_string())
-        .await
-        .map_err(FfiError::from)?;
-    match json_str {
-        Some(s) => serde_json::from_str(&s).map_err(|e| FfiError::Internal {
-            message: format!("Tag metadata for '{name}' is corrupt: {e}"),
-        }),
-        None => Ok(TagMetadataJson::default()),
-    }
-}
-
-/// Serialize and write tag metadata.
-async fn write_tag_metadata(
-    replica: &mut Replica<ExternalStorage>,
-    name: String,
-    meta: &TagMetadataJson,
-) -> Result<(), FfiError> {
-    let json = serde_json::to_string(meta).map_err(|e| FfiError::Internal {
-        message: format!("Failed to serialize tag metadata: {e}"),
-    })?;
-    replica
-        .set_tag_metadata(name, json)
-        .await
-        .map_err(FfiError::from)
-}

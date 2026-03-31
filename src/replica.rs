@@ -157,22 +157,6 @@ impl<S: Storage> Replica<S> {
         Ok(res)
     }
 
-    /// Get the metadata JSON for a tag by name.
-    ///
-    /// Returns `None` if no metadata has been set for this tag. When sync produces
-    /// duplicate rows, the latest row wins (LWW by `created_at`).
-    pub async fn get_tag_metadata(&mut self, name: String) -> Result<Option<String>> {
-        self.taskdb.get_tag_metadata(name).await
-    }
-
-    /// Set the metadata JSON for a tag by name.
-    ///
-    /// If metadata already exists for this tag, it is updated. Otherwise a new
-    /// row is inserted with a v7 UUID. The `data` parameter is an opaque JSON string.
-    pub async fn set_tag_metadata(&mut self, name: String, data: String) -> Result<()> {
-        self.taskdb.set_tag_metadata(name, data).await
-    }
-
     /// Get all unique tag names across all tasks, sorted alphabetically.
     pub async fn get_all_tags(&mut self) -> Result<Vec<String>> {
         self.taskdb.get_all_tags().await

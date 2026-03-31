@@ -13,9 +13,8 @@ use super::row_reader::{query_task_rows, read_raw_task_row};
 use crate::storage::columns::{raw_to_task, TASK_SELECT_COLS};
 use crate::storage::sql_ops::{
     add_operation_stmt, create_task_stmt, delete_task_stmts, prepare_task, remove_operation_stmt,
-    set_tag_metadata_stmt, set_task_stmts, set_tc_config_stmt, SqlStatement, ALL_OPERATIONS_SQL,
-    ALL_TAGS_SQL, ALL_TASK_UUIDS_SQL, LAST_OPERATION_SQL, TAG_METADATA_READ_SQL, TASK_EXISTS_SQL,
-    TC_CONFIG_READ_SQL,
+    set_task_stmts, set_tc_config_stmt, SqlStatement, ALL_OPERATIONS_SQL, ALL_TAGS_SQL,
+    ALL_TASK_UUIDS_SQL, LAST_OPERATION_SQL, TASK_EXISTS_SQL, TC_CONFIG_READ_SQL,
 };
 
 /// Execute a SqlStatement against a rusqlite Transaction.
@@ -378,30 +377,6 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
         }
 
         execute_sql_stmt(t, &remove_operation_stmt(&last_id))?;
-        Ok(())
-    }
-
-    async fn get_tag_metadata(&mut self, name: String) -> Result<Option<String>> {
-        let t = self.get_txn()?;
-        let data = t
-            .query_row(TAG_METADATA_READ_SQL, [&name], |row| {
-                row.get::<_, String>(1)
-            })
-            .optional()
-            .context("Get tag metadata")?;
-        Ok(data)
-    }
-
-    async fn set_tag_metadata(&mut self, name: String, data: String) -> Result<()> {
-        let t = self.get_txn()?;
-        let existing_id: Option<String> = t
-            .query_row(TAG_METADATA_READ_SQL, [&name], |row| {
-                row.get::<_, String>(0)
-            })
-            .optional()
-            .context("Check existing tag metadata")?;
-        let stmt = set_tag_metadata_stmt(&name, &data, existing_id.as_deref());
-        execute_sql_stmt(t, &stmt)?;
         Ok(())
     }
 

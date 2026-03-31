@@ -111,20 +111,6 @@ impl<S: Storage> TaskDb<S> {
         undo::commit_reversed_operations(txn.as_mut(), undo_ops).await
     }
 
-    /// Get the metadata JSON for a tag by name.
-    pub(crate) async fn get_tag_metadata(&mut self, name: String) -> Result<Option<String>> {
-        // Read-only: transaction is intentionally not committed
-        let mut txn = self.storage.txn().await?;
-        txn.get_tag_metadata(name).await
-    }
-
-    /// Set the metadata JSON for a tag by name, committing immediately.
-    pub(crate) async fn set_tag_metadata(&mut self, name: String, data: String) -> Result<()> {
-        let mut txn = self.storage.txn().await?;
-        txn.set_tag_metadata(name, data).await?;
-        txn.commit().await
-    }
-
     /// Get all unique tag names across all tasks.
     pub(crate) async fn get_all_tags(&mut self) -> Result<Vec<String>> {
         // Read-only: transaction is intentionally not committed

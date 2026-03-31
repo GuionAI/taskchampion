@@ -12,7 +12,6 @@ use uuid::Uuid;
 struct Data {
     tasks: HashMap<Uuid, TaskMap>,
     operations: Vec<Operation>,
-    tag_metadata: HashMap<String, String>,
     tc_config: Option<String>,
 }
 
@@ -129,15 +128,6 @@ impl StorageTxn for Txn<'_> {
         ))
     }
 
-    async fn get_tag_metadata(&mut self, name: String) -> Result<Option<String>> {
-        Ok(self.data_ref().tag_metadata.get(&name).cloned())
-    }
-
-    async fn set_tag_metadata(&mut self, name: String, data: String) -> Result<()> {
-        self.mut_data_ref().tag_metadata.insert(name, data);
-        Ok(())
-    }
-
     async fn get_all_tags(&mut self) -> Result<Vec<String>> {
         let tags: Vec<String> = self
             .data_ref()
@@ -185,7 +175,6 @@ impl InMemoryStorage {
             data: Data {
                 tasks: HashMap::new(),
                 operations: vec![],
-                tag_metadata: HashMap::new(),
                 tc_config: None,
             },
         }
