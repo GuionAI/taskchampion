@@ -48,6 +48,21 @@ impl FfiSession {
     }
 }
 
+/// Clear the `xstatus` UDA if it is currently set.
+///
+/// Called from `SetStatus`, `Done`, and `Delete` arms to ensure xstatus is
+/// never left set on a non-pending task.
+fn clear_xstatus_if_set(
+    task: &mut taskchampion::Task,
+    ops: &mut Operations,
+) -> Result<(), FfiError> {
+    if task.get_value("xstatus").is_some() {
+        task.set_value("xstatus", None::<String>, ops)
+            .map_err(FfiError::from)?;
+    }
+    Ok(())
+}
+
 fn apply_mutation(
     task: &mut taskchampion::Task,
     mutation: TaskMutation,
@@ -60,9 +75,8 @@ fn apply_mutation(
         TaskMutation::SetStatus { status } => {
             let new_status = Status::from(status);
             // Auto-clear xstatus when transitioning to non-pending status.
-            if new_status != Status::Pending && task.get_value("xstatus").is_some() {
-                task.set_value("xstatus", None::<String>, ops)
-                    .map_err(FfiError::from)?;
+            if new_status != Status::Pending {
+                clear_xstatus_if_set(task, ops)?;
             }
             task.set_status(new_status, ops).map_err(FfiError::from)?;
         }
@@ -135,11 +149,7 @@ fn apply_mutation(
             task.remove_dependency(dep, ops).map_err(FfiError::from)?;
         }
         TaskMutation::Done => {
-            // Auto-clear xstatus before marking done.
-            if task.get_value("xstatus").is_some() {
-                task.set_value("xstatus", None::<String>, ops)
-                    .map_err(FfiError::from)?;
-            }
+            clear_xstatus_if_set(task, ops)?;
             task.done(ops).map_err(FfiError::from)?;
         }
         TaskMutation::Start => {
@@ -151,10 +161,7 @@ fn apply_mutation(
         TaskMutation::Delete => {
             // Soft delete: sets status to `Deleted`. The task still exists and
             // can be re-fetched with `get_task`. Auto-clear xstatus.
-            if task.get_value("xstatus").is_some() {
-                task.set_value("xstatus", None::<String>, ops)
-                    .map_err(FfiError::from)?;
-            }
+            clear_xstatus_if_set(task, ops)?;
             task.set_status(Status::Deleted, ops)
                 .map_err(FfiError::from)?;
         }

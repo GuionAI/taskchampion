@@ -1222,6 +1222,9 @@ async fn test_set_project_round_trip() {
 
     let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
     assert_eq!(task.project, None, "project cleared");
+    // Note: project_id is a separate FK column managed by the storage layer;
+    // it is not automatically cleared when the project name is removed.
+    // Tracking this as a known storage-layer limitation.
 }
 
 // ---------------------------------------------------------------------------
@@ -1433,10 +1436,6 @@ async fn test_set_value_rejects_project_keys() {
         );
     }
 }
-
-// ---------------------------------------------------------------------------
-// Reparent and is_ancestor tests
-// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // Reparent and is_ancestor tests
@@ -1747,4 +1746,276 @@ async fn test_is_ancestor_basic() {
         "unrelated is not ancestor of child"
     );
     let _ = (grandparent, parent, unrelated);
+}
+
+// ---------------------------------------------------------------------------
+// Test gap #11: SetStatus to non-pending auto-clears xstatus
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_xstatus_auto_clears_on_setstatus_completed() {
+    let (session, mock) = make_session_with_executor();
+    mock.inject_tc_config(r#"{"xstatus":[{"name":"blocked","icon":128721}]}"#);
+
+    let uuid = Uuid::new_v4().to_string();
+    session
+        .create_task(uuid.clone(), "SetStatus test".into())
+        .await
+        .unwrap();
+    session
+        .set_xstatus(uuid.clone(), "blocked".into())
+        .await
+        .unwrap();
+
+    // SetStatus { Completed } exercises a different match arm than Done / Delete.
+    let task = session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetStatus {
+                status: FfiStatus::Completed,
+            }],
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        task.xstatus, None,
+        "xstatus must clear when SetStatus → Completed"
+    );
+    assert!(matches!(task.status, FfiStatus::Completed));
+}
+
+// ---------------------------------------------------------------------------
+// Test gap #12: clear_xstatus when xstatus is already None
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_clear_xstatus_when_already_none() {
+    let session = make_session();
+    let uuid = Uuid::new_v4().to_string();
+    session
+        .create_task(uuid.clone(), "No xstatus".into())
+        .await
+        .unwrap();
+
+    // clear_xstatus on a task that has no xstatus should succeed and return
+    // the task unchanged (no undo point emitted, status stays Pending).
+    let task = session.clear_xstatus(uuid.clone()).await.unwrap();
+    assert_eq!(task.xstatus, None, "xstatus still None");
+    assert!(
+        matches!(task.status, FfiStatus::Pending),
+        "status unchanged"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Test gap #13: reparent Before anchor + anchor_idx == 0 boundary
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_reparent_with_before_anchor() {
+    let session = make_session();
+    let pos = sequential_positions(2);
+
+    let parent = Uuid::new_v4().to_string();
+    session
+        .create_task(parent.clone(), "Parent".into())
+        .await
+        .unwrap();
+
+    let anchor1 = create_positioned(&session, "Anchor1", &pos[0]).await;
+    let anchor2 = create_positioned(&session, "Anchor2", &pos[1]).await;
+    session
+        .mutate_task(
+            anchor1.clone(),
+            vec![TaskMutation::SetParent {
+                uuid: Some(parent.clone()),
+            }],
+        )
+        .await
+        .unwrap();
+    session
+        .mutate_task(
+            anchor2.clone(),
+            vec![TaskMutation::SetParent {
+                uuid: Some(parent.clone()),
+            }],
+        )
+        .await
+        .unwrap();
+
+    let mover = Uuid::new_v4().to_string();
+    session
+        .create_task(mover.clone(), "Mover".into())
+        .await
+        .unwrap();
+
+    // Insert mover before anchor2 (middle of list) → pos[0] < mover < pos[1].
+    let task = session
+        .reparent(
+            mover.clone(),
+            Some(parent.clone()),
+            ReparentPosition::Before {
+                anchor: anchor2.clone(),
+            },
+        )
+        .await
+        .expect("reparent before anchor");
+    let new_pos = task.position.as_deref().expect("position set");
+    assert!(new_pos > pos[0].as_str(), "should be after anchor1");
+    assert!(new_pos < pos[1].as_str(), "should be before anchor2");
+    let _ = (anchor1, anchor2);
+}
+
+#[tokio::test]
+async fn test_reparent_before_first_child_prepends() {
+    let session = make_session();
+    let pos = sequential_positions(1);
+
+    let parent = Uuid::new_v4().to_string();
+    session
+        .create_task(parent.clone(), "Parent".into())
+        .await
+        .unwrap();
+
+    // anchor_idx == 0 path — exercises prepend_position.
+    let first_child = create_positioned(&session, "FirstChild", &pos[0]).await;
+    session
+        .mutate_task(
+            first_child.clone(),
+            vec![TaskMutation::SetParent {
+                uuid: Some(parent.clone()),
+            }],
+        )
+        .await
+        .unwrap();
+
+    let mover = Uuid::new_v4().to_string();
+    session
+        .create_task(mover.clone(), "Mover".into())
+        .await
+        .unwrap();
+
+    let task = session
+        .reparent(
+            mover.clone(),
+            Some(parent.clone()),
+            ReparentPosition::Before {
+                anchor: first_child.clone(),
+            },
+        )
+        .await
+        .expect("reparent before first child");
+    let new_pos = task.position.as_deref().expect("position set");
+    assert!(new_pos < pos[0].as_str(), "should be before first_child");
+    let _ = first_child;
+}
+
+// ---------------------------------------------------------------------------
+// Test gap #14: deep-chain cycle detection (3-level)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_reparent_deep_chain_cycle_rejected() {
+    let session = make_session();
+
+    // grandparent → parent → child chain.
+    let grandparent = Uuid::new_v4().to_string();
+    session
+        .create_task(grandparent.clone(), "Grandparent".into())
+        .await
+        .unwrap();
+    let parent = Uuid::new_v4().to_string();
+    session
+        .create_task(parent.clone(), "Parent".into())
+        .await
+        .unwrap();
+    session
+        .mutate_task(
+            parent.clone(),
+            vec![TaskMutation::SetParent {
+                uuid: Some(grandparent.clone()),
+            }],
+        )
+        .await
+        .unwrap();
+    let child = Uuid::new_v4().to_string();
+    session
+        .create_task(child.clone(), "Child".into())
+        .await
+        .unwrap();
+    session
+        .mutate_task(
+            child.clone(),
+            vec![TaskMutation::SetParent {
+                uuid: Some(parent.clone()),
+            }],
+        )
+        .await
+        .unwrap();
+
+    // Reparenting grandparent under child would create a 3-level cycle.
+    let result = session
+        .reparent(
+            grandparent.clone(),
+            Some(child.clone()),
+            ReparentPosition::End,
+        )
+        .await;
+    assert!(
+        matches!(result, Err(FfiError::CircularParent { .. })),
+        "expected CircularParent for deep chain cycle"
+    );
+    let _ = (parent, child);
+}
+
+// ---------------------------------------------------------------------------
+// Test gap #16: malformed tc_settings JSON returns an error
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_malformed_tc_settings_propagates_error() {
+    let (session, mock) = make_session_with_executor();
+    // Inject invalid JSON — not a valid TcConfig.
+    mock.inject_tc_config(r#"not valid json {"#);
+
+    let uuid = Uuid::new_v4().to_string();
+    session
+        .create_task(uuid.clone(), "Malformed config test".into())
+        .await
+        .unwrap();
+
+    // Operations that load tc_config should surface the parse error.
+    let result = session.set_xstatus(uuid.clone(), "blocked".into()).await;
+    assert!(
+        result.is_err(),
+        "malformed tc_settings JSON must return an error"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Test gap #4: AnchorHasNoPosition error
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_reorder_anchor_with_no_position_returns_error() {
+    let session = make_session();
+    let pos = sequential_positions(1);
+
+    // task has a position; anchor exists in DB but has no position field.
+    let task_uuid = create_positioned(&session, "Task", &pos[0]).await;
+    let unpositioned = Uuid::new_v4().to_string();
+    session
+        .create_task(unpositioned.clone(), "No position".into())
+        .await
+        .unwrap();
+
+    let result = session
+        .reorder_after(task_uuid.clone(), unpositioned.clone())
+        .await;
+    assert!(
+        matches!(result, Err(FfiError::AnchorHasNoPosition { .. })),
+        "expected AnchorHasNoPosition"
+    );
 }

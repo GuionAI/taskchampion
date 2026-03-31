@@ -198,72 +198,83 @@ impl<S: Storage> Replica<S> {
     }
 
     /// Remove `name` from tc_config.tags AND strip the `tag_{name}` key from every task
-    /// atomically in a single undo group.
+    /// in a single committed operation group.
+    ///
+    /// Task operations are committed first (with an undo point), then the config is
+    /// persisted. If the task commit fails the config is left untouched. The config
+    /// update is not reversible via `undo` — undo only reverses the task-level strip.
     ///
     /// Returns the number of tasks that had the tag removed.
-    /// Returns `Err` if the tag is not present in tc_config (never was configured).
-    pub async fn delete_tag(&mut self, name: &str, ops: &mut Operations) -> Result<u32> {
-        // Load and validate config.
+    /// Returns `Err` if the tag is not present in tc_config.
+    pub async fn delete_tag(&mut self, name: &str) -> Result<u32> {
+        // Load and validate config first — fail fast before touching tasks.
         let mut config = self.get_tc_config_parsed().await?;
         if !config.remove_tag(name) {
             return Err(Error::Usage(format!("Tag not found: {name}")));
         }
 
-        // Persist updated config.
-        self.set_tc_config_parsed(&config).await?;
-
-        // Strip tag key from all tasks that carry it via Update operations.
+        // Build task-strip operations using the actual stored values for `old_value`
+        // so that undo correctly restores the tag presence.
         let tag_key = format!("tag_{name}");
         let all = self.taskdb.all_tasks().await?;
+        let mut ops = Operations::new();
+        ops.push(Operation::UndoPoint);
         let mut count = 0u32;
-        for (uuid, taskmap) in all {
+        for (uuid, taskmap) in &all {
             if taskmap.contains_key(&tag_key) {
                 ops.push(Operation::Update {
-                    uuid,
+                    uuid: *uuid,
                     property: tag_key.clone(),
-                    old_value: Some(String::new()),
+                    old_value: taskmap.get(&tag_key).cloned(),
                     value: None,
                     timestamp: chrono::Utc::now(),
                 });
                 count += 1;
             }
         }
+
+        // Commit task ops first; only persist config if that succeeds.
+        self.commit_operations(ops).await?;
+        self.set_tc_config_parsed(&config).await?;
         Ok(count)
     }
 
     /// Rename `old` → `new` in tc_config.tags AND rename `tag_{old}` → `tag_{new}` on every
-    /// task atomically in a single undo group.
+    /// task in a single committed operation group.
+    ///
+    /// Task operations are committed first (with an undo point), then the config is
+    /// persisted. If the task commit fails the config is left untouched. The config
+    /// update is not reversible via `undo`.
     ///
     /// Returns the number of tasks that had the tag renamed.
-    pub async fn rename_tag(&mut self, old: &str, new: &str, ops: &mut Operations) -> Result<u32> {
+    pub async fn rename_tag(&mut self, old: &str, new: &str) -> Result<u32> {
         // Validate new tag name.
         let _: Tag = new
             .try_into()
             .map_err(|e| Error::Usage(format!("Invalid tag name: {e}")))?;
 
-        // Load and validate config.
+        // Load and validate config first — fail fast before touching tasks.
         let mut config = self.get_tc_config_parsed().await?;
         config.rename_tag(old, new).map_err(Error::Usage)?;
 
-        // Persist updated config.
-        self.set_tc_config_parsed(&config).await?;
-
-        // Rename tag key on all tasks that carry it via Update operations.
+        // Build task-rename operations using actual stored values for `old_value`.
         let old_key = format!("tag_{old}");
         let new_key = format!("tag_{new}");
         let all = self.taskdb.all_tasks().await?;
+        let mut ops = Operations::new();
+        ops.push(Operation::UndoPoint);
         let mut count = 0u32;
-        for (uuid, taskmap) in all {
+        for (uuid, taskmap) in &all {
             if taskmap.contains_key(&old_key) {
                 ops.push(Operation::Update {
-                    uuid,
+                    uuid: *uuid,
                     property: old_key.clone(),
-                    old_value: Some(String::new()),
+                    old_value: taskmap.get(&old_key).cloned(),
                     value: None,
                     timestamp: chrono::Utc::now(),
                 });
                 ops.push(Operation::Update {
-                    uuid,
+                    uuid: *uuid,
                     property: new_key.clone(),
                     old_value: None,
                     value: Some(String::new()),
@@ -272,6 +283,10 @@ impl<S: Storage> Replica<S> {
                 count += 1;
             }
         }
+
+        // Commit task ops first; only persist config if that succeeds.
+        self.commit_operations(ops).await?;
+        self.set_tc_config_parsed(&config).await?;
         Ok(count)
     }
 
@@ -1157,9 +1172,7 @@ mod tests {
     #[tokio::test]
     async fn delete_tag_updates_config_and_task() {
         let (mut replica, task_uuid) = make_replica_with_tag("work").await;
-        let mut ops = Operations::new();
-        let count = replica.delete_tag("work", &mut ops).await.unwrap();
-        replica.commit_operations(ops).await.unwrap();
+        let count = replica.delete_tag("work").await.unwrap();
         assert_eq!(count, 1, "one task should have the tag removed");
         // Config no longer has 'work'.
         let config = replica.get_tc_config_parsed().await.unwrap();
@@ -1172,14 +1185,10 @@ mod tests {
     #[tokio::test]
     async fn delete_tag_nonexistent_returns_err() {
         let mut replica = Replica::new(InMemoryStorage::new());
-        let mut ops = Operations::new();
-        let result = replica.delete_tag("ghost", &mut ops).await;
+        let result = replica.delete_tag("ghost").await;
         assert!(result.is_err(), "expected error for nonexistent tag");
         let msg = result.unwrap_err().to_string();
-        assert!(
-            msg.contains("Tag not found") || msg.contains("tag not found"),
-            "unexpected: {msg}"
-        );
+        assert!(msg.contains("Tag not found"), "unexpected: {msg}");
     }
 
     #[tokio::test]
@@ -1209,9 +1218,7 @@ mod tests {
         });
         replica.commit_operations(ops).await.unwrap();
 
-        let mut ops2 = Operations::new();
-        let count = replica.delete_tag("work", &mut ops2).await.unwrap();
-        replica.commit_operations(ops2).await.unwrap();
+        let count = replica.delete_tag("work").await.unwrap();
         assert_eq!(count, 1);
 
         let task = replica.get_task(uuid).await.unwrap().unwrap();
@@ -1228,12 +1235,7 @@ mod tests {
     #[tokio::test]
     async fn rename_tag_success() {
         let (mut replica, task_uuid) = make_replica_with_tag("oldtag").await;
-        let mut ops = Operations::new();
-        let count = replica
-            .rename_tag("oldtag", "newtag", &mut ops)
-            .await
-            .unwrap();
-        replica.commit_operations(ops).await.unwrap();
+        let count = replica.rename_tag("oldtag", "newtag").await.unwrap();
         assert_eq!(count, 1);
         // Config updated.
         let config = replica.get_tc_config_parsed().await.unwrap();
@@ -1248,19 +1250,17 @@ mod tests {
     #[tokio::test]
     async fn rename_tag_invalid_name() {
         let (mut replica, _) = make_replica_with_tag("work").await;
-        let mut ops = Operations::new();
-        let result = replica.rename_tag("work", "INVALID TAG!", &mut ops).await;
+        let result = replica.rename_tag("work", "INVALID TAG!").await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn rename_tag_nonexistent_old() {
         let mut replica = Replica::new(InMemoryStorage::new());
-        let mut ops = Operations::new();
-        let result = replica.rename_tag("ghost", "other", &mut ops).await;
+        let result = replica.rename_tag("ghost", "other").await;
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("tag not found"), "unexpected: {msg}");
+        assert!(msg.contains("Tag not found"), "unexpected: {msg}");
     }
 
     #[tokio::test]
@@ -1270,10 +1270,9 @@ mod tests {
         let mut config = crate::storage::tc_config::TcConfig::default();
         config.tags = "old,new".to_string();
         replica.set_tc_config_parsed(&config).await.unwrap();
-        let mut ops = Operations::new();
-        let result = replica.rename_tag("old", "new", &mut ops).await;
+        let result = replica.rename_tag("old", "new").await;
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("tag already exists"), "unexpected: {msg}");
+        assert!(msg.contains("Tag already exists"), "unexpected: {msg}");
     }
 }
