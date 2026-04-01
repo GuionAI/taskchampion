@@ -88,8 +88,7 @@ impl FfiSession {
 
 /// Clear the `xstatus` UDA if it is currently set.
 ///
-/// Called from `SetStatus`, `Done`, and `Delete` arms to ensure xstatus is
-/// never left set on a non-pending task.
+/// Called from SetStatus, Done, and Delete arms.
 fn clear_xstatus_if_set(
     task: &mut taskchampion::Task,
     ops: &mut Operations,
@@ -112,10 +111,8 @@ fn apply_mutation(
         }
         TaskMutation::SetStatus { status } => {
             let new_status = Status::from(status);
-            // Auto-clear xstatus when transitioning to non-pending status.
-            if new_status != Status::Pending {
-                clear_xstatus_if_set(task, ops)?;
-            }
+            // xstatus and status are mutually exclusive — always clear xstatus when setting status.
+            clear_xstatus_if_set(task, ops)?;
             task.set_status(new_status, ops).map_err(FfiError::from)?;
         }
         TaskMutation::SetPriority { value } => {
