@@ -1253,7 +1253,7 @@ mod tests {
         let mut replica = Replica::new(InMemoryStorage::new());
         // Set up tc_config with the tag.
         let mut config = crate::storage::tc_config::TcConfig::default();
-        config.tags = tag.to_string();
+        config.tags = vec![tag.to_string()];
         replica.set_tc_config_parsed(&config).await.unwrap();
         // Create a task with the tag.
         let uuid = Uuid::new_v4();
@@ -1297,7 +1297,7 @@ mod tests {
         // Task has both 'work' and 'home'. Deleting 'work' leaves 'home'.
         let mut replica = Replica::new(InMemoryStorage::new());
         let mut config = crate::storage::tc_config::TcConfig::default();
-        config.tags = "work,home".to_string();
+        config.tags = vec!["work".to_string(), "home".to_string()];
         replica.set_tc_config_parsed(&config).await.unwrap();
 
         let uuid = Uuid::new_v4();
@@ -1369,7 +1369,7 @@ mod tests {
         // Both 'old' and 'new' exist in config — rename 'old' → 'new' should fail.
         let mut replica = Replica::new(InMemoryStorage::new());
         let mut config = crate::storage::tc_config::TcConfig::default();
-        config.tags = "old,new".to_string();
+        config.tags = vec!["old".to_string(), "new".to_string()];
         replica.set_tc_config_parsed(&config).await.unwrap();
         let result = replica.rename_tag("old", "new").await;
         assert!(result.is_err());
