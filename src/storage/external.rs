@@ -372,7 +372,7 @@ impl StorageTxn for ExternalStorageTxn<'_> {
     async fn get_tc_config(&mut self) -> Result<Option<String>> {
         let row = self.executor.query_one(TC_CONFIG_READ_SQL, &[]).await?;
         match row {
-            Some(json) => parse_json_string_field(&json, "value").map(Some),
+            Some(json) => parse_json_string_field(&json, "tc_config").map(Some),
             None => Ok(None),
         }
     }

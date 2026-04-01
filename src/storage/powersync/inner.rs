@@ -119,10 +119,9 @@ impl PowerSyncStorageInner {
                 data TEXT NOT NULL DEFAULT '{}',
                 created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
             );
-            CREATE TABLE IF NOT EXISTS tc_settings (
+            CREATE TABLE IF NOT EXISTS settings (
                 id TEXT PRIMARY KEY,
-                key TEXT NOT NULL,
-                value TEXT NOT NULL DEFAULT '{}'
+                tc_config TEXT
             );
         ",
         )
