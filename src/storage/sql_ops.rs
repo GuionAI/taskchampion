@@ -54,7 +54,6 @@ pub(crate) struct PreparedTask {
     pub(crate) start_at: Option<String>,
     pub(crate) end_at: Option<String>,
     pub(crate) wait_at: Option<String>,
-    pub(crate) project_name: Option<String>,
     /// Raw project UUID set via `SetProjectId` (bypasses name resolution).
     pub(crate) project_id_raw: Option<String>,
 }
@@ -78,8 +77,7 @@ pub(crate) fn prepare_task(mut task_data: TaskMap) -> Result<PreparedTask> {
     let end_at = extract_timestamp(&mut task_data, "end")?;
     let wait_at = extract_timestamp(&mut task_data, "wait")?;
 
-    // Extract project name and raw project_id.
-    let project_name = task_data.remove("project");
+    // Extract raw project_id.
     let project_id_raw = task_data.remove("project_id");
 
     // Validate annotation keys have integer epoch suffixes.
@@ -110,7 +108,6 @@ pub(crate) fn prepare_task(mut task_data: TaskMap) -> Result<PreparedTask> {
         start_at,
         end_at,
         wait_at,
-        project_name,
         project_id_raw,
     })
 }
@@ -252,9 +249,7 @@ pub(crate) const TC_CONFIG_READ_SQL: &str = "SELECT tc_config FROM settings WHER
 
 pub(crate) const TASK_EXISTS_SQL: &str =
     "SELECT EXISTS(SELECT 1 FROM tc_tasks WHERE id = ?) AS exists_flag";
-#[cfg(feature = "storage-external")]
-pub(crate) const PROJECT_LOOKUP_SQL: &str =
-    "SELECT id FROM projects WHERE name = ? ORDER BY created_at LIMIT 1";
+
 pub(crate) const ALL_OPERATIONS_SQL: &str = "SELECT data FROM tc_operations ORDER BY id ASC";
 #[cfg(feature = "storage-external")]
 pub(crate) const ALL_OPS_WITH_ID_DESC_SQL: &str =
