@@ -235,17 +235,23 @@ pub(crate) fn remove_operation_stmt(id: &str) -> SqlStatement {
     }
 }
 
-/// Generate SQL statement for setting tc_config (upsert singleton row).
-pub(crate) fn set_tc_config_stmt(value: &str) -> SqlStatement {
+/// Generate SQL statement for setting tc_config (upsert row keyed by user UUID).
+pub(crate) fn set_tc_config_stmt(user_uuid: &Uuid, value: &str) -> SqlStatement {
     SqlStatement {
-        sql: "INSERT OR REPLACE INTO settings (id, tc_config) VALUES ('tc_config', ?)".into(),
-        params: vec![SqlParam::Text(value.to_string())],
+        sql: "INSERT OR REPLACE INTO settings (id, tc_config) VALUES (?, ?)".into(),
+        params: vec![
+            SqlParam::Text(user_uuid.to_string()),
+            SqlParam::Text(value.to_string()),
+        ],
     }
 }
 
 // ── Read SQL constants ─────────────────────────────────────────────────────
 
-pub(crate) const TC_CONFIG_READ_SQL: &str = "SELECT tc_config FROM settings WHERE id = 'tc_config'";
+/// Generate the SQL and bound param for reading tc_config for the given user UUID.
+pub(crate) fn tc_config_read_sql(user_uuid: &Uuid) -> (&'static str, String) {
+    ("SELECT tc_config FROM settings WHERE id = ?", user_uuid.to_string())
+}
 
 pub(crate) const TASK_EXISTS_SQL: &str =
     "SELECT EXISTS(SELECT 1 FROM tc_tasks WHERE id = ?) AS exists_flag";
