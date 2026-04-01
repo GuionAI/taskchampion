@@ -3,7 +3,6 @@ use crate::storage::send_wrapper::Wrapper;
 use crate::storage::{Storage, StorageTxn};
 use async_trait::async_trait;
 use std::path::Path;
-use uuid::Uuid;
 
 mod extension;
 mod inner;
@@ -23,10 +22,10 @@ impl PowerSyncStorage {
     /// The `tc_tasks` and `tc_operations` views must already exist (created by
     /// PowerSync from its schema definition). Local-only tables (`tc_sync_meta`)
     /// are created automatically.
-    pub async fn new(db_path: &Path, user_uuid: Uuid) -> Result<Self> {
+    pub async fn new(db_path: &Path) -> Result<Self> {
         let path = db_path.to_path_buf();
         Ok(Self(
-            Wrapper::new(async move || PowerSyncStorageInner::new(&path, user_uuid)).await?,
+            Wrapper::new(async move || PowerSyncStorageInner::new(&path)).await?,
         ))
     }
 

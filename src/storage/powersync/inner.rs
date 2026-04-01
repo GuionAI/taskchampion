@@ -13,8 +13,8 @@ use super::row_reader::{query_task_rows, read_raw_task_row};
 use crate::storage::columns::{raw_to_task, TASK_SELECT_COLS};
 use crate::storage::sql_ops::{
     add_operation_stmt, create_task_stmt, delete_task_stmts, prepare_task, remove_operation_stmt,
-    set_task_stmts, set_tc_config_stmt, tc_config_read_sql, SqlStatement, ALL_OPERATIONS_SQL,
-    ALL_TAGS_SQL, ALL_TASK_UUIDS_SQL, LAST_OPERATION_SQL, TASK_EXISTS_SQL,
+    set_task_stmts, set_tc_config_stmt, SqlStatement, ALL_OPERATIONS_SQL, ALL_TAGS_SQL,
+    ALL_TASK_UUIDS_SQL, LAST_OPERATION_SQL, TASK_EXISTS_SQL, TC_CONFIG_READ_SQL,
 };
 
 /// Execute a SqlStatement against a rusqlite Transaction.
@@ -26,12 +26,11 @@ fn execute_sql_stmt(t: &rusqlite::Transaction, stmt: &SqlStatement) -> Result<()
 
 pub(super) struct PowerSyncStorageInner {
     pub(super) conn: Connection,
-    pub(super) user_uuid: Uuid,
 }
 
 impl PowerSyncStorageInner {
     /// Open an existing PowerSync-managed database file and create local-only tables.
-    pub(super) fn new(db_path: &Path, user_uuid: Uuid) -> Result<Self> {
+    pub(super) fn new(db_path: &Path) -> Result<Self> {
         // Register the PowerSync extension as a SQLite auto-extension (once per process).
         init_powersync_extension()?;
 
@@ -78,7 +77,7 @@ impl PowerSyncStorageInner {
         // views; sync state (working-set, base_version, operations_sync) is unused since
         // PowerSync handles replication externally via flicknote-sync.
 
-        Ok(Self { conn, user_uuid })
+        Ok(Self { conn })
     }
 
     /// Create an in-memory database with all required tables for testing.
@@ -127,10 +126,9 @@ impl PowerSyncStorageInner {
         ",
         )
         .context("Creating PowerSync test tables")?;
-        Ok(Self {
-            conn,
-            user_uuid: Uuid::nil(),
-        })
+        // Pre-seed a settings row so UPDATE tc_config works (mirrors PowerSync sync in production).
+        conn.execute("INSERT OR IGNORE INTO settings (id, tc_config) VALUES ('00000000-0000-0000-0000-000000000000', NULL)", [])?;
+        Ok(Self { conn })
     }
 }
 
@@ -140,16 +138,12 @@ impl WrappedStorage for PowerSyncStorageInner {
         let txn = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        Ok(Box::new(PowerSyncTxn {
-            txn: Some(txn),
-            user_uuid: self.user_uuid,
-        }))
+        Ok(Box::new(PowerSyncTxn { txn: Some(txn) }))
     }
 }
 
 pub(super) struct PowerSyncTxn<'t> {
     txn: Option<rusqlite::Transaction<'t>>,
-    user_uuid: Uuid,
 }
 
 impl<'t> PowerSyncTxn<'t> {
@@ -363,15 +357,17 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
 
     async fn get_tc_config(&mut self) -> Result<Option<String>> {
         let t = self.get_txn()?;
-        let (sql, uuid_str) = tc_config_read_sql(&self.user_uuid);
-        t.query_row(sql, [&uuid_str], |row| row.get::<_, String>(0))
-            .optional()
-            .map_err(|e| Error::Database(format!("get_tc_config: {e}")))
+        t.query_row(TC_CONFIG_READ_SQL, [], |row| {
+            row.get::<_, Option<String>>(0)
+        })
+        .optional()
+        .map(|o| o.flatten())
+        .map_err(|e| Error::Database(format!("get_tc_config: {e}")))
     }
 
     async fn set_tc_config(&mut self, value: String) -> Result<()> {
         let t = self.get_txn()?;
-        execute_sql_stmt(t, &set_tc_config_stmt(&self.user_uuid, &value))
+        execute_sql_stmt(t, &set_tc_config_stmt(&value))
     }
 
     async fn commit(&mut self) -> Result<()> {
