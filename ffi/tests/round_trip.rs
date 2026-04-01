@@ -1952,20 +1952,9 @@ async fn test_xstatus_auto_clears_on_setstatus_pending() {
         .await
         .unwrap();
 
-    // Move to Completed first so the task has a non-pending status.
-    session
-        .mutate_task(
-            uuid.clone(),
-            vec![TaskMutation::SetStatus {
-                status: FfiStatus::Completed,
-            }],
-        )
-        .await
-        .unwrap()
-        .unwrap();
-
-    // Now SetStatus { Pending } — before the fix, xstatus was NOT cleared here.
-    // After the fix, xstatus is always cleared when setting status to any value.
+    // SetStatus { Pending } directly on a Pending task that already has xstatus
+    // set. The old buggy code skipped clear_xstatus_if_set when new_status ==
+    // Pending, leaving xstatus intact. The fix removes that guard.
     let task = session
         .mutate_task(
             uuid.clone(),

@@ -88,7 +88,8 @@ impl FfiSession {
 
 /// Clear the `xstatus` UDA if it is currently set.
 ///
-/// Called from SetStatus, Done, and Delete arms.
+/// Ensures xstatus is always cleared when a standard status is applied —
+/// xstatus and status are mutually exclusive.
 fn clear_xstatus_if_set(
     task: &mut taskchampion::Task,
     ops: &mut Operations,
