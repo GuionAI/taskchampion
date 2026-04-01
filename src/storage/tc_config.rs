@@ -9,7 +9,7 @@
 //! ```json
 //! {
 //!   "xstatus": [{"name": "blocked", "icon": 128721}],
-//!   "tags": "abc,efg"
+//!   "tags": ["abc", "efg"]
 //! }
 //! ```
 
@@ -26,8 +26,8 @@ pub struct XStatusDef {
 
 /// Per-device task configuration stored in `tc_settings`.
 ///
-/// Tags are stored as a comma-separated string (e.g. `"work,home,urgent"`).
-/// An empty string means no tags are configured.
+/// Tags are stored as a JSON array of strings (e.g. `["work", "home"]`),
+/// with legacy support for comma-separated strings on deserialization.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct TcConfig {
     /// Extended-status definitions. Each entry adds a named xstatus category.
@@ -38,27 +38,19 @@ pub struct TcConfig {
     #[serde(default)]
     pub(crate) xstatus: Vec<XStatusDef>,
 
-    /// Comma-separated list of configured tag names. Empty string = no tags.
+    /// List of configured tag names.
     ///
     /// Use [`remove_tag`](TcConfig::remove_tag) /
     /// [`rename_tag`](TcConfig::rename_tag) to mutate — direct field access is
-    /// intentionally restricted to keep the comma-separated invariant intact.
+    /// intentionally restricted to prevent duplicate entries via `add_tag`'s dedup guard.
     #[serde(default)]
-    pub(crate) tags: String,
+    pub(crate) tags: Vec<String>,
 }
 
 impl TcConfig {
     /// Return tag names as a sorted, deduplicated `Vec<String>`.
     pub fn tag_list(&self) -> Vec<String> {
-        if self.tags.is_empty() {
-            return Vec::new();
-        }
-        let mut names: Vec<String> = self
-            .tags
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
+        let mut names = self.tags.clone();
         names.sort();
         names.dedup();
         names
@@ -66,18 +58,16 @@ impl TcConfig {
 
     /// Return `true` if the given tag name is in the config.
     pub fn has_tag(&self, name: &str) -> bool {
-        self.tags.split(',').any(|t| t.trim() == name)
+        self.tags.iter().any(|t| t == name)
     }
 
     /// Remove `name` from the tag list. Returns `false` if not present.
     pub fn remove_tag(&mut self, name: &str) -> bool {
-        let mut list = self.tag_list();
-        let before_len = list.len();
-        list.retain(|t| t != name);
-        if list.len() == before_len {
+        let before_len = self.tags.len();
+        self.tags.retain(|t| t != name);
+        if self.tags.len() == before_len {
             return false;
         }
-        self.tags = list.join(",");
         true
     }
 
@@ -88,12 +78,7 @@ impl TcConfig {
         if self.has_tag(name) {
             return false;
         }
-        if self.tags.is_empty() {
-            self.tags = name.to_string();
-        } else {
-            self.tags.push(',');
-            self.tags.push_str(name);
-        }
+        self.tags.push(name.to_string());
         true
     }
 
@@ -102,19 +87,17 @@ impl TcConfig {
     /// Returns `Err` (message) if `old` is not present or `new` already exists.
     /// Returns `Err` if `old == new` (renaming to the same name is a no-op error).
     pub fn rename_tag(&mut self, old: &str, new: &str) -> Result<(), String> {
-        let mut list = self.tag_list();
-        if !list.iter().any(|t| t == old) {
+        if !self.tags.iter().any(|t| t == old) {
             return Err(format!("Tag not found: {old}"));
         }
-        if list.iter().any(|t| t == new) {
+        if self.tags.iter().any(|t| t == new) {
             return Err(format!("Tag already exists: {new}"));
         }
-        for t in &mut list {
+        for t in &mut self.tags {
             if t == old {
                 *t = new.to_string();
             }
         }
-        self.tags = list.join(",");
         Ok(())
     }
 
@@ -172,9 +155,9 @@ impl TcConfig {
 mod tests {
     use super::*;
 
-    fn config_with_tags(tags: &str) -> TcConfig {
+    fn config_with_tags(tags: &[&str]) -> TcConfig {
         TcConfig {
-            tags: tags.to_string(),
+            tags: tags.iter().map(|s| s.to_string()).collect(),
             ..Default::default()
         }
     }
@@ -183,20 +166,14 @@ mod tests {
 
     #[test]
     fn tag_list_empty_string_returns_empty() {
-        assert_eq!(config_with_tags("").tag_list(), Vec::<String>::new());
+        assert_eq!(config_with_tags(&[]).tag_list(), Vec::<String>::new());
     }
 
     #[test]
     fn tag_list_deduplicates_and_sorts() {
         // Duplicates are collapsed; result is sorted alphabetically.
-        let cfg = config_with_tags("work,home,work,urgent,home");
+        let cfg = config_with_tags(&["work", "home", "work", "urgent", "home"]);
         assert_eq!(cfg.tag_list(), vec!["home", "urgent", "work"]);
-    }
-
-    #[test]
-    fn tag_list_trims_whitespace() {
-        let cfg = config_with_tags(" work , home ");
-        assert_eq!(cfg.tag_list(), vec!["home", "work"]);
     }
 
     // ── add_tag ───────────────────────────────────────────────────────────────
@@ -210,7 +187,7 @@ mod tests {
 
     #[test]
     fn add_tag_appends_to_existing() {
-        let mut cfg = config_with_tags("home");
+        let mut cfg = config_with_tags(&["home"]);
         assert!(cfg.add_tag("work"));
         assert!(cfg.has_tag("work"));
         assert!(cfg.has_tag("home"));
@@ -218,7 +195,7 @@ mod tests {
 
     #[test]
     fn add_tag_dedup_returns_false() {
-        let mut cfg = config_with_tags("work");
+        let mut cfg = config_with_tags(&["work"]);
         assert!(!cfg.add_tag("work"), "duplicate should return false");
         assert_eq!(cfg.tag_list(), vec!["work"], "list unchanged");
     }
@@ -227,14 +204,14 @@ mod tests {
 
     #[test]
     fn remove_tag_returns_false_when_absent() {
-        let mut cfg = config_with_tags("work,home");
+        let mut cfg = config_with_tags(&["work", "home"]);
         assert!(!cfg.remove_tag("urgent"), "absent tag should return false");
         assert_eq!(cfg.tag_list(), vec!["home", "work"], "list unchanged");
     }
 
     #[test]
     fn remove_tag_removes_present_tag() {
-        let mut cfg = config_with_tags("work,home");
+        let mut cfg = config_with_tags(&["work", "home"]);
         assert!(cfg.remove_tag("work"));
         assert_eq!(cfg.tag_list(), vec!["home"]);
     }
@@ -244,7 +221,7 @@ mod tests {
     #[test]
     fn rename_tag_same_name_is_error() {
         // Renaming to the same name is an error: "Tag already exists".
-        let mut cfg = config_with_tags("work");
+        let mut cfg = config_with_tags(&["work"]);
         let result = cfg.rename_tag("work", "work");
         assert!(result.is_err());
         assert!(
@@ -255,7 +232,7 @@ mod tests {
 
     #[test]
     fn rename_tag_old_not_found_prefix() {
-        let mut cfg = config_with_tags("work");
+        let mut cfg = config_with_tags(&["work"]);
         let result = cfg.rename_tag("ghost", "new");
         assert!(result.is_err());
         assert!(
@@ -266,7 +243,7 @@ mod tests {
 
     #[test]
     fn rename_tag_new_already_exists_prefix() {
-        let mut cfg = config_with_tags("old,new");
+        let mut cfg = config_with_tags(&["old", "new"]);
         let result = cfg.rename_tag("old", "new");
         assert!(result.is_err());
         assert!(
@@ -277,7 +254,7 @@ mod tests {
 
     #[test]
     fn rename_tag_succeeds() {
-        let mut cfg = config_with_tags("old,home");
+        let mut cfg = config_with_tags(&["old", "home"]);
         cfg.rename_tag("old", "newtag").unwrap();
         assert_eq!(cfg.tag_list(), vec!["home", "newtag"]);
     }
@@ -397,5 +374,39 @@ mod tests {
         });
         assert!(cfg.remove_xstatus("blocked"));
         assert!(!cfg.has_xstatus("blocked"));
+    }
+
+    // ── serde shape ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn has_tag_exact_match_no_trim() {
+        // has_tag uses exact Vec equality — no whitespace trimming.
+        // (The old comma-split impl did trim; the new one does not.)
+        let cfg = config_with_tags(&["work"]);
+        assert!(cfg.has_tag("work"), "exact match");
+        assert!(!cfg.has_tag(" work"), "leading space must not match");
+        assert!(!cfg.has_tag("work "), "trailing space must not match");
+    }
+
+    // ── serde shape ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn tags_serializes_as_json_array() {
+        let mut cfg = TcConfig::default();
+        cfg.add_tag("work");
+        cfg.add_tag("home");
+        let json = serde_json::to_string(&cfg).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let arr = v["tags"].as_array().expect("tags should be a JSON array");
+        let mut names: Vec<&str> = arr.iter().map(|t| t.as_str().unwrap()).collect();
+        names.sort();
+        assert_eq!(names, vec!["home", "work"]);
+    }
+
+    #[test]
+    fn tags_deserializes_from_json_array() {
+        let json = r#"{"tags":["delta","echo"]}"#;
+        let cfg: TcConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.tag_list(), vec!["delta", "echo"]);
     }
 }

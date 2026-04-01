@@ -355,7 +355,7 @@ async fn test_undo_reverses_last_mutation() {
 #[tokio::test]
 async fn test_add_and_remove_tag() {
     let (session, mock) = make_session_with_executor();
-    mock.inject_tc_config(r#"{"tags":"work"}"#);
+    mock.inject_tc_config(r#"{"tags":["work"]}"#);
     let uuid = Uuid::new_v4().to_string();
 
     session
@@ -555,7 +555,7 @@ async fn test_position_numeric_string_round_trip() {
 #[tokio::test]
 async fn test_delete_tag_removes_from_config_and_tasks() {
     let (session, mock) = make_session_with_executor();
-    mock.inject_tc_config(r#"{"tags":"work,home"}"#);
+    mock.inject_tc_config(r#"{"tags":["work","home"]}"#);
 
     let uuid = Uuid::new_v4().to_string();
     session
@@ -584,7 +584,7 @@ async fn test_delete_tag_removes_from_config_and_tasks() {
 #[tokio::test]
 async fn test_delete_tag_not_found() {
     let (session, mock) = make_session_with_executor();
-    mock.inject_tc_config(r#"{"tags":"work"}"#);
+    mock.inject_tc_config(r#"{"tags":["work"]}"#);
 
     let result = session.delete_tag("ghost".into()).await;
     assert!(
@@ -596,7 +596,7 @@ async fn test_delete_tag_not_found() {
 #[tokio::test]
 async fn test_rename_tag_success() {
     let (session, mock) = make_session_with_executor();
-    mock.inject_tc_config(r#"{"tags":"oldtag,home"}"#);
+    mock.inject_tc_config(r#"{"tags":["oldtag","home"]}"#);
 
     let uuid = Uuid::new_v4().to_string();
     session
@@ -627,7 +627,7 @@ async fn test_rename_tag_success() {
 #[tokio::test]
 async fn test_rename_tag_not_found() {
     let (session, mock) = make_session_with_executor();
-    mock.inject_tc_config(r#"{"tags":"work"}"#);
+    mock.inject_tc_config(r#"{"tags":["work"]}"#);
 
     let result = session.rename_tag("ghost".into(), "other".into()).await;
     assert!(
@@ -639,7 +639,7 @@ async fn test_rename_tag_not_found() {
 #[tokio::test]
 async fn test_rename_tag_already_exists() {
     let (session, mock) = make_session_with_executor();
-    mock.inject_tc_config(r#"{"tags":"old,new"}"#);
+    mock.inject_tc_config(r#"{"tags":["old","new"]}"#);
 
     let result = session.rename_tag("old".into(), "new".into()).await;
     assert!(
@@ -2166,7 +2166,7 @@ async fn test_create_tag_success() {
 #[tokio::test]
 async fn test_create_tag_already_exists() {
     let (session, mock) = make_session_with_executor();
-    mock.inject_tc_config(r#"{"tags":"work"}"#);
+    mock.inject_tc_config(r#"{"tags":["work"]}"#);
 
     let result = session.create_tag("work".into()).await;
     assert!(
