@@ -1286,7 +1286,6 @@ async fn test_set_project_id_nonexistent_uuid() {
     );
 }
 
-
 #[tokio::test]
 async fn test_set_project_id_invalid_uuid_rejected() {
     let session = make_session();
