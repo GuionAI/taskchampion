@@ -3190,9 +3190,6 @@ public struct FfiConverterTypeFfiError: FfiConverterRustBuffer {
         case 8: return .AnchorHasNoPosition(
             uuid: try FfiConverterString.read(from: &buf)
             )
-        case 9: return .ProjectNotFound(
-            name: try FfiConverterString.read(from: &buf)
-            )
         case 9: return .TagNotFound(
             name: try FfiConverterString.read(from: &buf)
             )
@@ -3261,7 +3258,6 @@ public struct FfiConverterTypeFfiError: FfiConverterRustBuffer {
             writeInt(&buf, Int32(8))
             FfiConverterString.write(uuid, into: &buf)
             
-        
         
         case let .TagNotFound(name):
             writeInt(&buf, Int32(9))
@@ -3672,26 +3668,26 @@ public struct FfiConverterTypeFfiRecurrenceSpec: FfiConverterRustBuffer {
         
         
         case .biannual:
-            writeInt(&buf, Int32(9))
+            writeInt(&buf, Int32(10))
         
         
         case let .nMonths(n):
-            writeInt(&buf, Int32(10))
-            FfiConverterUInt32.write(n, into: &buf)
-            
-        
-        case let .nQuarters(n):
             writeInt(&buf, Int32(11))
             FfiConverterUInt32.write(n, into: &buf)
             
         
-        case let .nYears(n):
+        case let .nQuarters(n):
             writeInt(&buf, Int32(12))
             FfiConverterUInt32.write(n, into: &buf)
             
         
-        case let .nDays(n):
+        case let .nYears(n):
             writeInt(&buf, Int32(13))
+            FfiConverterUInt32.write(n, into: &buf)
+            
+        
+        case let .nDays(n):
+            writeInt(&buf, Int32(14))
             FfiConverterUInt32.write(n, into: &buf)
             
         
@@ -4237,8 +4233,7 @@ public enum TaskMutation: Equatable, Hashable {
     /**
      * Set the project by UUID. `None` clears the project assignment.
      *
-     * Writes the
-     * `project_id` column directly. The caller is responsible for
+     * Writes the `project_id` column directly. The caller is responsible for
      * passing a valid project UUID — no existence check is performed.
      */
     case setProjectId(value: String?
@@ -4347,7 +4342,6 @@ public struct FfiConverterTypeTaskMutation: FfiConverterRustBuffer {
         case 26: return .setUntil(epoch: try FfiConverterOptionInt64.read(from: &buf)
         )
         
-        
         case 27: return .setProjectId(value: try FfiConverterOptionString.read(from: &buf)
         )
         
@@ -4408,28 +4402,28 @@ public struct FfiConverterTypeTaskMutation: FfiConverterRustBuffer {
             
         
         case let .removeTag(tag):
-            writeInt(&buf, Int32(9))
+            writeInt(&buf, Int32(10))
             FfiConverterString.write(tag, into: &buf)
             
         
         case let .addAnnotation(entry,description):
-            writeInt(&buf, Int32(10))
+            writeInt(&buf, Int32(11))
             FfiConverterInt64.write(entry, into: &buf)
             FfiConverterString.write(description, into: &buf)
             
         
         case let .removeAnnotation(entry):
-            writeInt(&buf, Int32(11))
+            writeInt(&buf, Int32(12))
             FfiConverterInt64.write(entry, into: &buf)
             
         
         case let .addDependency(uuid):
-            writeInt(&buf, Int32(12))
+            writeInt(&buf, Int32(13))
             FfiConverterString.write(uuid, into: &buf)
             
         
         case let .removeDependency(uuid):
-            writeInt(&buf, Int32(13))
+            writeInt(&buf, Int32(14))
             FfiConverterString.write(uuid, into: &buf)
             
         
@@ -4488,7 +4482,6 @@ public struct FfiConverterTypeTaskMutation: FfiConverterRustBuffer {
             writeInt(&buf, Int32(26))
             FfiConverterOptionInt64.write(epoch, into: &buf)
             
-        
         
         case let .setProjectId(value):
             writeInt(&buf, Int32(27))
