@@ -210,9 +210,14 @@ impl<S: Storage> Replica<S> {
     /// Returns `Err` if `name` is not a valid tag name.
     pub async fn create_tag(&mut self, name: &str) -> Result<bool> {
         // Validate tag name before touching config.
-        let _: Tag = name
+        let tag: Tag = name
             .try_into()
             .map_err(|e| Error::Usage(format!("Invalid tag name: {e}")))?;
+        if tag.is_synthetic() {
+            return Err(Error::Usage(format!(
+                "Cannot register synthetic tag '{name}' — synthetic tags are reserved"
+            )));
+        }
 
         let mut config = self.get_tc_config_parsed().await?;
         if !config.add_tag(name) {
@@ -1501,7 +1506,7 @@ mod tests {
         let err = replica.delete_xstatus("ghost").await.unwrap_err();
         assert!(
             matches!(err, Error::Usage(_)),
-            "expected Error::TagNotRegistered, got: {err:?}"
+            "expected Error::Usage, got: {err:?}"
         );
     }
 
@@ -1613,7 +1618,7 @@ mod tests {
         let err = replica.rename_xstatus("ghost", "new").await.unwrap_err();
         assert!(
             matches!(err, Error::Usage(_)),
-            "expected Error::TagNotRegistered, got: {err:?}"
+            "expected Error::Usage, got: {err:?}"
         );
     }
 
@@ -1636,7 +1641,7 @@ mod tests {
         let err = replica.rename_xstatus("old", "new").await.unwrap_err();
         assert!(
             matches!(err, Error::Usage(_)),
-            "expected Error::TagNotRegistered, got: {err:?}"
+            "expected Error::Usage, got: {err:?}"
         );
     }
 
@@ -1690,6 +1695,17 @@ mod tests {
         assert!(
             matches!(err, Error::Usage(_)),
             "expected Error::Usage for invalid tag name, got: {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_tag_synthetic_rejected() {
+        let mut replica = Replica::new(InMemoryStorage::new());
+        // Synthetic tags (all-uppercase reserved names) cannot be registered.
+        let err = replica.create_tag("WAITING").await.unwrap_err();
+        assert!(
+            matches!(err, Error::Usage(_)),
+            "expected Error::Usage, got: {err:?}"
         );
     }
 }
