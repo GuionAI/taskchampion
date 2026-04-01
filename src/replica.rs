@@ -305,7 +305,7 @@ impl<S: Storage> Replica<S> {
     ) -> Result<()> {
         let config = self.get_tc_config_parsed().await?;
         if !config.has_tag(tag.as_ref()) {
-            return Err(Error::Usage(format!("Tag not found in config: {tag}")));
+            return Err(Error::TagNotRegistered(tag.as_ref().to_string()));
         }
         task.add_tag(tag, ops)
     }
@@ -1395,8 +1395,8 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            matches!(err, Error::Usage(_)),
-            "expected Error::Usage, got: {err:?}"
+            matches!(err, Error::TagNotRegistered(_)),
+            "expected Error::TagNotRegistered, got: {err:?}"
         );
         // No partial operations should have been appended before the error.
         assert!(
@@ -1483,7 +1483,7 @@ mod tests {
         let err = replica.delete_xstatus("ghost").await.unwrap_err();
         assert!(
             matches!(err, Error::Usage(_)),
-            "expected Error::Usage, got: {err:?}"
+            "expected Error::TagNotRegistered, got: {err:?}"
         );
     }
 
@@ -1595,7 +1595,7 @@ mod tests {
         let err = replica.rename_xstatus("ghost", "new").await.unwrap_err();
         assert!(
             matches!(err, Error::Usage(_)),
-            "expected Error::Usage, got: {err:?}"
+            "expected Error::TagNotRegistered, got: {err:?}"
         );
     }
 
@@ -1618,7 +1618,7 @@ mod tests {
         let err = replica.rename_xstatus("old", "new").await.unwrap_err();
         assert!(
             matches!(err, Error::Usage(_)),
-            "expected Error::Usage, got: {err:?}"
+            "expected Error::TagNotRegistered, got: {err:?}"
         );
     }
 }
