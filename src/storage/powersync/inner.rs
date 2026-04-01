@@ -126,8 +126,6 @@ impl PowerSyncStorageInner {
         ",
         )
         .context("Creating PowerSync test tables")?;
-        // Pre-seed a settings row so UPDATE tc_config works (mirrors PowerSync sync in production).
-        conn.execute("INSERT OR IGNORE INTO settings (id, tc_config) VALUES ('00000000-0000-0000-0000-000000000000', NULL)", [])?;
         Ok(Self { conn })
     }
 }

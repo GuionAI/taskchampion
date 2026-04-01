@@ -204,6 +204,24 @@ impl<S: Storage> Replica<S> {
     /// persisted. If the task commit fails the config is left untouched. The config
     /// update is not reversible via `undo` — undo only reverses the task-level strip.
     ///
+    /// Register `name` as a valid tag in tc_config.
+    ///
+    /// Returns `Ok(true)` if the tag was newly added, `Ok(false)` if it was already registered.
+    /// Returns `Err` if `name` is not a valid tag name.
+    pub async fn create_tag(&mut self, name: &str) -> Result<bool> {
+        // Validate tag name before touching config.
+        let _: Tag = name
+            .try_into()
+            .map_err(|e| Error::Usage(format!("Invalid tag name: {e}")))?;
+
+        let mut config = self.get_tc_config_parsed().await?;
+        if !config.add_tag(name) {
+            return Ok(false); // already registered
+        }
+        self.set_tc_config_parsed(&config).await?;
+        Ok(true)
+    }
+
     /// Returns the number of tasks that had the tag removed.
     /// Returns `Err` if the tag is not present in tc_config.
     pub async fn delete_tag(&mut self, name: &str) -> Result<u32> {
@@ -1619,6 +1637,59 @@ mod tests {
         assert!(
             matches!(err, Error::Usage(_)),
             "expected Error::TagNotRegistered, got: {err:?}"
+        );
+    }
+
+    // ── create_tag ─────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn create_tag_new() {
+        let mut replica = Replica::new(InMemoryStorage::new());
+        // Tag does not exist yet — create_tag should return Ok(true).
+        let created = replica.create_tag("work").await.unwrap();
+        assert!(created, "create_tag should return true for new tag");
+
+        // Now add_tag_validated should succeed since the tag is registered.
+        let task_uuid = Uuid::new_v4();
+        let mut ops = Operations::new();
+        let mut task = replica.create_task(task_uuid, &mut ops).await.unwrap();
+        replica.commit_operations(ops).await.unwrap();
+
+        let tag: Tag = "work".try_into().unwrap();
+        let mut ops2 = Operations::new();
+        replica
+            .add_tag_validated(&mut task, &tag, &mut ops2)
+            .await
+            .unwrap();
+        replica.commit_operations(ops2).await.unwrap();
+
+        let task = replica.get_task(task_uuid).await.unwrap().unwrap();
+        assert!(
+            task.get_tags().any(|t| t == tag),
+            "task should have the work tag"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_tag_duplicate() {
+        let mut replica = Replica::new(InMemoryStorage::new());
+        // First creation succeeds.
+        let first = replica.create_tag("work").await.unwrap();
+        assert!(first, "first create_tag should return true");
+
+        // Second creation returns Ok(false) — tag already exists.
+        let second = replica.create_tag("work").await.unwrap();
+        assert!(!second, "duplicate create_tag should return false");
+    }
+
+    #[tokio::test]
+    async fn create_tag_invalid_name() {
+        let mut replica = Replica::new(InMemoryStorage::new());
+        // Tag name starting with a digit is invalid.
+        let err = replica.create_tag("123invalid").await.unwrap_err();
+        assert!(
+            matches!(err, Error::Usage(_)),
+            "expected Error::Usage for invalid tag name, got: {err:?}"
         );
     }
 }

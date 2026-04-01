@@ -92,6 +92,16 @@ async fn storage() -> Result<Wrapper> {
 crate::storage::test::storage_tests_no_sync!(storage().await.unwrap());
 
 #[tokio::test]
+async fn tc_config_round_trip() -> crate::errors::Result<()> {
+    crate::storage::test::tc_config_round_trip(storage().await.unwrap()).await
+}
+
+#[tokio::test]
+async fn tc_config_overwrite() -> crate::errors::Result<()> {
+    crate::storage::test::tc_config_overwrite(storage().await.unwrap()).await
+}
+
+#[tokio::test]
 async fn test_implicit_rollback() -> Result<()> {
     let mut storage = storage().await?;
     let uuid = Uuid::new_v4();
