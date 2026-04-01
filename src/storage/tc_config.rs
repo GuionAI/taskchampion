@@ -38,59 +38,13 @@ pub struct TcConfig {
     #[serde(default)]
     pub(crate) xstatus: Vec<XStatusDef>,
 
-    /// List of configured tag names. May contain duplicates in internal storage;
-    /// deduplication and sorting are applied only in [`tag_list()`](TcConfig::tag_list)
-    /// output. Use the mutation methods to keep the list consistent.
+    /// List of configured tag names.
     ///
     /// Use [`remove_tag`](TcConfig::remove_tag) /
     /// [`rename_tag`](TcConfig::rename_tag) to mutate — direct field access is
     /// intentionally restricted to prevent duplicate entries via `add_tag`'s dedup guard.
-    ///
-    /// **Deserialization note:** legacy comma-separated strings (e.g. `"a,b"`) are
-    /// trimmed per-segment; JSON array values (`["a", "b"]`) are stored as-is.
-    #[serde(default, deserialize_with = "deserialize_tags")]
+    #[serde(default)]
     pub(crate) tags: Vec<String>,
-}
-
-/// Custom deserializer for `tags` field that accepts either a JSON array (new format)
-/// or a comma-separated string (legacy format).
-fn deserialize_tags<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    struct TagsVisitor;
-
-    impl<'de> serde::de::Visitor<'de> for TagsVisitor {
-        type Value = Vec<String>;
-
-        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-            formatter.write_str("a JSON array of strings or a comma-separated string")
-        }
-
-        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error,
-        {
-            Ok(value
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect())
-        }
-
-        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-        where
-            A: serde::de::SeqAccess<'de>,
-        {
-            let mut values = Vec::new();
-            while let Some(s) = seq.next_element()? {
-                values.push(s);
-            }
-            Ok(values)
-        }
-    }
-
-    deserializer.deserialize_any(TagsVisitor)
 }
 
 impl TcConfig {
@@ -447,14 +401,6 @@ mod tests {
         let mut names: Vec<&str> = arr.iter().map(|t| t.as_str().unwrap()).collect();
         names.sort();
         assert_eq!(names, vec!["home", "work"]);
-    }
-
-    #[test]
-    fn tags_deserializes_from_legacy_comma_string() {
-        // Legacy format: comma-separated string. Should still parse correctly.
-        let json = r#"{"tags":"alpha,beta,gamma"}"#;
-        let cfg: TcConfig = serde_json::from_str(json).unwrap();
-        assert_eq!(cfg.tag_list(), vec!["alpha", "beta", "gamma"]);
     }
 
     #[test]
