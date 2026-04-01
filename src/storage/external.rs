@@ -15,8 +15,8 @@ use crate::storage::columns::{raw_to_task, RawTaskRow, TASK_SELECT_COLS};
 use crate::storage::sql_ops::{
     add_operation_stmt, create_task_stmt, delete_task_stmts, prepare_task, remove_operation_stmt,
     set_task_stmts, set_tc_config_stmt, SqlParam, SqlStatement, ALL_OPERATIONS_SQL,
-    ALL_OPS_WITH_ID_DESC_SQL, ALL_TAGS_SQL, ALL_TASK_UUIDS_SQL, PROJECT_LOOKUP_SQL,
-    TASK_EXISTS_SQL, TC_CONFIG_READ_SQL,
+    ALL_OPS_WITH_ID_DESC_SQL, ALL_TAGS_SQL, ALL_TASK_UUIDS_SQL, TASK_EXISTS_SQL,
+    TC_CONFIG_READ_SQL,
 };
 use crate::storage::{Storage, StorageTxn, TaskMap};
 
@@ -58,7 +58,6 @@ impl Storage for ExternalStorage {
         Ok(Box::new(ExternalStorageTxn {
             executor: &*self.executor,
             write_buffer: Vec::new(),
-            project_cache: HashMap::new(),
             pending_creates: HashSet::new(),
             pending_op_deletes: HashSet::new(),
             task_write_cache: HashMap::new(),
@@ -71,8 +70,6 @@ impl Storage for ExternalStorage {
 struct ExternalStorageTxn<'a> {
     executor: &'a dyn SqlExecutor,
     write_buffer: Vec<SqlStatement>,
-    /// Cache project_name → project_id for buffered inserts within this txn.
-    project_cache: HashMap<String, String>,
     /// Track UUIDs of tasks created in this uncommitted transaction.
     /// Prevents double-INSERT when `create_task` + `set_task` are called
     /// for the same UUID in one transaction (the shared test suite does this).
@@ -94,30 +91,6 @@ struct ExternalStorageTxn<'a> {
 }
 
 impl ExternalStorageTxn<'_> {
-    /// Resolve a project name to its ID. Checks local cache first (for
-    /// projects created in this uncommitted transaction), then queries the host.
-    async fn resolve_project_id(&mut self, name: &str) -> Result<String> {
-        // Check local cache first.
-        if let Some(id) = self.project_cache.get(name) {
-            return Ok(id.clone());
-        }
-
-        // Query host.
-        let row = self
-            .executor
-            .query_one(PROJECT_LOOKUP_SQL, &[SqlParam::Text(name.to_string())])
-            .await?;
-
-        if let Some(json) = row {
-            let id = parse_json_string_field(&json, "id")?;
-            self.project_cache.insert(name.to_string(), id.clone());
-            return Ok(id);
-        }
-
-        // Not found — project must exist; fail with ProjectNotFound.
-        Err(Error::ProjectNotFound(name.to_string()))
-    }
-
     /// Parse a JSON row into a `RawTaskRow`.
     fn parse_task_row(json: &str) -> Result<RawTaskRow> {
         let v: serde_json::Value = serde_json::from_str(json)
@@ -226,11 +199,9 @@ impl StorageTxn for ExternalStorageTxn<'_> {
         self.task_write_cache.insert(uuid, task.clone());
         let prepared = prepare_task(task)?;
 
-        // Resolve project: name-based lookup takes precedence; fall back to raw UUID.
-        let project_id: Option<String> = match &prepared.project_name {
-            Some(name) => Some(self.resolve_project_id(name).await?),
-            None => prepared.project_id_raw.clone(),
-        };
+        // project_id_raw wins — SetProjectId is the only write path.
+        // Project name is returned to the consumer via JOIN on read; the blob key is ignored.
+        let project_id: Option<String> = prepared.project_id_raw.clone();
 
         // Check existence: pending_creates first, then host DB.
         let exists = if self.pending_creates.contains(&uuid) {
@@ -372,8 +343,18 @@ impl StorageTxn for ExternalStorageTxn<'_> {
     async fn get_tc_config(&mut self) -> Result<Option<String>> {
         let row = self.executor.query_one(TC_CONFIG_READ_SQL, &[]).await?;
         match row {
-            Some(json) => parse_json_string_field(&json, "value").map(Some),
             None => Ok(None),
+            Some(json) => {
+                let v: serde_json::Value = serde_json::from_str(&json)
+                    .map_err(|e| Error::Database(format!("tc_config parse: {e}")))?;
+                match v.get("tc_config") {
+                    Some(serde_json::Value::String(s)) => Ok(Some(s.clone())),
+                    Some(serde_json::Value::Null) | None => Ok(None),
+                    Some(other) => Err(Error::Database(format!(
+                        "Field 'tc_config' must be a string, got: {other}"
+                    ))),
+                }
+            }
         }
     }
 
@@ -491,10 +472,9 @@ mod test {
                     data TEXT NOT NULL DEFAULT '{}',
                     created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
                 );
-                CREATE TABLE IF NOT EXISTS tc_settings (
+                CREATE TABLE IF NOT EXISTS settings (
                     id TEXT PRIMARY KEY,
-                    key TEXT NOT NULL,
-                    value TEXT NOT NULL DEFAULT '{}'
+                    tc_config TEXT
                 );",
             )
             .unwrap();

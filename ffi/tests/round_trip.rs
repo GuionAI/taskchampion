@@ -1204,69 +1204,6 @@ async fn test_set_value_rejects_recurrence_dedicated_keys() {
     }
 }
 
-#[tokio::test]
-async fn test_set_project_round_trip() {
-    let (session, mock) = make_session_with_executor();
-    let uuid = Uuid::new_v4().to_string();
-
-    // Pre-seed project so SetProject can resolve it.
-    mock.inject_project("work");
-
-    session
-        .create_task(uuid.clone(), "Project test".into())
-        .await
-        .expect("create");
-
-    // Default: no project.
-    let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
-    assert_eq!(task.project, None);
-    assert_eq!(task.project_id, None);
-
-    // Set project.
-    session
-        .mutate_task(
-            uuid.clone(),
-            vec![TaskMutation::SetProject {
-                value: Some("work".into()),
-            }],
-        )
-        .await
-        .expect("set project");
-
-    let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
-    assert_eq!(task.project.as_deref(), Some("work"), "project name set");
-    assert!(
-        task.project_id.is_some(),
-        "project_id should be populated after set"
-    );
-
-    // SetProject with nonexistent name should fail with ProjectNotFound.
-    let result = session
-        .mutate_task(
-            uuid.clone(),
-            vec![TaskMutation::SetProject {
-                value: Some("nonexistent".into()),
-            }],
-        )
-        .await;
-    assert!(
-        matches!(result, Err(FfiError::ProjectNotFound { .. })),
-        "expected ProjectNotFound for unknown project"
-    );
-
-    // Clear project (None) still works — bypasses resolve_project_id.
-    session
-        .mutate_task(uuid.clone(), vec![TaskMutation::SetProject { value: None }])
-        .await
-        .expect("clear project");
-
-    let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
-    assert_eq!(task.project, None, "project cleared");
-    assert_eq!(task.project_id, None, "project_id cleared with project");
-}
-
-// ---------------------------------------------------------------------------
-// SetProjectId tests
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -1346,54 +1283,6 @@ async fn test_set_project_id_nonexistent_uuid() {
         task.project_id.as_deref(),
         Some(random_id.as_str()),
         "project_id set to random UUID"
-    );
-}
-
-#[tokio::test]
-async fn test_set_project_id_then_set_project_clears_old_id() {
-    let (session, mock) = make_session_with_executor();
-    let uuid = Uuid::new_v4().to_string();
-    let project_id = mock.inject_project("work");
-    mock.inject_project("personal");
-
-    session
-        .create_task(uuid.clone(), "Cross-set test".into())
-        .await
-        .expect("create");
-
-    // Set project by UUID first.
-    session
-        .mutate_task(
-            uuid.clone(),
-            vec![TaskMutation::SetProjectId {
-                value: Some(project_id.clone()),
-            }],
-        )
-        .await
-        .expect("set project_id");
-
-    // Overwrite with SetProject by name.
-    session
-        .mutate_task(
-            uuid.clone(),
-            vec![TaskMutation::SetProject {
-                value: Some("personal".into()),
-            }],
-        )
-        .await
-        .expect("set project by name");
-
-    let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
-    assert_eq!(
-        task.project.as_deref(),
-        Some("personal"),
-        "project name resolved from new name"
-    );
-    // project_id should now point to "personal", not the old "work" UUID.
-    assert_ne!(
-        task.project_id.as_deref(),
-        Some(project_id.as_str()),
-        "project_id should no longer be the old UUID"
     );
 }
 
@@ -1670,7 +1559,7 @@ async fn test_reorder_to_beginning_already_first() {
 }
 
 #[tokio::test]
-async fn test_set_value_rejects_project_keys() {
+async fn test_set_value_rejects_project_id_key() {
     let session = make_session();
     let uuid = Uuid::new_v4().to_string();
 

@@ -248,16 +248,6 @@ fn apply_mutation(
             task.set_value("until", epoch.map(|e| e.to_string()), ops)
                 .map_err(FfiError::from)?;
         }
-        TaskMutation::SetProject { value } => {
-            // Always clear project_id: when clearing project (None) this
-            // prevents the storage JOIN from resolving a stale name; when
-            // setting a name the storage layer overwrites project_id via
-            // resolve_project_id, so clearing first is purely defensive.
-            task.set_value("project_id", None::<String>, ops)
-                .map_err(FfiError::from)?;
-            task.set_value("project", value, ops)
-                .map_err(FfiError::from)?;
-        }
         TaskMutation::SetProjectId { value } => {
             // Validate UUID format if a value is provided.
             if let Some(ref v) = value {
@@ -265,8 +255,8 @@ fn apply_mutation(
             }
             task.set_value("project_id", value, ops)
                 .map_err(FfiError::from)?;
-            // Clear stale project name — the host should set it via SetProject
-            // if a human-readable name is needed on the task.
+            // Clear stale project name — the host can call SetProjectId again
+            // with None to clear it.
             task.set_value("project", None::<String>, ops)
                 .map_err(FfiError::from)?;
         }
@@ -285,7 +275,6 @@ fn apply_mutation(
                 "parent_id",
                 "position",
                 "start",
-                "project",
                 "project_id",
             ];
             if core_keys.contains(&key.as_str())
