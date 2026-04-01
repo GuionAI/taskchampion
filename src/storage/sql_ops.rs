@@ -250,7 +250,10 @@ pub(crate) fn set_tc_config_stmt(user_uuid: &Uuid, value: &str) -> SqlStatement 
 
 /// Generate the SQL and bound param for reading tc_config for the given user UUID.
 pub(crate) fn tc_config_read_sql(user_uuid: &Uuid) -> (&'static str, String) {
-    ("SELECT tc_config FROM settings WHERE id = ?", user_uuid.to_string())
+    (
+        "SELECT tc_config FROM settings WHERE id = ?",
+        user_uuid.to_string(),
+    )
 }
 
 pub(crate) const TASK_EXISTS_SQL: &str =

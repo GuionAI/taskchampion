@@ -140,7 +140,10 @@ impl WrappedStorage for PowerSyncStorageInner {
         let txn = self
             .conn
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        Ok(Box::new(PowerSyncTxn { txn: Some(txn), user_uuid: self.user_uuid }))
+        Ok(Box::new(PowerSyncTxn {
+            txn: Some(txn),
+            user_uuid: self.user_uuid,
+        }))
     }
 }
 
