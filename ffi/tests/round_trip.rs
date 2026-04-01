@@ -44,10 +44,9 @@ impl MockFfiSqlExecutor {
                 id TEXT PRIMARY KEY, name TEXT,
                 created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
             );
-            CREATE TABLE IF NOT EXISTS tc_settings (
+            CREATE TABLE IF NOT EXISTS settings (
                 id TEXT PRIMARY KEY,
-                key TEXT NOT NULL,
-                value TEXT NOT NULL DEFAULT '{}'
+                tc_config TEXT NOT NULL DEFAULT '{}'
             );",
         )
         .expect("create tables");
@@ -82,7 +81,7 @@ impl MockFfiSqlExecutor {
     fn inject_tc_config(&self, json: &str) {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT OR REPLACE INTO tc_settings (id, key, value) VALUES ('tc_config', 'tc_config', ?)",
+            "INSERT OR REPLACE INTO settings (id, tc_config) VALUES ('tc_config', ?)",
             rusqlite::params![json],
         )
         .expect("inject_tc_config");
@@ -92,7 +91,7 @@ impl MockFfiSqlExecutor {
     fn read_tc_config(&self) -> String {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-            "SELECT value FROM tc_settings WHERE id = 'tc_config'",
+            "SELECT tc_config FROM settings WHERE id = 'tc_config'",
             [],
             |row| row.get::<_, String>(0),
         )
@@ -1932,6 +1931,57 @@ async fn test_xstatus_auto_clears_on_setstatus_completed() {
         "xstatus must clear when SetStatus → Completed"
     );
     assert!(matches!(task.status, FfiStatus::Completed));
+}
+
+// ---------------------------------------------------------------------------
+// Test: SetStatus to Pending also clears xstatus (the bug fix)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_xstatus_auto_clears_on_setstatus_pending() {
+    let (session, mock) = make_session_with_executor();
+    mock.inject_tc_config(r#"{"xstatus":[{"name":"blocked","icon":128721}]}"#);
+
+    let uuid = Uuid::new_v4().to_string();
+    session
+        .create_task(uuid.clone(), "SetStatus to Pending test".into())
+        .await
+        .unwrap();
+    session
+        .set_xstatus(uuid.clone(), "blocked".into())
+        .await
+        .unwrap();
+
+    // Move to Completed first so the task has a non-pending status.
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetStatus {
+                status: FfiStatus::Completed,
+            }],
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+    // Now SetStatus { Pending } — before the fix, xstatus was NOT cleared here.
+    // After the fix, xstatus is always cleared when setting status to any value.
+    let task = session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetStatus {
+                status: FfiStatus::Pending,
+            }],
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        task.xstatus, None,
+        "xstatus must clear when SetStatus to Pending"
+    );
+    assert!(matches!(task.status, FfiStatus::Pending));
 }
 
 // ---------------------------------------------------------------------------
