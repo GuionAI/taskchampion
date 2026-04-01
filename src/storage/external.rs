@@ -372,8 +372,18 @@ impl StorageTxn for ExternalStorageTxn<'_> {
     async fn get_tc_config(&mut self) -> Result<Option<String>> {
         let row = self.executor.query_one(TC_CONFIG_READ_SQL, &[]).await?;
         match row {
-            Some(json) => parse_json_string_field(&json, "tc_config").map(Some),
             None => Ok(None),
+            Some(json) => {
+                let v: serde_json::Value = serde_json::from_str(&json)
+                    .map_err(|e| Error::Database(format!("tc_config parse: {e}")))?;
+                match v.get("tc_config") {
+                    Some(serde_json::Value::String(s)) => Ok(Some(s.clone())),
+                    Some(serde_json::Value::Null) | None => Ok(None),
+                    Some(other) => Err(Error::Database(format!(
+                        "Field 'tc_config' must be a string, got: {other}"
+                    ))),
+                }
+            }
         }
     }
 
@@ -491,11 +501,11 @@ mod test {
                     data TEXT NOT NULL DEFAULT '{}',
                     created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
                 );
-                CREATE TABLE IF NOT EXISTS tc_settings (
+                CREATE TABLE IF NOT EXISTS settings (
                     id TEXT PRIMARY KEY,
-                    key TEXT NOT NULL,
-                    value TEXT NOT NULL DEFAULT '{}'
-                );",
+                    tc_config TEXT
+                );
+                INSERT OR IGNORE INTO settings (id, tc_config) VALUES ('tc_config', '{}');",
             )
             .unwrap();
             Self {

@@ -249,7 +249,6 @@ fn apply_mutation(
                 .map_err(FfiError::from)?;
         }
         TaskMutation::SetProjectId { value } => {
-===AFTER===
             // Validate UUID format if a value is provided.
             if let Some(ref v) = value {
                 parse_uuid(v)?;
@@ -258,7 +257,6 @@ fn apply_mutation(
                 .map_err(FfiError::from)?;
             // Clear stale project name — the host can call SetProjectId again
             // with None to clear it.
-===AFTER===
             task.set_value("project", None::<String>, ops)
                 .map_err(FfiError::from)?;
         }
@@ -279,7 +277,6 @@ fn apply_mutation(
                 "start",
                 "project_id",
             ];
-===AFTER===
             if core_keys.contains(&key.as_str())
                 || DEDICATED_UDA_FIELDS.contains(&key.as_str())
                 || key.starts_with("tag_")
