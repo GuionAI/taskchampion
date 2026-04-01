@@ -200,4 +200,14 @@ mod test {
     }
 
     crate::storage::test::storage_tests_no_sync!(storage().await);
+
+    #[tokio::test]
+    async fn tc_config_round_trip() -> crate::errors::Result<()> {
+        crate::storage::test::tc_config_round_trip(storage().await).await
+    }
+
+    #[tokio::test]
+    async fn tc_config_overwrite() -> crate::errors::Result<()> {
+        crate::storage::test::tc_config_overwrite(storage().await).await
+    }
 }

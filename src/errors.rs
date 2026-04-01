@@ -11,6 +11,9 @@ pub enum Error {
     /// A usage error
     #[error("Usage Error: {0}")]
     Usage(String),
+    /// A tag was not found in tc_config when trying to add it to a task
+    #[error("Tag not registered in tc_config: {0}")]
+    TagNotRegistered(String),
     /// A referenced task was not found
     #[error("Task not found: {0}")]
     TaskNotFound(uuid::Uuid),

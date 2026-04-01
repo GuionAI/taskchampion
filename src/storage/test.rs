@@ -72,16 +72,6 @@ macro_rules! storage_tests_no_sync {
         async fn tc_config_absent_returns_none() -> $crate::errors::Result<()> {
             $crate::storage::test::tc_config_absent_returns_none($storage).await
         }
-
-        #[tokio::test]
-        async fn tc_config_round_trip() -> $crate::errors::Result<()> {
-            $crate::storage::test::tc_config_round_trip($storage).await
-        }
-
-        #[tokio::test]
-        async fn tc_config_overwrite() -> $crate::errors::Result<()> {
-            $crate::storage::test::tc_config_overwrite($storage).await
-        }
     };
 }
 pub(crate) use storage_tests_no_sync;

@@ -355,9 +355,12 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
 
     async fn get_tc_config(&mut self) -> Result<Option<String>> {
         let t = self.get_txn()?;
-        t.query_row(TC_CONFIG_READ_SQL, [], |row| row.get::<_, String>(0))
-            .optional()
-            .map_err(|e| Error::Database(format!("get_tc_config: {e}")))
+        t.query_row(TC_CONFIG_READ_SQL, [], |row| {
+            row.get::<_, Option<String>>(0)
+        })
+        .optional()
+        .map(|o| o.flatten())
+        .map_err(|e| Error::Database(format!("get_tc_config: {e}")))
     }
 
     async fn set_tc_config(&mut self, value: String) -> Result<()> {

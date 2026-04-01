@@ -60,6 +60,33 @@ mod test {
 
     crate::storage::test::storage_tests_no_sync!(storage().await?);
 
+    /// Seed a settings row the way the PG trigger would in production.
+    fn seed_settings_row(storage: &mut PowerSyncStorageInner) {
+        storage
+            .conn
+            .execute(
+                "INSERT INTO settings (id, tc_config) VALUES (?, NULL)",
+                [Uuid::new_v4().to_string()],
+            )
+            .expect("seed settings row");
+    }
+
+    #[tokio::test]
+    async fn tc_config_round_trip() -> crate::errors::Result<()> {
+        let mut inner = PowerSyncStorageInner::new_for_test()?;
+        seed_settings_row(&mut inner);
+        let storage = PowerSyncStorage(Wrapper::new(async move || Ok(inner)).await?);
+        crate::storage::test::tc_config_round_trip(storage).await
+    }
+
+    #[tokio::test]
+    async fn tc_config_overwrite() -> crate::errors::Result<()> {
+        let mut inner = PowerSyncStorageInner::new_for_test()?;
+        seed_settings_row(&mut inner);
+        let storage = PowerSyncStorage(Wrapper::new(async move || Ok(inner)).await?);
+        crate::storage::test::tc_config_overwrite(storage).await
+    }
+
     /// Verify that promoted string columns (status, description, priority, parent) survive
     /// a set_task / get_task round-trip via the dedicated columns, not just the JSON blob.
     #[tokio::test]
