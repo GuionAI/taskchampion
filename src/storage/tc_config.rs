@@ -38,11 +38,16 @@ pub struct TcConfig {
     #[serde(default)]
     pub(crate) xstatus: Vec<XStatusDef>,
 
-    /// List of configured tag names.
+    /// List of configured tag names. May contain duplicates in internal storage;
+    /// deduplication and sorting are applied only in [`tag_list()`](TcConfig::tag_list)
+    /// output. Use the mutation methods to keep the list consistent.
     ///
     /// Use [`remove_tag`](TcConfig::remove_tag) /
     /// [`rename_tag`](TcConfig::rename_tag) to mutate — direct field access is
-    /// intentionally restricted to keep the deduplication/sorting invariant intact.
+    /// intentionally restricted to prevent duplicate entries via `add_tag`'s dedup guard.
+    ///
+    /// **Deserialization note:** legacy comma-separated strings (e.g. `"a,b"`) are
+    /// trimmed per-segment; JSON array values (`["a", "b"]`) are stored as-is.
     #[serde(default, deserialize_with = "deserialize_tags")]
     pub(crate) tags: Vec<String>,
 }
@@ -415,6 +420,18 @@ mod tests {
         });
         assert!(cfg.remove_xstatus("blocked"));
         assert!(!cfg.has_xstatus("blocked"));
+    }
+
+    // ── serde shape ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn has_tag_exact_match_no_trim() {
+        // has_tag uses exact Vec equality — no whitespace trimming.
+        // (The old comma-split impl did trim; the new one does not.)
+        let cfg = config_with_tags(&["work"]);
+        assert!(cfg.has_tag("work"), "exact match");
+        assert!(!cfg.has_tag(" work"), "leading space must not match");
+        assert!(!cfg.has_tag("work "), "trailing space must not match");
     }
 
     // ── serde shape ───────────────────────────────────────────────────────────────
