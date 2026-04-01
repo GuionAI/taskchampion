@@ -475,8 +475,7 @@ mod test {
                 CREATE TABLE IF NOT EXISTS settings (
                     id TEXT PRIMARY KEY,
                     tc_config TEXT
-                );
-                INSERT OR IGNORE INTO settings (id, tc_config) VALUES ('tc_config', '{}');",
+                );",
             )
             .unwrap();
             Self {
