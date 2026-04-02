@@ -125,10 +125,6 @@ fn apply_mutation(
             let value = epoch.map(|e| e.to_string());
             task.set_value("due", value, ops).map_err(FfiError::from)?;
         }
-        TaskMutation::SetWait { epoch } => {
-            let value = epoch.map(|e| e.to_string());
-            task.set_value("wait", value, ops).map_err(FfiError::from)?;
-        }
         TaskMutation::SetEntry { epoch } => {
             let value = epoch.map(|e| e.to_string());
             task.set_value("entry", value, ops)
@@ -266,7 +262,6 @@ fn apply_mutation(
                 "description",
                 "priority",
                 "due",
-                "wait",
                 "entry",
                 "end",
                 "modified",

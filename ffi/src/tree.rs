@@ -25,8 +25,6 @@ pub struct FfiTaskDescendant {
     pub uuid: String,
     /// Task status.
     pub status: FfiStatus,
-    /// True when the task has a future `wait` date (logically "waiting").
-    pub has_wait: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -40,7 +38,8 @@ pub(crate) fn ffi_to_task_descendant(d: FfiTaskDescendant) -> Result<TaskDescend
     Ok(TaskDescendant {
         uuid,
         status: Status::from(d.status),
-        has_wait: d.has_wait,
+        // has_wait is not exposed to FFI; use false (tasks won't have wait dates from FFI)
+        has_wait: false,
     })
 }
 

@@ -141,8 +141,6 @@ pub struct FfiRecurringTemplate {
     pub mask: String,
     /// Hard expiry date as Unix epoch seconds. `None` if not set.
     pub until_epoch: Option<i64>,
-    /// Wait date as Unix epoch seconds. `None` if not set.
-    pub wait_epoch: Option<i64>,
     /// Fields to clone onto child tasks (description, project, tags, etc.).
     pub cloneable_fields: HashMap<String, String>,
 }
@@ -157,7 +155,6 @@ pub enum FfiRecurrenceAction {
         template_uuid: String,
         imask: u32,
         due_epoch: i64,
-        wait_epoch: Option<i64>,
         cloneable_fields: HashMap<String, String>,
     },
     /// Update the template's mask string.
@@ -186,8 +183,6 @@ pub struct FfiChildStatusChange {
     pub imask: u32,
     /// New status for this child.
     pub new_status: FfiStatus,
-    /// True when the child has a future `wait` date (logically "waiting").
-    pub has_wait: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -198,14 +193,14 @@ fn ffi_to_recurring_template(t: FfiRecurringTemplate) -> Result<RecurringTemplat
     let uuid = parse_uuid_ctx(&t.uuid, "template UUID")?;
     let due = epoch_to_dt(t.due_epoch)?;
     let until = t.until_epoch.map(epoch_to_dt).transpose()?;
-    let wait = t.wait_epoch.map(epoch_to_dt).transpose()?;
     Ok(RecurringTemplate {
         uuid,
         due,
         recur: t.recur,
         mask: t.mask,
         until,
-        wait,
+        // Wait is not exposed to FFI; use None (tasks won't have wait dates from FFI)
+        wait: None,
         cloneable_fields: t.cloneable_fields,
     })
 }
@@ -216,8 +211,8 @@ fn recurrence_action_to_ffi(a: RecurrenceAction) -> FfiRecurrenceAction {
             template_uuid,
             imask,
             due,
-            wait,
             cloneable_fields,
+            ..
         } => FfiRecurrenceAction::CreateChild {
             template_uuid: template_uuid.to_string(),
             // Narrowing cast: praxis enforces a 10k iteration cap so this
@@ -227,7 +222,6 @@ fn recurrence_action_to_ffi(a: RecurrenceAction) -> FfiRecurrenceAction {
                 .try_into()
                 .expect("imask exceeds u32::MAX — bug in praxis"),
             due_epoch: due.timestamp(),
-            wait_epoch: wait.map(|w| w.timestamp()),
             cloneable_fields,
         },
         RecurrenceAction::UpdateTemplateMask {
@@ -252,7 +246,8 @@ fn ffi_to_child_status_change(c: FfiChildStatusChange) -> Result<ChildStatusChan
         template_uuid,
         imask: c.imask as usize, // widening cast: u32 → usize, always safe on 32/64-bit targets
         new_status: Status::from(c.new_status),
-        has_wait: c.has_wait,
+        // has_wait is not exposed to FFI; use false (tasks won't have wait dates from FFI)
+        has_wait: false,
     })
 }
 
@@ -324,13 +319,14 @@ pub fn recurrence_diff_ffi(
         .collect())
 }
 
-/// Map a task's FFI status and wait state to the appropriate mask character.
+/// Map a task's FFI status to the appropriate mask character.
 #[uniffi::export]
-pub fn mask_char_for_ffi_status(status: FfiStatus, has_wait: bool) -> FfiMaskChar {
+pub fn mask_char_for_ffi_status(status: FfiStatus) -> FfiMaskChar {
     use praxis::recurrence::mask::MaskChar;
 
     let tc_status = Status::from(status);
-    match mask_char_for_status(&tc_status, has_wait) {
+    // has_wait is always false since wait is not exposed to FFI
+    match mask_char_for_status(&tc_status, false) {
         MaskChar::Pending => FfiMaskChar::Pending,
         MaskChar::Waiting => FfiMaskChar::Waiting,
         MaskChar::Completed => FfiMaskChar::Completed,

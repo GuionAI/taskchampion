@@ -23,7 +23,6 @@ impl From<&Task> for FfiTask {
             entry: task.get_entry().map(|ts| ts.timestamp()),
             modified: task.get_modified().map(|ts| ts.timestamp()),
             due: task.get_due().map(|ts| ts.timestamp()),
-            wait: task.get_wait().map(|ts| ts.timestamp()),
             scheduled: task
                 .get_value("scheduled")
                 .and_then(|s| s.parse::<i64>().ok()),
@@ -43,7 +42,6 @@ impl From<&Task> for FfiTask {
                 })
                 .collect(),
             dependencies: task.get_dependencies().map(|u| u.to_string()).collect(),
-            is_waiting: task.is_waiting(),
             is_active: task.is_active(),
             is_blocked: task.is_blocked(),
             is_blocking: task.is_blocking(),

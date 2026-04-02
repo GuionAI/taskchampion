@@ -37,7 +37,6 @@ pub struct FfiTask {
     pub entry: Option<i64>,
     pub modified: Option<i64>,
     pub due: Option<i64>,
-    pub wait: Option<i64>,
     /// Scheduled date as Unix epoch seconds, or `None` if not set.
     pub scheduled: Option<i64>,
     /// Start time (active tracking) as Unix epoch seconds, or `None`.
@@ -50,7 +49,6 @@ pub struct FfiTask {
     pub annotations: Vec<FfiAnnotation>,
     /// UUIDs of tasks this task depends on.
     pub dependencies: Vec<String>,
-    pub is_waiting: bool,
     pub is_active: bool,
     pub is_blocked: bool,
     pub is_blocking: bool,
@@ -150,9 +148,6 @@ pub enum TaskMutation {
     },
     /// `None` clears the field.
     SetDue {
-        epoch: Option<i64>,
-    },
-    SetWait {
         epoch: Option<i64>,
     },
     SetEntry {
