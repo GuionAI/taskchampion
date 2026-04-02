@@ -66,34 +66,6 @@ impl FfiSession {
 
 #[uniffi::export]
 impl FfiSession {
-    /// Fetch a single task by UUID. Returns `None` if not found.
-    pub async fn get_task(&self, uuid: String) -> Result<Option<FfiTask>, FfiError> {
-        self.with_replica(|mut replica| async move {
-            let uuid = parse_uuid(&uuid)?;
-            let task = replica.get_task(uuid).await.map_err(FfiError::from)?;
-            Ok(task.as_ref().map(FfiTask::from))
-        })
-        .await
-    }
-
-    /// Return all tasks (pending, completed, deleted).
-    pub async fn all_tasks(&self) -> Result<Vec<FfiTask>, FfiError> {
-        self.with_replica(|mut replica| async move {
-            let tasks = replica.all_tasks().await.map_err(FfiError::from)?;
-            Ok(tasks.values().map(FfiTask::from).collect())
-        })
-        .await
-    }
-
-    /// Return pending tasks only.
-    pub async fn pending_tasks(&self) -> Result<Vec<FfiTask>, FfiError> {
-        self.with_replica(|mut replica| async move {
-            let tasks = replica.pending_tasks().await.map_err(FfiError::from)?;
-            Ok(tasks.iter().map(FfiTask::from).collect())
-        })
-        .await
-    }
-
     /// Return the task tree as a flat list of [`FfiTreeNode`]s.
     pub async fn tree_map(&self) -> Result<Vec<FfiTreeNode>, FfiError> {
         self.with_replica(|mut replica| async move {
