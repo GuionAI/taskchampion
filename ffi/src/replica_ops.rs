@@ -66,7 +66,6 @@ impl FfiSession {
 
 #[uniffi::export]
 impl FfiSession {
-
     /// Return the task tree as a flat list of [`FfiTreeNode`]s.
     pub async fn tree_map(&self) -> Result<Vec<FfiTreeNode>, FfiError> {
         self.with_replica(|mut replica| async move {
