@@ -141,8 +141,6 @@ pub struct FfiRecurringTemplate {
     pub mask: String,
     /// Hard expiry date as Unix epoch seconds. `None` if not set.
     pub until_epoch: Option<i64>,
-    /// Wait date as Unix epoch seconds. `None` if not set.
-    pub wait_epoch: Option<i64>,
     /// Fields to clone onto child tasks (description, project, tags, etc.).
     pub cloneable_fields: HashMap<String, String>,
 }
@@ -157,7 +155,6 @@ pub enum FfiRecurrenceAction {
         template_uuid: String,
         imask: u32,
         due_epoch: i64,
-        wait_epoch: Option<i64>,
         cloneable_fields: HashMap<String, String>,
     },
     /// Update the template's mask string.
@@ -186,8 +183,6 @@ pub struct FfiChildStatusChange {
     pub imask: u32,
     /// New status for this child.
     pub new_status: FfiStatus,
-    /// True when the child has a future `wait` date (logically "waiting").
-    pub has_wait: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -198,14 +193,14 @@ fn ffi_to_recurring_template(t: FfiRecurringTemplate) -> Result<RecurringTemplat
     let uuid = parse_uuid_ctx(&t.uuid, "template UUID")?;
     let due = epoch_to_dt(t.due_epoch)?;
     let until = t.until_epoch.map(epoch_to_dt).transpose()?;
-    let wait = t.wait_epoch.map(epoch_to_dt).transpose()?;
     Ok(RecurringTemplate {
         uuid,
         due,
         recur: t.recur,
         mask: t.mask,
         until,
-        wait,
+        // Wait is not exposed to FFI; use None (tasks won't have wait dates from FFI)
+        wait: None,
         cloneable_fields: t.cloneable_fields,
     })
 }
@@ -216,8 +211,8 @@ fn recurrence_action_to_ffi(a: RecurrenceAction) -> FfiRecurrenceAction {
             template_uuid,
             imask,
             due,
-            wait,
             cloneable_fields,
+            ..
         } => FfiRecurrenceAction::CreateChild {
             template_uuid: template_uuid.to_string(),
             // Narrowing cast: praxis enforces a 10k iteration cap so this
@@ -227,7 +222,6 @@ fn recurrence_action_to_ffi(a: RecurrenceAction) -> FfiRecurrenceAction {
                 .try_into()
                 .expect("imask exceeds u32::MAX — bug in praxis"),
             due_epoch: due.timestamp(),
-            wait_epoch: wait.map(|w| w.timestamp()),
             cloneable_fields,
         },
         RecurrenceAction::UpdateTemplateMask {
@@ -252,7 +246,8 @@ fn ffi_to_child_status_change(c: FfiChildStatusChange) -> Result<ChildStatusChan
         template_uuid,
         imask: c.imask as usize, // widening cast: u32 → usize, always safe on 32/64-bit targets
         new_status: Status::from(c.new_status),
-        has_wait: c.has_wait,
+        // has_wait is not exposed to FFI; use false (tasks won't have wait dates from FFI)
+        has_wait: false,
     })
 }
 
@@ -324,13 +319,14 @@ pub fn recurrence_diff_ffi(
         .collect())
 }
 
-/// Map a task's FFI status and wait state to the appropriate mask character.
+/// Map a task's FFI status to the appropriate mask character.
 #[uniffi::export]
-pub fn mask_char_for_ffi_status(status: FfiStatus, has_wait: bool) -> FfiMaskChar {
+pub fn mask_char_for_ffi_status(status: FfiStatus) -> FfiMaskChar {
     use praxis::recurrence::mask::MaskChar;
 
     let tc_status = Status::from(status);
-    match mask_char_for_status(&tc_status, has_wait) {
+    // has_wait is always false since wait is not exposed to FFI
+    match mask_char_for_status(&tc_status, false) {
         MaskChar::Pending => FfiMaskChar::Pending,
         MaskChar::Waiting => FfiMaskChar::Waiting,
         MaskChar::Completed => FfiMaskChar::Completed,
@@ -450,7 +446,6 @@ mod tests {
             recur: "weekly".to_string(),
             mask: "-+-".to_string(),
             until_epoch: None,
-            wait_epoch: None,
             cloneable_fields: HashMap::new(),
         };
         let rust = ffi_to_recurring_template(ffi).unwrap();
@@ -459,27 +454,27 @@ mod tests {
         assert_eq!(rust.recur, "weekly");
         assert_eq!(rust.mask, "-+-");
         assert!(rust.until.is_none());
+        // wait is always None at FFI level
         assert!(rust.wait.is_none());
         assert!(rust.cloneable_fields.is_empty());
     }
 
     #[test]
-    fn ffi_recurring_template_with_until_and_wait() {
+    fn ffi_recurring_template_with_until() {
         let due = dt_epoch(2025, 1, 1);
         let until = dt_epoch(2025, 12, 31);
-        let wait = dt_epoch(2024, 12, 31);
         let ffi = FfiRecurringTemplate {
             uuid: uuid_str(),
             due_epoch: due,
             recur: "monthly".to_string(),
             mask: "".to_string(),
             until_epoch: Some(until),
-            wait_epoch: Some(wait),
             cloneable_fields: HashMap::new(),
         };
         let rust = ffi_to_recurring_template(ffi).unwrap();
         assert_eq!(rust.until.unwrap().timestamp(), until);
-        assert_eq!(rust.wait.unwrap().timestamp(), wait);
+        // wait is always None at FFI level
+        assert!(rust.wait.is_none());
     }
 
     #[test]
@@ -493,7 +488,6 @@ mod tests {
             recur: "monthly".to_string(),
             mask: "".to_string(),
             until_epoch: None,
-            wait_epoch: None,
             cloneable_fields: fields.clone(),
         };
         let rust = ffi_to_recurring_template(ffi).unwrap();
@@ -508,7 +502,6 @@ mod tests {
             recur: "weekly".to_string(),
             mask: "".to_string(),
             until_epoch: None,
-            wait_epoch: None,
             cloneable_fields: HashMap::new(),
         };
         assert!(matches!(
@@ -538,13 +531,11 @@ mod tests {
                 template_uuid: t,
                 imask,
                 due_epoch,
-                wait_epoch,
                 cloneable_fields,
             } => {
                 assert_eq!(t, template_uuid_str());
                 assert_eq!(imask, 3u32);
                 assert_eq!(due_epoch, due.timestamp());
-                assert!(wait_epoch.is_none());
                 assert_eq!(cloneable_fields, fields);
             }
             _ => panic!("expected CreateChild"),
@@ -595,12 +586,12 @@ mod tests {
             template_uuid: template_uuid_str(),
             imask: 2u32,
             new_status: FfiStatus::Completed,
-            has_wait: false,
         };
         let rust = ffi_to_child_status_change(ffi).unwrap();
         assert_eq!(rust.template_uuid.to_string(), template_uuid_str());
         assert_eq!(rust.imask, 2usize);
         assert!(matches!(rust.new_status, Status::Completed));
+        // has_wait is always false at FFI level
         assert!(!rust.has_wait);
     }
 
@@ -610,7 +601,6 @@ mod tests {
             template_uuid: "bad".to_string(),
             imask: 0,
             new_status: FfiStatus::Pending,
-            has_wait: false,
         };
         assert!(matches!(
             ffi_to_child_status_change(ffi),
@@ -630,7 +620,6 @@ mod tests {
             recur: "monthly".to_string(),
             mask: "".to_string(),
             until_epoch: None,
-            wait_epoch: None,
             cloneable_fields: HashMap::new(),
         };
         let actions = reconcile_ffi(vec![template], now, 1).unwrap();
@@ -658,7 +647,6 @@ mod tests {
             recur: "not-a-valid-spec".to_string(),
             mask: "".to_string(),
             until_epoch: None,
-            wait_epoch: None,
             cloneable_fields: HashMap::new(),
         };
         let result = reconcile_ffi(vec![template], now, 1);
@@ -674,7 +662,6 @@ mod tests {
             template_uuid: template_uuid_str(),
             imask: 0,
             new_status: FfiStatus::Completed,
-            has_wait: false,
         };
         let result = update_mask_for_child_ffi("-+-".to_string(), change).unwrap();
         assert_eq!(result, "++-");
@@ -687,23 +674,22 @@ mod tests {
             template_uuid: template_uuid_str(),
             imask: 0,
             new_status: FfiStatus::Deleted,
-            has_wait: false,
         };
         let result = update_mask_for_child_ffi("-+W".to_string(), change).unwrap();
         assert_eq!(result, "X+W");
     }
 
     #[test]
-    fn update_mask_for_child_ffi_pending_has_wait() {
-        // mask "-+"; set index 0 to Pending with wait → "W+"
+    fn update_mask_for_child_ffi_pending() {
+        // mask "-+-"; set index 0 to Pending (with has_wait=false) → "-+-"
+        // Note: has_wait is not exposed at FFI level, so Pending keeps the "-" char
         let change = FfiChildStatusChange {
             template_uuid: template_uuid_str(),
             imask: 0,
             new_status: FfiStatus::Pending,
-            has_wait: true,
         };
-        let result = update_mask_for_child_ffi("-+".to_string(), change).unwrap();
-        assert_eq!(result, "W+");
+        let result = update_mask_for_child_ffi("-+-".to_string(), change).unwrap();
+        assert_eq!(result, "-+-");
     }
 
     #[test]
@@ -712,7 +698,6 @@ mod tests {
             template_uuid: template_uuid_str(),
             imask: 99, // way out of bounds
             new_status: FfiStatus::Completed,
-            has_wait: false,
         };
         let result = update_mask_for_child_ffi("-+-".to_string(), change);
         assert!(matches!(result, Err(FfiError::InvalidInput { .. })));

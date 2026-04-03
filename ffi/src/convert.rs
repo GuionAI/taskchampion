@@ -4,9 +4,7 @@ use async_trait::async_trait;
 use taskchampion::{Status, Task, TreeMap};
 use uuid::Uuid;
 
-use crate::types::{
-    FfiAnnotation, FfiError, FfiStatus, FfiTask, FfiTreeNode, DEDICATED_UDA_FIELDS,
-};
+use crate::types::{FfiAnnotation, FfiError, FfiStatus, FfiTask, FfiTreeNode};
 
 // ---------------------------------------------------------------------------
 // Task → FfiTask
@@ -23,7 +21,6 @@ impl From<&Task> for FfiTask {
             entry: task.get_entry().map(|ts| ts.timestamp()),
             modified: task.get_modified().map(|ts| ts.timestamp()),
             due: task.get_due().map(|ts| ts.timestamp()),
-            wait: task.get_wait().map(|ts| ts.timestamp()),
             scheduled: task
                 .get_value("scheduled")
                 .and_then(|s| s.parse::<i64>().ok()),
@@ -43,7 +40,6 @@ impl From<&Task> for FfiTask {
                 })
                 .collect(),
             dependencies: task.get_dependencies().map(|u| u.to_string()).collect(),
-            is_waiting: task.is_waiting(),
             is_active: task.is_active(),
             is_blocked: task.is_blocked(),
             is_blocking: task.is_blocking(),
@@ -62,12 +58,7 @@ impl From<&Task> for FfiTask {
             xstatus: task.get_value("xstatus").map(|v| v.to_string()),
             project: task.get_value("project").map(|v| v.to_string()),
             project_id: task.get_value("project_id").map(|v| v.to_string()),
-            remaining_data: {
-                task.get_user_defined_attributes()
-                    .filter(|(k, _)| !DEDICATED_UDA_FIELDS.contains(k))
-                    .map(|(k, v)| (k.to_string(), v.to_string()))
-                    .collect()
-            },
+            today_position: task.get_value("today_position").map(|v| v.to_string()),
         }
     }
 }

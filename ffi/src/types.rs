@@ -37,7 +37,6 @@ pub struct FfiTask {
     pub entry: Option<i64>,
     pub modified: Option<i64>,
     pub due: Option<i64>,
-    pub wait: Option<i64>,
     /// Scheduled date as Unix epoch seconds, or `None` if not set.
     pub scheduled: Option<i64>,
     /// Start time (active tracking) as Unix epoch seconds, or `None`.
@@ -50,7 +49,6 @@ pub struct FfiTask {
     pub annotations: Vec<FfiAnnotation>,
     /// UUIDs of tasks this task depends on.
     pub dependencies: Vec<String>,
-    pub is_waiting: bool,
     pub is_active: bool,
     pub is_blocked: bool,
     pub is_blocking: bool,
@@ -81,33 +79,11 @@ pub struct FfiTask {
     ///
     /// Raw value from `tc_tasks.project_id` — same JOIN as `project`.
     pub project_id: Option<String>,
-    /// User-defined attributes not covered by dedicated fields.
+    /// FlickNote: position of this task in the today view. `None` if not set.
     ///
-    /// Keys are the raw TaskMap keys (e.g. `"custom_field"`).
-    /// Values are the raw string values from the TaskMap.
-    /// Empty if the task has no UDAs.
-    ///
-    /// Keys excluded from this map: `"scheduled"`, `"is_full_day"`, `"estimate"`,
-    /// `"recur"`, `"mask"`, `"imask"`, `"until"`, `"xstatus"` — all have typed
-    /// accessor fields above. See [`DEDICATED_UDA_FIELDS`] for the authoritative list.
-    pub remaining_data: std::collections::HashMap<String, String>,
+    /// Stored as UDA `"today_position"` in the task.
+    pub today_position: Option<String>,
 }
-
-/// UDA keys that have dedicated typed fields on [`FfiTask`].
-///
-/// These keys are excluded from `FfiTask.remaining_data` and rejected by the
-/// `SetValue` mutation. When adding a new dedicated field, update this list —
-/// both `convert.rs` and `task_ops.rs` reference it.
-pub(crate) const DEDICATED_UDA_FIELDS: &[&str] = &[
-    "scheduled",
-    "is_full_day",
-    "estimate",
-    "recur",
-    "mask",
-    "imask",
-    "until",
-    "xstatus",
-];
 
 /// A node in the task tree (parent/child hierarchy).
 #[derive(uniffi::Record)]
@@ -150,9 +126,6 @@ pub enum TaskMutation {
     },
     /// `None` clears the field.
     SetDue {
-        epoch: Option<i64>,
-    },
-    SetWait {
         epoch: Option<i64>,
     },
     SetEntry {
@@ -242,13 +215,10 @@ pub enum TaskMutation {
     SetProjectId {
         value: Option<String>,
     },
-    /// Generic escape hatch for setting arbitrary UDA values.
+    /// Set the today_position value. `None` clears the field.
     ///
-    /// `key` is the raw TaskMap key. `value` is `None` to remove.
-    /// Returns `InvalidInput` if `key` is a known TaskChampion property
-    /// (use the dedicated variant instead).
-    SetValue {
-        key: String,
+    /// Stored as UDA `"today_position"` in the task.
+    SetTodayPosition {
         value: Option<String>,
     },
 }

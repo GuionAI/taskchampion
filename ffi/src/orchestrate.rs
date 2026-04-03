@@ -123,7 +123,6 @@ mod tests {
         FfiTaskDescendant {
             uuid,
             status: FfiStatus::Pending,
-            has_wait: false,
         }
     }
 
@@ -131,7 +130,6 @@ mod tests {
         FfiTaskDescendant {
             uuid,
             status: FfiStatus::Completed,
-            has_wait: false,
         }
     }
 
