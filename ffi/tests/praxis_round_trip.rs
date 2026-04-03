@@ -118,23 +118,19 @@ fn test_recurrence_diff_empty_mask() {
 #[test]
 fn test_mask_char_for_status() {
     // Recurring → Unknown
-    let c = mask_char_for_ffi_status(FfiStatus::Recurring, false);
+    let c = mask_char_for_ffi_status(FfiStatus::Recurring);
     assert!(matches!(c, FfiMaskChar::Unknown));
 
-    // Pending + has_wait:true → Waiting
-    let c = mask_char_for_ffi_status(FfiStatus::Pending, true);
-    assert!(matches!(c, FfiMaskChar::Waiting));
-
-    // Pending + has_wait:false → Pending
-    let c = mask_char_for_ffi_status(FfiStatus::Pending, false);
+    // Pending → Pending (has_wait is always false at FFI level)
+    let c = mask_char_for_ffi_status(FfiStatus::Pending);
     assert!(matches!(c, FfiMaskChar::Pending));
 
     // Completed → Completed
-    let c = mask_char_for_ffi_status(FfiStatus::Completed, false);
+    let c = mask_char_for_ffi_status(FfiStatus::Completed);
     assert!(matches!(c, FfiMaskChar::Completed));
 
     // Deleted → Deleted
-    let c = mask_char_for_ffi_status(FfiStatus::Deleted, false);
+    let c = mask_char_for_ffi_status(FfiStatus::Deleted);
     assert!(matches!(c, FfiMaskChar::Deleted));
 }
 
@@ -164,11 +160,10 @@ fn test_is_template_expired() {
 // descendants_to_complete_ffi
 // ---------------------------------------------------------------------------
 
-fn make_desc(uuid: &str, status: FfiStatus, has_wait: bool) -> FfiTaskDescendant {
+fn make_desc(uuid: &str, status: FfiStatus) -> FfiTaskDescendant {
     FfiTaskDescendant {
         uuid: uuid.to_string(),
         status,
-        has_wait,
     }
 }
 
@@ -180,10 +175,10 @@ const UUID4: &str = "00000000-0000-0000-0000-000000000004";
 #[test]
 fn test_descendants_to_complete() {
     let descendants = vec![
-        make_desc(UUID1, FfiStatus::Pending, false), // pending → complete
-        make_desc(UUID2, FfiStatus::Pending, true),  // waiting → complete
-        make_desc(UUID3, FfiStatus::Completed, false), // skip
-        make_desc(UUID4, FfiStatus::Deleted, false), // skip
+        make_desc(UUID1, FfiStatus::Pending),   // pending → complete
+        make_desc(UUID2, FfiStatus::Pending),   // pending → complete (has_wait always false at FFI)
+        make_desc(UUID3, FfiStatus::Completed), // skip
+        make_desc(UUID4, FfiStatus::Deleted),   // skip
     ];
     let result = descendants_to_complete_ffi(descendants).unwrap();
     assert_eq!(result.len(), 2);
@@ -196,13 +191,12 @@ fn test_descendants_to_complete() {
 #[test]
 fn test_descendants_to_complete_skips_recurring_and_unknown() {
     let descendants = vec![
-        make_desc(UUID1, FfiStatus::Recurring, false),
+        make_desc(UUID1, FfiStatus::Recurring),
         make_desc(
             UUID2,
             FfiStatus::Unknown {
                 value: "custom".to_string(),
             },
-            false,
         ),
     ];
     let result = descendants_to_complete_ffi(descendants).unwrap();
@@ -216,10 +210,10 @@ fn test_descendants_to_complete_skips_recurring_and_unknown() {
 #[test]
 fn test_descendants_to_delete() {
     let descendants = vec![
-        make_desc(UUID1, FfiStatus::Pending, false),   // pending
-        make_desc(UUID2, FfiStatus::Pending, true),    // waiting (counts as pending)
-        make_desc(UUID3, FfiStatus::Completed, false), // not pending
-        make_desc(UUID4, FfiStatus::Deleted, false),   // not pending
+        make_desc(UUID1, FfiStatus::Pending),   // pending
+        make_desc(UUID2, FfiStatus::Pending),     // pending (has_wait always false at FFI)
+        make_desc(UUID3, FfiStatus::Completed),  // not pending
+        make_desc(UUID4, FfiStatus::Deleted),     // not pending
     ];
     let result = descendants_to_delete_ffi(descendants).unwrap();
     assert_eq!(result.pending_count, 2);
@@ -233,13 +227,12 @@ fn test_descendants_to_delete() {
 #[test]
 fn test_descendants_to_delete_unknown_not_counted() {
     let descendants = vec![
-        make_desc(UUID1, FfiStatus::Recurring, false),
+        make_desc(UUID1, FfiStatus::Recurring),
         make_desc(
             UUID2,
             FfiStatus::Unknown {
                 value: "x".to_string(),
             },
-            false,
         ),
     ];
     let result = descendants_to_delete_ffi(descendants).unwrap();
@@ -256,7 +249,6 @@ fn test_descendants_to_complete_invalid_uuid_returns_err() {
     let descendants = vec![FfiTaskDescendant {
         uuid: "not-a-uuid".to_string(),
         status: FfiStatus::Pending,
-        has_wait: false,
     }];
     let result = descendants_to_complete_ffi(descendants);
     assert!(result.is_err(), "expected Err for invalid UUID");
@@ -267,7 +259,6 @@ fn test_descendants_to_delete_invalid_uuid_returns_err() {
     let descendants = vec![FfiTaskDescendant {
         uuid: "not-a-uuid".to_string(),
         status: FfiStatus::Pending,
-        has_wait: false,
     }];
     let result = descendants_to_delete_ffi(descendants);
     assert!(result.is_err(), "expected Err for invalid UUID");
