@@ -79,38 +79,13 @@ pub struct FfiTask {
     ///
     /// Raw value from `tc_tasks.project_id` — same JOIN as `project`.
     pub project_id: Option<String>,
-    /// User-defined attributes not covered by dedicated fields.
-    ///
-    /// Keys are the raw TaskMap keys (e.g. `"custom_field"`).
-    /// Values are the raw string values from the TaskMap.
-    /// Empty if the task has no UDAs.
-    ///
-    /// Keys excluded from this map: `"scheduled"`, `"is_full_day"`, `"estimate"`,
-    /// `"recur"`, `"mask"`, `"imask"`, `"until"`, `"xstatus"`, `"today_position"` —
-    /// all have typed accessor fields above. See [`DEDICATED_UDA_FIELDS`] for the authoritative list.
-    pub remaining_data: std::collections::HashMap<String, String>,
     /// FlickNote: position of this task in the today view. `None` if not set.
     ///
     /// Stored as UDA `"today_position"` in the task.
     pub today_position: Option<String>,
 }
 
-/// UDA keys that have dedicated typed fields on [`FfiTask`].
-///
-/// These keys are excluded from `FfiTask.remaining_data` and rejected by the
-/// `SetValue` mutation. When adding a new dedicated field, update this list —
-/// both `convert.rs` and `task_ops.rs` reference it.
-pub(crate) const DEDICATED_UDA_FIELDS: &[&str] = &[
-    "scheduled",
-    "is_full_day",
-    "estimate",
-    "recur",
-    "mask",
-    "imask",
-    "until",
-    "xstatus",
-    "today_position",
-];
+
 
 /// A node in the task tree (parent/child hierarchy).
 #[derive(uniffi::Record)]
@@ -246,15 +221,6 @@ pub enum TaskMutation {
     ///
     /// Stored as UDA `"today_position"` in the task.
     SetTodayPosition {
-        value: Option<String>,
-    },
-    /// Generic escape hatch for setting arbitrary UDA values.
-    ///
-    /// `key` is the raw TaskMap key. `value` is `None` to remove.
-    /// Returns `InvalidInput` if `key` is a known TaskChampion property
-    /// (use the dedicated variant instead).
-    SetValue {
-        key: String,
         value: Option<String>,
     },
 }

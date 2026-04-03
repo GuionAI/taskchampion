@@ -5,7 +5,7 @@ use taskchampion::{Status, Task, TreeMap};
 use uuid::Uuid;
 
 use crate::types::{
-    FfiAnnotation, FfiError, FfiStatus, FfiTask, FfiTreeNode, DEDICATED_UDA_FIELDS,
+    FfiAnnotation, FfiError, FfiStatus, FfiTask, FfiTreeNode,
 };
 
 // ---------------------------------------------------------------------------
@@ -60,12 +60,6 @@ impl From<&Task> for FfiTask {
             xstatus: task.get_value("xstatus").map(|v| v.to_string()),
             project: task.get_value("project").map(|v| v.to_string()),
             project_id: task.get_value("project_id").map(|v| v.to_string()),
-            remaining_data: {
-                task.get_user_defined_attributes()
-                    .filter(|(k, _)| !DEDICATED_UDA_FIELDS.contains(k))
-                    .map(|(k, v)| (k.to_string(), v.to_string()))
-                    .collect()
-            },
             today_position: task.get_value("today_position").map(|v| v.to_string()),
         }
     }

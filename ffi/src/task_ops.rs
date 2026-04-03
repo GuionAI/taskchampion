@@ -4,7 +4,7 @@ use chrono::DateTime;
 use taskchampion::{Annotation, Operation, Operations, Status, Tag};
 
 use crate::replica_ops::{parse_uuid, FfiSession};
-use crate::types::{FfiError, FfiTask, TaskMutation, DEDICATED_UDA_FIELDS};
+use crate::types::{FfiError, FfiTask, TaskMutation};
 
 #[uniffi::export]
 impl FfiSession {
@@ -257,36 +257,6 @@ fn apply_mutation(
         TaskMutation::SetTodayPosition { value } => {
             task.set_value("today_position", value, ops)
                 .map_err(FfiError::from)?;
-        }
-        TaskMutation::SetValue { key, value } => {
-            // Guard: reject known TaskChampion core keys and dedicated UDA
-            // fields — callers should use the typed mutation variant instead.
-            let core_keys = [
-                "status",
-                "description",
-                "priority",
-                "due",
-                "entry",
-                "end",
-                "modified",
-                "parent_id",
-                "position",
-                "start",
-                "project_id",
-            ];
-            if core_keys.contains(&key.as_str())
-                || DEDICATED_UDA_FIELDS.contains(&key.as_str())
-                || key.starts_with("tag_")
-                || key.starts_with("annotation_")
-                || key.starts_with("dep_")
-            {
-                return Err(FfiError::InvalidInput {
-                    message: format!(
-                        "'{key}' is a known property — use the dedicated mutation variant"
-                    ),
-                });
-            }
-            task.set_value(key, value, ops).map_err(FfiError::from)?;
         }
     }
     Ok(())
