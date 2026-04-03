@@ -551,11 +551,6 @@ fileprivate struct FfiConverterString: FfiConverter {
 public protocol FfiSessionProtocol: AnyObject, Sendable {
     
     /**
-     * Return all tasks (pending, completed, deleted).
-     */
-    func allTasks() async throws  -> [FfiTask]
-    
-    /**
      * Clear the xstatus UDA on a task, and auto-set status to `Pending`.
      *
      * Returns the task unchanged (no undo point) if xstatus is already `None`.
@@ -611,11 +606,6 @@ public protocol FfiSessionProtocol: AnyObject, Sendable {
     func dependencyMap() async throws  -> [FfiDependencyEdge]
     
     /**
-     * Fetch a single task by UUID. Returns `None` if not found.
-     */
-    func getTask(uuid: String) async throws  -> FfiTask?
-    
-    /**
      * Return `true` if `ancestor_uuid` is an ancestor of `uuid` in the task tree.
      *
      * Used for UI hints such as greying out invalid drag-and-drop targets.
@@ -625,11 +615,6 @@ public protocol FfiSessionProtocol: AnyObject, Sendable {
      * Returns `false` if either UUID does not exist or is not in the tree.
      */
     func isAncestor(uuid: String, ancestorUuid: String) async throws  -> Bool
-    
-    /**
-     * Return pending tasks only.
-     */
-    func pendingTasks() async throws  -> [FfiTask]
     
     /**
      * Rename `old` to `new` in tc_config.tags and across all task keys.
@@ -807,26 +792,6 @@ public convenience init(executor: FfiSqlExecutor) {
 
     
     /**
-     * Return all tasks (pending, completed, deleted).
-     */
-open func allTasks()async throws  -> [FfiTask]  {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_taskchampion_ffi_fn_method_ffisession_all_tasks(
-                    self.uniffiCloneHandle()
-                    
-                )
-            },
-            pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
-            completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
-            freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterSequenceTypeFfiTask.lift,
-            errorHandler: FfiConverterTypeFfiError_lift
-        )
-}
-    
-    /**
      * Clear the xstatus UDA on a task, and auto-set status to `Pending`.
      *
      * Returns the task unchanged (no undo point) if xstatus is already `None`.
@@ -987,26 +952,6 @@ open func dependencyMap()async throws  -> [FfiDependencyEdge]  {
 }
     
     /**
-     * Fetch a single task by UUID. Returns `None` if not found.
-     */
-open func getTask(uuid: String)async throws  -> FfiTask?  {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_taskchampion_ffi_fn_method_ffisession_get_task(
-                    self.uniffiCloneHandle(),
-                    FfiConverterString.lower(uuid)
-                )
-            },
-            pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
-            completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
-            freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterOptionTypeFfiTask.lift,
-            errorHandler: FfiConverterTypeFfiError_lift
-        )
-}
-    
-    /**
      * Return `true` if `ancestor_uuid` is an ancestor of `uuid` in the task tree.
      *
      * Used for UI hints such as greying out invalid drag-and-drop targets.
@@ -1028,26 +973,6 @@ open func isAncestor(uuid: String, ancestorUuid: String)async throws  -> Bool  {
             completeFunc: ffi_taskchampion_ffi_rust_future_complete_i8,
             freeFunc: ffi_taskchampion_ffi_rust_future_free_i8,
             liftFunc: FfiConverterBool.lift,
-            errorHandler: FfiConverterTypeFfiError_lift
-        )
-}
-    
-    /**
-     * Return pending tasks only.
-     */
-open func pendingTasks()async throws  -> [FfiTask]  {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_taskchampion_ffi_fn_method_ffisession_pending_tasks(
-                    self.uniffiCloneHandle()
-                    
-                )
-            },
-            pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
-            completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
-            freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterSequenceTypeFfiTask.lift,
             errorHandler: FfiConverterTypeFfiError_lift
         )
 }
@@ -1822,10 +1747,6 @@ public struct FfiChildStatusChange: Equatable, Hashable {
      * New status for this child.
      */
     public var newStatus: FfiStatus
-    /**
-     * True when the child has a future `wait` date (logically "waiting").
-     */
-    public var hasWait: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -1838,14 +1759,10 @@ public struct FfiChildStatusChange: Equatable, Hashable {
          */imask: UInt32, 
         /**
          * New status for this child.
-         */newStatus: FfiStatus, 
-        /**
-         * True when the child has a future `wait` date (logically "waiting").
-         */hasWait: Bool) {
+         */newStatus: FfiStatus) {
         self.templateUuid = templateUuid
         self.imask = imask
         self.newStatus = newStatus
-        self.hasWait = hasWait
     }
 
     
@@ -1866,8 +1783,7 @@ public struct FfiConverterTypeFfiChildStatusChange: FfiConverterRustBuffer {
             try FfiChildStatusChange(
                 templateUuid: FfiConverterString.read(from: &buf), 
                 imask: FfiConverterUInt32.read(from: &buf), 
-                newStatus: FfiConverterTypeFfiStatus.read(from: &buf), 
-                hasWait: FfiConverterBool.read(from: &buf)
+                newStatus: FfiConverterTypeFfiStatus.read(from: &buf)
         )
     }
 
@@ -1875,7 +1791,6 @@ public struct FfiConverterTypeFfiChildStatusChange: FfiConverterRustBuffer {
         FfiConverterString.write(value.templateUuid, into: &buf)
         FfiConverterUInt32.write(value.imask, into: &buf)
         FfiConverterTypeFfiStatus.write(value.newStatus, into: &buf)
-        FfiConverterBool.write(value.hasWait, into: &buf)
     }
 }
 
@@ -2287,10 +2202,6 @@ public struct FfiRecurringTemplate: Equatable, Hashable {
      */
     public var untilEpoch: Int64?
     /**
-     * Wait date as Unix epoch seconds. `None` if not set.
-     */
-    public var waitEpoch: Int64?
-    /**
      * Fields to clone onto child tasks (description, project, tags, etc.).
      */
     public var cloneableFields: [String: String]
@@ -2311,9 +2222,6 @@ public struct FfiRecurringTemplate: Equatable, Hashable {
          * Hard expiry date as Unix epoch seconds. `None` if not set.
          */untilEpoch: Int64?, 
         /**
-         * Wait date as Unix epoch seconds. `None` if not set.
-         */waitEpoch: Int64?, 
-        /**
          * Fields to clone onto child tasks (description, project, tags, etc.).
          */cloneableFields: [String: String]) {
         self.uuid = uuid
@@ -2321,7 +2229,6 @@ public struct FfiRecurringTemplate: Equatable, Hashable {
         self.recur = recur
         self.mask = mask
         self.untilEpoch = untilEpoch
-        self.waitEpoch = waitEpoch
         self.cloneableFields = cloneableFields
     }
 
@@ -2346,7 +2253,6 @@ public struct FfiConverterTypeFfiRecurringTemplate: FfiConverterRustBuffer {
                 recur: FfiConverterString.read(from: &buf), 
                 mask: FfiConverterString.read(from: &buf), 
                 untilEpoch: FfiConverterOptionInt64.read(from: &buf), 
-                waitEpoch: FfiConverterOptionInt64.read(from: &buf), 
                 cloneableFields: FfiConverterDictionaryStringString.read(from: &buf)
         )
     }
@@ -2357,7 +2263,6 @@ public struct FfiConverterTypeFfiRecurringTemplate: FfiConverterRustBuffer {
         FfiConverterString.write(value.recur, into: &buf)
         FfiConverterString.write(value.mask, into: &buf)
         FfiConverterOptionInt64.write(value.untilEpoch, into: &buf)
-        FfiConverterOptionInt64.write(value.waitEpoch, into: &buf)
         FfiConverterDictionaryStringString.write(value.cloneableFields, into: &buf)
     }
 }
@@ -2521,7 +2426,6 @@ public struct FfiTask: Equatable, Hashable {
     public var entry: Int64?
     public var modified: Int64?
     public var due: Int64?
-    public var wait: Int64?
     /**
      * Scheduled date as Unix epoch seconds, or `None` if not set.
      */
@@ -2544,7 +2448,6 @@ public struct FfiTask: Equatable, Hashable {
      * UUIDs of tasks this task depends on.
      */
     public var dependencies: [String]
-    public var isWaiting: Bool
     public var isActive: Bool
     public var isBlocked: Bool
     public var isBlocking: Bool
@@ -2594,24 +2497,18 @@ public struct FfiTask: Equatable, Hashable {
      */
     public var projectId: String?
     /**
-     * User-defined attributes not covered by dedicated fields.
+     * FlickNote: position of this task in the today view. `None` if not set.
      *
-     * Keys are the raw TaskMap keys (e.g. `"custom_field"`).
-     * Values are the raw string values from the TaskMap.
-     * Empty if the task has no UDAs.
-     *
-     * Keys excluded from this map: `"scheduled"`, `"is_full_day"`, `"estimate"`,
-     * `"recur"`, `"mask"`, `"imask"`, `"until"`, `"xstatus"` — all have typed
-     * accessor fields above. See [`DEDICATED_UDA_FIELDS`] for the authoritative list.
+     * Stored as UDA `"today_position"` in the task.
      */
-    public var remainingData: [String: String]
+    public var todayPosition: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
     public init(uuid: String, status: FfiStatus, description: String, priority: String, 
         /**
          * Unix epoch seconds, or `None` if not set.
-         */entry: Int64?, modified: Int64?, due: Int64?, wait: Int64?, 
+         */entry: Int64?, modified: Int64?, due: Int64?, 
         /**
          * Scheduled date as Unix epoch seconds, or `None` if not set.
          */scheduled: Int64?, 
@@ -2626,7 +2523,7 @@ public struct FfiTask: Equatable, Hashable {
          */tags: [String], annotations: [FfiAnnotation], 
         /**
          * UUIDs of tasks this task depends on.
-         */dependencies: [String], isWaiting: Bool, isActive: Bool, isBlocked: Bool, isBlocking: Bool, 
+         */dependencies: [String], isActive: Bool, isBlocked: Bool, isBlocking: Bool, 
         /**
          * FlickNote: whether this is a full-day task. Derived from UDA `is_full_day`.
          */isFullDay: Bool, 
@@ -2664,16 +2561,10 @@ public struct FfiTask: Equatable, Hashable {
          * Raw value from `tc_tasks.project_id` — same JOIN as `project`.
          */projectId: String?, 
         /**
-         * User-defined attributes not covered by dedicated fields.
+         * FlickNote: position of this task in the today view. `None` if not set.
          *
-         * Keys are the raw TaskMap keys (e.g. `"custom_field"`).
-         * Values are the raw string values from the TaskMap.
-         * Empty if the task has no UDAs.
-         *
-         * Keys excluded from this map: `"scheduled"`, `"is_full_day"`, `"estimate"`,
-         * `"recur"`, `"mask"`, `"imask"`, `"until"`, `"xstatus"` — all have typed
-         * accessor fields above. See [`DEDICATED_UDA_FIELDS`] for the authoritative list.
-         */remainingData: [String: String]) {
+         * Stored as UDA `"today_position"` in the task.
+         */todayPosition: String?) {
         self.uuid = uuid
         self.status = status
         self.description = description
@@ -2681,7 +2572,6 @@ public struct FfiTask: Equatable, Hashable {
         self.entry = entry
         self.modified = modified
         self.due = due
-        self.wait = wait
         self.scheduled = scheduled
         self.start = start
         self.parent = parent
@@ -2689,7 +2579,6 @@ public struct FfiTask: Equatable, Hashable {
         self.tags = tags
         self.annotations = annotations
         self.dependencies = dependencies
-        self.isWaiting = isWaiting
         self.isActive = isActive
         self.isBlocked = isBlocked
         self.isBlocking = isBlocking
@@ -2702,7 +2591,7 @@ public struct FfiTask: Equatable, Hashable {
         self.xstatus = xstatus
         self.project = project
         self.projectId = projectId
-        self.remainingData = remainingData
+        self.todayPosition = todayPosition
     }
 
     
@@ -2728,7 +2617,6 @@ public struct FfiConverterTypeFfiTask: FfiConverterRustBuffer {
                 entry: FfiConverterOptionInt64.read(from: &buf), 
                 modified: FfiConverterOptionInt64.read(from: &buf), 
                 due: FfiConverterOptionInt64.read(from: &buf), 
-                wait: FfiConverterOptionInt64.read(from: &buf), 
                 scheduled: FfiConverterOptionInt64.read(from: &buf), 
                 start: FfiConverterOptionInt64.read(from: &buf), 
                 parent: FfiConverterOptionString.read(from: &buf), 
@@ -2736,7 +2624,6 @@ public struct FfiConverterTypeFfiTask: FfiConverterRustBuffer {
                 tags: FfiConverterSequenceString.read(from: &buf), 
                 annotations: FfiConverterSequenceTypeFfiAnnotation.read(from: &buf), 
                 dependencies: FfiConverterSequenceString.read(from: &buf), 
-                isWaiting: FfiConverterBool.read(from: &buf), 
                 isActive: FfiConverterBool.read(from: &buf), 
                 isBlocked: FfiConverterBool.read(from: &buf), 
                 isBlocking: FfiConverterBool.read(from: &buf), 
@@ -2749,7 +2636,7 @@ public struct FfiConverterTypeFfiTask: FfiConverterRustBuffer {
                 xstatus: FfiConverterOptionString.read(from: &buf), 
                 project: FfiConverterOptionString.read(from: &buf), 
                 projectId: FfiConverterOptionString.read(from: &buf), 
-                remainingData: FfiConverterDictionaryStringString.read(from: &buf)
+                todayPosition: FfiConverterOptionString.read(from: &buf)
         )
     }
 
@@ -2761,7 +2648,6 @@ public struct FfiConverterTypeFfiTask: FfiConverterRustBuffer {
         FfiConverterOptionInt64.write(value.entry, into: &buf)
         FfiConverterOptionInt64.write(value.modified, into: &buf)
         FfiConverterOptionInt64.write(value.due, into: &buf)
-        FfiConverterOptionInt64.write(value.wait, into: &buf)
         FfiConverterOptionInt64.write(value.scheduled, into: &buf)
         FfiConverterOptionInt64.write(value.start, into: &buf)
         FfiConverterOptionString.write(value.parent, into: &buf)
@@ -2769,7 +2655,6 @@ public struct FfiConverterTypeFfiTask: FfiConverterRustBuffer {
         FfiConverterSequenceString.write(value.tags, into: &buf)
         FfiConverterSequenceTypeFfiAnnotation.write(value.annotations, into: &buf)
         FfiConverterSequenceString.write(value.dependencies, into: &buf)
-        FfiConverterBool.write(value.isWaiting, into: &buf)
         FfiConverterBool.write(value.isActive, into: &buf)
         FfiConverterBool.write(value.isBlocked, into: &buf)
         FfiConverterBool.write(value.isBlocking, into: &buf)
@@ -2782,7 +2667,7 @@ public struct FfiConverterTypeFfiTask: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.xstatus, into: &buf)
         FfiConverterOptionString.write(value.project, into: &buf)
         FfiConverterOptionString.write(value.projectId, into: &buf)
-        FfiConverterDictionaryStringString.write(value.remainingData, into: &buf)
+        FfiConverterOptionString.write(value.todayPosition, into: &buf)
     }
 }
 
@@ -2814,10 +2699,6 @@ public struct FfiTaskDescendant: Equatable, Hashable {
      * Task status.
      */
     public var status: FfiStatus
-    /**
-     * True when the task has a future `wait` date (logically "waiting").
-     */
-    public var hasWait: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -2827,13 +2708,9 @@ public struct FfiTaskDescendant: Equatable, Hashable {
          */uuid: String, 
         /**
          * Task status.
-         */status: FfiStatus, 
-        /**
-         * True when the task has a future `wait` date (logically "waiting").
-         */hasWait: Bool) {
+         */status: FfiStatus) {
         self.uuid = uuid
         self.status = status
-        self.hasWait = hasWait
     }
 
     
@@ -2853,15 +2730,13 @@ public struct FfiConverterTypeFfiTaskDescendant: FfiConverterRustBuffer {
         return
             try FfiTaskDescendant(
                 uuid: FfiConverterString.read(from: &buf), 
-                status: FfiConverterTypeFfiStatus.read(from: &buf), 
-                hasWait: FfiConverterBool.read(from: &buf)
+                status: FfiConverterTypeFfiStatus.read(from: &buf)
         )
     }
 
     public static func write(_ value: FfiTaskDescendant, into buf: inout [UInt8]) {
         FfiConverterString.write(value.uuid, into: &buf)
         FfiConverterTypeFfiStatus.write(value.status, into: &buf)
-        FfiConverterBool.write(value.hasWait, into: &buf)
     }
 }
 
@@ -3406,7 +3281,7 @@ public enum FfiRecurrenceAction: Equatable, Hashable {
     /**
      * Create a child task instance.
      */
-    case createChild(templateUuid: String, imask: UInt32, dueEpoch: Int64, waitEpoch: Int64?, cloneableFields: [String: String]
+    case createChild(templateUuid: String, imask: UInt32, dueEpoch: Int64, cloneableFields: [String: String]
     )
     /**
      * Update the template's mask string.
@@ -3448,7 +3323,7 @@ public struct FfiConverterTypeFfiRecurrenceAction: FfiConverterRustBuffer {
         let variant: Int32 = try readInt(&buf)
         switch variant {
         
-        case 1: return .createChild(templateUuid: try FfiConverterString.read(from: &buf), imask: try FfiConverterUInt32.read(from: &buf), dueEpoch: try FfiConverterInt64.read(from: &buf), waitEpoch: try FfiConverterOptionInt64.read(from: &buf), cloneableFields: try FfiConverterDictionaryStringString.read(from: &buf)
+        case 1: return .createChild(templateUuid: try FfiConverterString.read(from: &buf), imask: try FfiConverterUInt32.read(from: &buf), dueEpoch: try FfiConverterInt64.read(from: &buf), cloneableFields: try FfiConverterDictionaryStringString.read(from: &buf)
         )
         
         case 2: return .updateTemplateMask(templateUuid: try FfiConverterString.read(from: &buf), newMask: try FfiConverterString.read(from: &buf)
@@ -3468,12 +3343,11 @@ public struct FfiConverterTypeFfiRecurrenceAction: FfiConverterRustBuffer {
         switch value {
         
         
-        case let .createChild(templateUuid,imask,dueEpoch,waitEpoch,cloneableFields):
+        case let .createChild(templateUuid,imask,dueEpoch,cloneableFields):
             writeInt(&buf, Int32(1))
             FfiConverterString.write(templateUuid, into: &buf)
             FfiConverterUInt32.write(imask, into: &buf)
             FfiConverterInt64.write(dueEpoch, into: &buf)
-            FfiConverterOptionInt64.write(waitEpoch, into: &buf)
             FfiConverterDictionaryStringString.write(cloneableFields, into: &buf)
             
         
@@ -4142,8 +4016,6 @@ public enum TaskMutation: Equatable, Hashable {
      */
     case setDue(epoch: Int64?
     )
-    case setWait(epoch: Int64?
-    )
     case setEntry(epoch: Int64?
     )
     case setParent(uuid: String?
@@ -4239,13 +4111,11 @@ public enum TaskMutation: Equatable, Hashable {
     case setProjectId(value: String?
     )
     /**
-     * Generic escape hatch for setting arbitrary UDA values.
+     * Set the today_position value. `None` clears the field.
      *
-     * `key` is the raw TaskMap key. `value` is `None` to remove.
-     * Returns `InvalidInput` if `key` is a known TaskChampion property
-     * (use the dedicated variant instead).
+     * Stored as UDA `"today_position"` in the task.
      */
-    case setValue(key: String, value: String?
+    case setTodayPosition(value: String?
     )
 
 
@@ -4280,72 +4150,69 @@ public struct FfiConverterTypeTaskMutation: FfiConverterRustBuffer {
         case 4: return .setDue(epoch: try FfiConverterOptionInt64.read(from: &buf)
         )
         
-        case 5: return .setWait(epoch: try FfiConverterOptionInt64.read(from: &buf)
+        case 5: return .setEntry(epoch: try FfiConverterOptionInt64.read(from: &buf)
         )
         
-        case 6: return .setEntry(epoch: try FfiConverterOptionInt64.read(from: &buf)
+        case 6: return .setParent(uuid: try FfiConverterOptionString.read(from: &buf)
         )
         
-        case 7: return .setParent(uuid: try FfiConverterOptionString.read(from: &buf)
+        case 7: return .setPosition(value: try FfiConverterOptionString.read(from: &buf)
         )
         
-        case 8: return .setPosition(value: try FfiConverterOptionString.read(from: &buf)
+        case 8: return .addTag(tag: try FfiConverterString.read(from: &buf)
         )
         
-        case 9: return .addTag(tag: try FfiConverterString.read(from: &buf)
+        case 9: return .removeTag(tag: try FfiConverterString.read(from: &buf)
         )
         
-        case 10: return .removeTag(tag: try FfiConverterString.read(from: &buf)
+        case 10: return .addAnnotation(entry: try FfiConverterInt64.read(from: &buf), description: try FfiConverterString.read(from: &buf)
         )
         
-        case 11: return .addAnnotation(entry: try FfiConverterInt64.read(from: &buf), description: try FfiConverterString.read(from: &buf)
+        case 11: return .removeAnnotation(entry: try FfiConverterInt64.read(from: &buf)
         )
         
-        case 12: return .removeAnnotation(entry: try FfiConverterInt64.read(from: &buf)
+        case 12: return .addDependency(uuid: try FfiConverterString.read(from: &buf)
         )
         
-        case 13: return .addDependency(uuid: try FfiConverterString.read(from: &buf)
+        case 13: return .removeDependency(uuid: try FfiConverterString.read(from: &buf)
         )
         
-        case 14: return .removeDependency(uuid: try FfiConverterString.read(from: &buf)
+        case 14: return .done
+        
+        case 15: return .start
+        
+        case 16: return .stop
+        
+        case 17: return .delete
+        
+        case 18: return .setScheduled(epoch: try FfiConverterOptionInt64.read(from: &buf)
         )
         
-        case 15: return .done
-        
-        case 16: return .start
-        
-        case 17: return .stop
-        
-        case 18: return .delete
-        
-        case 19: return .setScheduled(epoch: try FfiConverterOptionInt64.read(from: &buf)
+        case 19: return .setStart(epoch: try FfiConverterOptionInt64.read(from: &buf)
         )
         
-        case 20: return .setStart(epoch: try FfiConverterOptionInt64.read(from: &buf)
+        case 20: return .setIsFullDay(value: try FfiConverterBool.read(from: &buf)
         )
         
-        case 21: return .setIsFullDay(value: try FfiConverterBool.read(from: &buf)
+        case 21: return .setEstimate(boxes: try FfiConverterOptionUInt32.read(from: &buf)
         )
         
-        case 22: return .setEstimate(boxes: try FfiConverterOptionUInt32.read(from: &buf)
+        case 22: return .setRecur(value: try FfiConverterOptionString.read(from: &buf)
         )
         
-        case 23: return .setRecur(value: try FfiConverterOptionString.read(from: &buf)
+        case 23: return .setMask(value: try FfiConverterOptionString.read(from: &buf)
         )
         
-        case 24: return .setMask(value: try FfiConverterOptionString.read(from: &buf)
+        case 24: return .setImask(value: try FfiConverterOptionUInt32.read(from: &buf)
         )
         
-        case 25: return .setImask(value: try FfiConverterOptionUInt32.read(from: &buf)
+        case 25: return .setUntil(epoch: try FfiConverterOptionInt64.read(from: &buf)
         )
         
-        case 26: return .setUntil(epoch: try FfiConverterOptionInt64.read(from: &buf)
+        case 26: return .setProjectId(value: try FfiConverterOptionString.read(from: &buf)
         )
         
-        case 27: return .setProjectId(value: try FfiConverterOptionString.read(from: &buf)
-        )
-        
-        case 28: return .setValue(key: try FfiConverterString.read(from: &buf), value: try FfiConverterOptionString.read(from: &buf)
+        case 27: return .setTodayPosition(value: try FfiConverterOptionString.read(from: &buf)
         )
         
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -4376,121 +4243,115 @@ public struct FfiConverterTypeTaskMutation: FfiConverterRustBuffer {
             FfiConverterOptionInt64.write(epoch, into: &buf)
             
         
-        case let .setWait(epoch):
+        case let .setEntry(epoch):
             writeInt(&buf, Int32(5))
             FfiConverterOptionInt64.write(epoch, into: &buf)
             
         
-        case let .setEntry(epoch):
-            writeInt(&buf, Int32(6))
-            FfiConverterOptionInt64.write(epoch, into: &buf)
-            
-        
         case let .setParent(uuid):
-            writeInt(&buf, Int32(7))
+            writeInt(&buf, Int32(6))
             FfiConverterOptionString.write(uuid, into: &buf)
             
         
         case let .setPosition(value):
-            writeInt(&buf, Int32(8))
+            writeInt(&buf, Int32(7))
             FfiConverterOptionString.write(value, into: &buf)
             
         
         case let .addTag(tag):
-            writeInt(&buf, Int32(9))
+            writeInt(&buf, Int32(8))
             FfiConverterString.write(tag, into: &buf)
             
         
         case let .removeTag(tag):
-            writeInt(&buf, Int32(10))
+            writeInt(&buf, Int32(9))
             FfiConverterString.write(tag, into: &buf)
             
         
         case let .addAnnotation(entry,description):
-            writeInt(&buf, Int32(11))
+            writeInt(&buf, Int32(10))
             FfiConverterInt64.write(entry, into: &buf)
             FfiConverterString.write(description, into: &buf)
             
         
         case let .removeAnnotation(entry):
-            writeInt(&buf, Int32(12))
+            writeInt(&buf, Int32(11))
             FfiConverterInt64.write(entry, into: &buf)
             
         
         case let .addDependency(uuid):
-            writeInt(&buf, Int32(13))
+            writeInt(&buf, Int32(12))
             FfiConverterString.write(uuid, into: &buf)
             
         
         case let .removeDependency(uuid):
-            writeInt(&buf, Int32(14))
+            writeInt(&buf, Int32(13))
             FfiConverterString.write(uuid, into: &buf)
             
         
         case .done:
-            writeInt(&buf, Int32(15))
+            writeInt(&buf, Int32(14))
         
         
         case .start:
-            writeInt(&buf, Int32(16))
+            writeInt(&buf, Int32(15))
         
         
         case .stop:
-            writeInt(&buf, Int32(17))
+            writeInt(&buf, Int32(16))
         
         
         case .delete:
-            writeInt(&buf, Int32(18))
+            writeInt(&buf, Int32(17))
         
         
         case let .setScheduled(epoch):
-            writeInt(&buf, Int32(19))
+            writeInt(&buf, Int32(18))
             FfiConverterOptionInt64.write(epoch, into: &buf)
             
         
         case let .setStart(epoch):
-            writeInt(&buf, Int32(20))
+            writeInt(&buf, Int32(19))
             FfiConverterOptionInt64.write(epoch, into: &buf)
             
         
         case let .setIsFullDay(value):
-            writeInt(&buf, Int32(21))
+            writeInt(&buf, Int32(20))
             FfiConverterBool.write(value, into: &buf)
             
         
         case let .setEstimate(boxes):
-            writeInt(&buf, Int32(22))
+            writeInt(&buf, Int32(21))
             FfiConverterOptionUInt32.write(boxes, into: &buf)
             
         
         case let .setRecur(value):
-            writeInt(&buf, Int32(23))
+            writeInt(&buf, Int32(22))
             FfiConverterOptionString.write(value, into: &buf)
             
         
         case let .setMask(value):
-            writeInt(&buf, Int32(24))
+            writeInt(&buf, Int32(23))
             FfiConverterOptionString.write(value, into: &buf)
             
         
         case let .setImask(value):
-            writeInt(&buf, Int32(25))
+            writeInt(&buf, Int32(24))
             FfiConverterOptionUInt32.write(value, into: &buf)
             
         
         case let .setUntil(epoch):
-            writeInt(&buf, Int32(26))
+            writeInt(&buf, Int32(25))
             FfiConverterOptionInt64.write(epoch, into: &buf)
             
         
         case let .setProjectId(value):
-            writeInt(&buf, Int32(27))
+            writeInt(&buf, Int32(26))
             FfiConverterOptionString.write(value, into: &buf)
             
         
-        case let .setValue(key,value):
-            writeInt(&buf, Int32(28))
-            FfiConverterString.write(key, into: &buf)
+        case let .setTodayPosition(value):
+            writeInt(&buf, Int32(27))
             FfiConverterOptionString.write(value, into: &buf)
             
         }
@@ -4860,31 +4721,6 @@ fileprivate struct FfiConverterSequenceTypeFfiSqlStatement: FfiConverterRustBuff
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterSequenceTypeFfiTask: FfiConverterRustBuffer {
-    typealias SwiftType = [FfiTask]
-
-    public static func write(_ value: [FfiTask], into buf: inout [UInt8]) {
-        let len = Int32(value.count)
-        writeInt(&buf, len)
-        for item in value {
-            FfiConverterTypeFfiTask.write(item, into: &buf)
-        }
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiTask] {
-        let len: Int32 = try readInt(&buf)
-        var seq = [FfiTask]()
-        seq.reserveCapacity(Int(len))
-        for _ in 0 ..< len {
-            seq.append(try FfiConverterTypeFfiTask.read(from: &buf))
-        }
-        return seq
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
 fileprivate struct FfiConverterSequenceTypeFfiTaskDescendant: FfiConverterRustBuffer {
     typealias SwiftType = [FfiTaskDescendant]
 
@@ -5240,18 +5076,6 @@ public func planCompletionFfi(targetUuid: String, descendants: [FfiTaskDescendan
 })
 }
 /**
- * SQL that covers all task-related tables.
- *
- * Pass this to `db.watch()` so PowerSync re-runs your query whenever any
- * task or project row changes.
- */
-public func allTaskTablesSql() -> String  {
-    return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_taskchampion_ffi_fn_func_alltasktablessql($0
-    )
-})
-}
-/**
  * Generate due dates for a recurrence template.
  *
  * - `base_due_epoch`: the initial due date (Unix epoch seconds)
@@ -5290,13 +5114,12 @@ public func isTemplateExpiredFfi(mask: String, dueCount: UInt32, untilReached: B
 })
 }
 /**
- * Map a task's FFI status and wait state to the appropriate mask character.
+ * Map a task's FFI status to the appropriate mask character.
  */
-public func maskCharForFfiStatus(status: FfiStatus, hasWait: Bool) -> FfiMaskChar  {
+public func maskCharForFfiStatus(status: FfiStatus) -> FfiMaskChar  {
     return try!  FfiConverterTypeFfiMaskChar_lift(try! rustCall() {
     uniffi_taskchampion_ffi_fn_func_mask_char_for_ffi_status(
-        FfiConverterTypeFfiStatus_lower(status),
-        FfiConverterBool.lower(hasWait),$0
+        FfiConverterTypeFfiStatus_lower(status),$0
     )
 })
 }
@@ -5403,16 +5226,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_taskchampion_ffi_checksum_func_plan_completion_ffi() != 61772) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_func_alltasktablessql() != 45498) {
-        return InitializationResult.apiChecksumMismatch
-    }
     if (uniffi_taskchampion_ffi_checksum_func_generate_due_dates() != 26948) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_func_is_template_expired_ffi() != 53260) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_func_mask_char_for_ffi_status() != 26684) {
+    if (uniffi_taskchampion_ffi_checksum_func_mask_char_for_ffi_status() != 3290) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_func_parse_recurrence_spec() != 41629) {
@@ -5431,9 +5251,6 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_func_descendants_to_delete_ffi() != 20591) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_taskchampion_ffi_checksum_method_ffisession_all_tasks() != 57965) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_clear_xstatus() != 15503) {
@@ -5457,13 +5274,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_dependency_map() != 18621) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_method_ffisession_get_task() != 45469) {
-        return InitializationResult.apiChecksumMismatch
-    }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_is_ancestor() != 58227) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_taskchampion_ffi_checksum_method_ffisession_pending_tasks() != 10449) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_rename_tag() != 64411) {
