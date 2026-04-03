@@ -66,6 +66,7 @@ impl From<&Task> for FfiTask {
                     .map(|(k, v)| (k.to_string(), v.to_string()))
                     .collect()
             },
+            today_position: task.get_value("today_position").map(|v| v.to_string()),
         }
     }
 }

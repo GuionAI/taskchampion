@@ -254,6 +254,10 @@ fn apply_mutation(
             task.set_value("project", None::<String>, ops)
                 .map_err(FfiError::from)?;
         }
+        TaskMutation::SetTodayPosition { value } => {
+            task.set_value("today_position", value, ops)
+                .map_err(FfiError::from)?;
+        }
         TaskMutation::SetValue { key, value } => {
             // Guard: reject known TaskChampion core keys and dedicated UDA
             // fields — callers should use the typed mutation variant instead.

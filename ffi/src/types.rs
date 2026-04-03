@@ -86,9 +86,13 @@ pub struct FfiTask {
     /// Empty if the task has no UDAs.
     ///
     /// Keys excluded from this map: `"scheduled"`, `"is_full_day"`, `"estimate"`,
-    /// `"recur"`, `"mask"`, `"imask"`, `"until"`, `"xstatus"` — all have typed
-    /// accessor fields above. See [`DEDICATED_UDA_FIELDS`] for the authoritative list.
+    /// `"recur"`, `"mask"`, `"imask"`, `"until"`, `"xstatus"`, `"today_position"` —
+    /// all have typed accessor fields above. See [`DEDICATED_UDA_FIELDS`] for the authoritative list.
     pub remaining_data: std::collections::HashMap<String, String>,
+    /// FlickNote: position of this task in the today view. `None` if not set.
+    ///
+    /// Stored as UDA `"today_position"` in the task.
+    pub today_position: Option<String>,
 }
 
 /// UDA keys that have dedicated typed fields on [`FfiTask`].
@@ -105,6 +109,7 @@ pub(crate) const DEDICATED_UDA_FIELDS: &[&str] = &[
     "imask",
     "until",
     "xstatus",
+    "today_position",
 ];
 
 /// A node in the task tree (parent/child hierarchy).
@@ -235,6 +240,12 @@ pub enum TaskMutation {
     /// Writes the `project_id` column directly. The caller is responsible for
     /// passing a valid project UUID — no existence check is performed.
     SetProjectId {
+        value: Option<String>,
+    },
+    /// Set the today_position value. `None` clears the field.
+    ///
+    /// Stored as UDA `"today_position"` in the task.
+    SetTodayPosition {
         value: Option<String>,
     },
     /// Generic escape hatch for setting arbitrary UDA values.
