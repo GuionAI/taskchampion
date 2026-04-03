@@ -211,9 +211,9 @@ fn test_descendants_to_complete_skips_recurring_and_unknown() {
 fn test_descendants_to_delete() {
     let descendants = vec![
         make_desc(UUID1, FfiStatus::Pending),   // pending
-        make_desc(UUID2, FfiStatus::Pending),     // pending (has_wait always false at FFI)
-        make_desc(UUID3, FfiStatus::Completed),  // not pending
-        make_desc(UUID4, FfiStatus::Deleted),     // not pending
+        make_desc(UUID2, FfiStatus::Pending),   // pending (has_wait always false at FFI)
+        make_desc(UUID3, FfiStatus::Completed), // not pending
+        make_desc(UUID4, FfiStatus::Deleted),   // not pending
     ];
     let result = descendants_to_delete_ffi(descendants).unwrap();
     assert_eq!(result.pending_count, 2);

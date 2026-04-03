@@ -4,9 +4,7 @@ use async_trait::async_trait;
 use taskchampion::{Status, Task, TreeMap};
 use uuid::Uuid;
 
-use crate::types::{
-    FfiAnnotation, FfiError, FfiStatus, FfiTask, FfiTreeNode,
-};
+use crate::types::{FfiAnnotation, FfiError, FfiStatus, FfiTask, FfiTreeNode};
 
 // ---------------------------------------------------------------------------
 // Task → FfiTask

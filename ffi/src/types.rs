@@ -85,8 +85,6 @@ pub struct FfiTask {
     pub today_position: Option<String>,
 }
 
-
-
 /// A node in the task tree (parent/child hierarchy).
 #[derive(uniffi::Record)]
 pub struct FfiTreeNode {
