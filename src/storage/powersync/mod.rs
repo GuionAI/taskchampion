@@ -87,6 +87,21 @@ mod test {
         crate::storage::test::tc_config_overwrite(storage).await
     }
 
+    /// Verify that set_tc_config creates the settings row via UPSERT even when
+    /// no settings row exists at all (no seed, no default row).
+    #[tokio::test]
+    async fn tc_config_upsert_creates_row_when_absent() -> crate::errors::Result<()> {
+        let mut inner = PowerSyncStorageInner::new_for_test()?;
+        // Remove the default row seeded by new_for_test to simulate a fresh DB
+        // with no settings row (mirrors the state before the fix was applied).
+        inner
+            .conn
+            .execute("DELETE FROM settings", [])
+            .expect("clear settings table");
+        let storage = PowerSyncStorage(Wrapper::new(async move || Ok(inner)).await?);
+        crate::storage::test::tc_config_round_trip(storage).await
+    }
+
     /// Verify that promoted string columns (status, description, priority, parent) survive
     /// a set_task / get_task round-trip via the dedicated columns, not just the JSON blob.
     #[tokio::test]
