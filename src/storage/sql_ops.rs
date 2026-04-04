@@ -230,17 +230,12 @@ pub(crate) fn remove_operation_stmt(id: &str) -> SqlStatement {
     }
 }
 
-/// The canonical `id` value for the single settings row.
-pub(crate) const SETTINGS_DEFAULT_ID: &str = "default";
-
 /// Generate SQL statement for setting tc_config.
 pub(crate) fn set_tc_config_stmt(value: &str) -> SqlStatement {
     SqlStatement {
-        // Upsert so the write succeeds even when no settings row exists yet.
-        sql: format!(
-            "INSERT INTO settings (id, tc_config) VALUES ('{SETTINGS_DEFAULT_ID}', ?) \
-             ON CONFLICT(id) DO UPDATE SET tc_config = excluded.tc_config"
-        ),
+        // Single-user DB: PowerSync/Supabase ensures exactly one settings row
+        // per user via an auth trigger. Plain UPDATE is correct for production.
+        sql: "UPDATE settings SET tc_config = ?".into(),
         params: vec![SqlParam::Text(value.to_string())],
     }
 }

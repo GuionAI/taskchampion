@@ -1464,7 +1464,6 @@ version = "3.0.2-pre"
 dependencies = [
  "anyhow",
  "async-trait",
- "bytes",
  "chrono",
  "fractional_index",
  "libc",
