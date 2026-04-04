@@ -122,6 +122,7 @@ impl PowerSyncStorageInner {
                 id TEXT PRIMARY KEY,
                 tc_config TEXT
             );
+            INSERT INTO settings (id) VALUES ('default') ON CONFLICT(id) DO NOTHING;
         ",
         )
         .context("Creating PowerSync test tables")?;

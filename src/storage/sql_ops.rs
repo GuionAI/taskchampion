@@ -233,8 +233,10 @@ pub(crate) fn remove_operation_stmt(id: &str) -> SqlStatement {
 /// Generate SQL statement for setting tc_config.
 pub(crate) fn set_tc_config_stmt(value: &str) -> SqlStatement {
     SqlStatement {
-        // Single-user DB: PowerSync ensures exactly one settings row per user.
-        sql: "UPDATE settings SET tc_config = ?".into(),
+        // Upsert so the write succeeds even when no settings row exists yet.
+        sql: "INSERT INTO settings (id, tc_config) VALUES ('default', ?) \
+              ON CONFLICT(id) DO UPDATE SET tc_config = excluded.tc_config"
+            .into(),
         params: vec![SqlParam::Text(value.to_string())],
     }
 }
