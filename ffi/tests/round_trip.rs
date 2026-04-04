@@ -2229,7 +2229,7 @@ async fn test_today_reorder_after_middle() {
     // A(pos[0]) < B(pos[1]) < C(pos[2]). Move A after B → B < A < C.
     let a = create_today_positioned(&session, "A", &pos[0]).await;
     let b = create_today_positioned(&session, "B", &pos[1]).await;
-    let c = create_today_positioned(&session, "C", &pos[2]).await;
+    let _c = create_today_positioned(&session, "C", &pos[2]).await;
 
     let task = session
         .today_reorder_after(a.clone(), b.clone())
@@ -2239,7 +2239,6 @@ async fn test_today_reorder_after_middle() {
     let new_pos = task.today_position.as_deref().expect("today_position set");
     assert!(new_pos > pos[1].as_str(), "A should be after B");
     assert!(new_pos < pos[2].as_str(), "A should be before C");
-    let _ = c;
 }
 
 #[tokio::test]
@@ -2265,7 +2264,7 @@ async fn test_today_reorder_before_middle() {
     let pos = sequential_positions(3);
 
     // A(pos[0]) < B(pos[1]) < C(pos[2]). Move C before B → A < C < B.
-    let a = create_today_positioned(&session, "A", &pos[0]).await;
+    let _a = create_today_positioned(&session, "A", &pos[0]).await;
     let b = create_today_positioned(&session, "B", &pos[1]).await;
     let c = create_today_positioned(&session, "C", &pos[2]).await;
 
@@ -2277,7 +2276,6 @@ async fn test_today_reorder_before_middle() {
     let new_pos = task.today_position.as_deref().expect("today_position set");
     assert!(new_pos > pos[0].as_str(), "C should be after A");
     assert!(new_pos < pos[1].as_str(), "C should be before B");
-    let _ = a;
 }
 
 #[tokio::test]
@@ -2312,11 +2310,12 @@ async fn test_today_reorder_to_beginning_and_end() {
     assert!(a_pos > pos[2].as_str(), "A should be after C");
 
     // Move C to beginning → C < B < A.
+    // Re-fetch B from DB to get its stable position (unchanged by previous move).
+    let b_task = session.get_task(b.clone()).await.unwrap().unwrap();
+    let b_pos = b_task.today_position.as_deref().expect("B today_position");
     let moved = session.today_reorder_to_beginning(c.clone()).await.unwrap();
     let c_pos = moved.today_position.as_deref().expect("today_position");
-    assert!(c_pos < pos[1].as_str(), "C should be before B");
-
-    let _ = b;
+    assert!(c_pos < b_pos, "C should be before B");
 }
 
 #[tokio::test]
@@ -2363,6 +2362,56 @@ async fn test_today_reorder_nonexistent_anchor() {
     let ghost = Uuid::new_v4().to_string();
 
     let result = session.today_reorder_after(task, ghost).await;
+    assert!(
+        matches!(result, Err(FfiError::TaskNotFound { .. })),
+        "expected TaskNotFound"
+    );
+}
+
+#[tokio::test]
+async fn test_today_reorder_before_nonexistent_uuid() {
+    let session = make_session();
+    let pos = sequential_positions(1);
+    let anchor = create_today_positioned(&session, "Anchor", &pos[0]).await;
+    let ghost = Uuid::new_v4().to_string();
+
+    let result = session.today_reorder_before(ghost, anchor).await;
+    assert!(
+        matches!(result, Err(FfiError::TaskNotFound { .. })),
+        "expected TaskNotFound"
+    );
+}
+
+#[tokio::test]
+async fn test_today_reorder_before_nonexistent_anchor() {
+    let session = make_session();
+    let pos = sequential_positions(1);
+    let task = create_today_positioned(&session, "Task", &pos[0]).await;
+    let ghost = Uuid::new_v4().to_string();
+
+    let result = session.today_reorder_before(task, ghost).await;
+    assert!(
+        matches!(result, Err(FfiError::TaskNotFound { .. })),
+        "expected TaskNotFound"
+    );
+}
+
+#[tokio::test]
+async fn test_today_reorder_to_beginning_nonexistent() {
+    let session = make_session();
+    let ghost = Uuid::new_v4().to_string();
+    let result = session.today_reorder_to_beginning(ghost).await;
+    assert!(
+        matches!(result, Err(FfiError::TaskNotFound { .. })),
+        "expected TaskNotFound"
+    );
+}
+
+#[tokio::test]
+async fn test_today_reorder_to_end_nonexistent() {
+    let session = make_session();
+    let ghost = Uuid::new_v4().to_string();
+    let result = session.today_reorder_to_end(ghost).await;
     assert!(
         matches!(result, Err(FfiError::TaskNotFound { .. })),
         "expected TaskNotFound"
