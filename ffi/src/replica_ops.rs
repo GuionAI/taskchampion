@@ -702,8 +702,8 @@ fn sorted_today_positions(
 ) -> Vec<(uuid::Uuid, String)> {
     let mut positioned: Vec<(uuid::Uuid, String)> = all_tasks
         .iter()
-        .filter(|(&u, t)| u != exclude && t.get_value("today_position").is_some())
-        .map(|(&u, t)| (u, t.get_value("today_position").unwrap().to_string()))
+        .filter(|(&u, _)| u != exclude)
+        .filter_map(|(&u, t)| t.get_value("today_position").map(|p| (u, p.to_string())))
         .collect();
     positioned.sort_by(|(_, a), (_, b)| a.cmp(b));
     positioned
