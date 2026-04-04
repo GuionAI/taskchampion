@@ -107,6 +107,7 @@ pub(crate) const TASK_SELECT_COLS: &str = "t.id, t.data, t.status, t.description
     t.start_at, t.end_at, t.wait_at, t.parent_id, \
     p.name as project_name, t.project_id";
 
+#[cfg(feature = "storage-pgwire")]
 /// Build the tc_tasks column projection with a caller-supplied `data` expression.
 ///
 /// Used by backends that need a different `data` cast — e.g. Postgres requires
