@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::errors::{Error, Result};
 use crate::operation::Operation;
-use crate::storage::columns::raw_to_task;
+use crate::storage::columns::{raw_to_task, task_select_cols};
 use crate::storage::sql_ops::prepare_task;
 use crate::storage::{Storage, StorageTxn, TaskMap};
 
@@ -18,19 +18,13 @@ use row_reader::{read_raw_task_row, rows_to_tasks};
 
 // ── SQL constants (Postgres-native $N placeholders) ────────────────────────
 
-/// Column list used in all tc_tasks SELECT queries.
-/// Mirrors the shared `TASK_SELECT_COLS` but in Postgres SQL syntax.
-const PG_TASK_SELECT_COLS: &str = "t.id, t.data::text, t.status, t.description, t.priority, \
-    t.entry_at, t.modified_at, t.due_at, t.scheduled_at, \
-    t.start_at, t.end_at, t.wait_at, t.parent_id, \
-    p.name as project_name, t.project_id";
-
 const PG_TASK_EXISTS_SQL: &str =
     "SELECT EXISTS(SELECT 1 FROM tc_tasks WHERE id = $1) AS exists_flag";
 
 const PG_ALL_OPERATIONS_SQL: &str = "SELECT data FROM tc_operations ORDER BY id ASC";
 const PG_LAST_OPERATION_SQL: &str = "SELECT id, data FROM tc_operations ORDER BY id DESC LIMIT 1";
 const PG_ALL_TASK_UUIDS_SQL: &str = "SELECT id FROM tc_tasks";
+/// Tags query using `jsonb_each_text` (Postgres-native replacement for SQLite's `json_each`).
 const PG_ALL_TAGS_SQL: &str = "SELECT DISTINCT kv.key AS name \
      FROM tc_tasks, jsonb_each_text(data) AS kv \
      WHERE kv.key LIKE 'tag_%' \
@@ -54,14 +48,19 @@ impl PgWireStorage {
     /// - `database_url`: Postgres connection string, e.g. `postgres://host:port/dbname`
     ///   (no password — auth is via JWT in the user field)
     /// - `token`: Supabase JWT, sent as the pgwire `user` field for authentication
+    ///
+    /// # Connection background task
+    ///
+    /// tokio-postgres requires a background task to drive the connection protocol.
+    /// This task is spawned on the current tokio runtime. If it encounters a network
+    /// error, subsequent operations on the returned `PgWireStorage` will fail with
+    /// opaque "connection closed" errors from tokio-postgres.
     pub async fn new(database_url: &str, token: &str) -> Result<Self> {
-        // Parse the URL and inject the token as the user field.
-        // tokio-postgres Config::from_str accepts standard DSN syntax.
         let config_str = build_config(database_url, token)?;
 
         let (client, connection) = tokio_postgres::connect(&config_str, NoTls)
             .await
-            .map_err(|_| Error::Database("pgwire connect failed".into()))?;
+            .map_err(|e| Error::Database(format!("pgwire connect failed: {e}")))?;
 
         // Spawn the connection task — it drives the protocol until the client drops.
         tokio::spawn(async move {
@@ -76,7 +75,6 @@ impl PgWireStorage {
 
 /// Build a tokio-postgres config string with the JWT as the user field.
 fn build_config(database_url: &str, token: &str) -> Result<String> {
-    // Parse the URL to extract host, port, and database.
     // Expected format: postgres://host:port/dbname or postgresql://host:port/dbname
     let without_scheme = database_url
         .strip_prefix("postgres://")
@@ -131,6 +129,14 @@ impl<'a> PgWireTxn<'a> {
     }
 }
 
+impl Drop for PgWireTxn<'_> {
+    fn drop(&mut self) {
+        if self.txn.is_some() {
+            log::debug!("PgWireTxn dropped without commit — implicit rollback");
+        }
+    }
+}
+
 /// Parse an operation from a JSON string, handling Supabase JSONB double-encoding.
 ///
 /// Supabase JSONB can double-encode bare JSON string values:
@@ -138,22 +144,22 @@ impl<'a> PgWireTxn<'a> {
 /// Supabase JSONB stores as a string value. When read back via pgwire text mode,
 /// it may arrive as `"\"UndoPoint\""`. Object variants like `{"Create":{...}}`
 /// are unaffected because JSON objects don't get re-wrapped.
-pub(crate) fn parse_operation(data_str: &str) -> Result<Operation> {
-    match serde_json::from_str::<Operation>(data_str) {
-        Ok(op) => Ok(op),
-        Err(original_err) => {
-            if data_str.starts_with('"') && data_str.ends_with('"') {
-                if let Ok(inner) = serde_json::from_str::<String>(data_str) {
-                    return serde_json::from_str::<Operation>(&inner).map_err(|e| {
-                        Error::Database(format!("Failed to parse operation (unwrapped): {e}"))
-                    });
-                }
-            }
-            Err(Error::Database(format!(
-                "Failed to parse operation: {original_err}"
-            )))
+fn parse_operation(data_str: &str) -> Result<Operation> {
+    if let Ok(op) = serde_json::from_str::<Operation>(data_str) {
+        return Ok(op);
+    }
+    // If the string is a double-encoded JSON value (starts and ends with `"`),
+    // unwrap one layer of JSON string encoding and retry.
+    if data_str.starts_with('"') && data_str.ends_with('"') {
+        if let Ok(inner) = serde_json::from_str::<String>(data_str) {
+            return serde_json::from_str::<Operation>(&inner).map_err(|e| {
+                Error::Database(format!("Failed to parse operation (unwrapped): {e}"))
+            });
         }
     }
+    // Re-parse to produce the error from the first attempt.
+    serde_json::from_str::<Operation>(data_str)
+        .map_err(|e| Error::Database(format!("Failed to parse operation: {e}")))
 }
 
 /// Decode an operation data value from tokio-postgres.
@@ -173,9 +179,10 @@ fn decode_op_data(row: &tokio_postgres::Row, col: &str) -> Result<Operation> {
 #[async_trait]
 impl StorageTxn for PgWireTxn<'_> {
     async fn get_task(&mut self, uuid: Uuid) -> Result<Option<TaskMap>> {
+        let cols = task_select_cols("t.data::text");
         let t = self.get_txn()?;
         let sql = format!(
-            "SELECT {PG_TASK_SELECT_COLS}
+            "SELECT {cols}
              FROM tc_tasks t
              LEFT JOIN projects p ON t.project_id = p.id
              WHERE t.id = $1 LIMIT 1"
@@ -195,9 +202,10 @@ impl StorageTxn for PgWireTxn<'_> {
     }
 
     async fn get_pending_tasks(&mut self) -> Result<Vec<(Uuid, TaskMap)>> {
+        let cols = task_select_cols("t.data::text");
         let t = self.get_txn()?;
         let sql = format!(
-            "SELECT {PG_TASK_SELECT_COLS}
+            "SELECT {cols}
              FROM tc_tasks t
              LEFT JOIN projects p ON t.project_id = p.id
              WHERE t.status = 'pending'"
@@ -321,9 +329,10 @@ impl StorageTxn for PgWireTxn<'_> {
     }
 
     async fn all_tasks(&mut self) -> Result<Vec<(Uuid, TaskMap)>> {
+        let cols = task_select_cols("t.data::text");
         let t = self.get_txn()?;
         let sql = format!(
-            "SELECT {PG_TASK_SELECT_COLS}
+            "SELECT {cols}
              FROM tc_tasks t
              LEFT JOIN projects p ON t.project_id = p.id"
         );
@@ -351,7 +360,10 @@ impl StorageTxn for PgWireTxn<'_> {
     }
 
     async fn get_task_operations(&mut self, uuid: Uuid) -> Result<Vec<Operation>> {
-        // Postgres schema has no UUID column on tc_operations; filter in-memory.
+        // tc_operations has no UUID column (schema is Supabase-managed).
+        // Filter in-memory after deserializing — O(n) over all operations, acceptable
+        // for expected operation counts. A future `uuid` index on tc_operations would
+        // allow a WHERE clause here if volume becomes a concern.
         let ops = self.all_operations().await?;
         Ok(ops
             .into_iter()
@@ -458,10 +470,21 @@ impl StorageTxn for PgWireTxn<'_> {
     }
 
     async fn set_tc_config(&mut self, value: String) -> Result<()> {
+        // The settings row is seeded by the Supabase auth trigger on first user login.
+        // A bare UPDATE silently succeeds even if no row exists, so we verify the
+        // rowcount to catch misconfiguration early.
         let t = self.get_txn()?;
-        t.execute("UPDATE settings SET tc_config = $1", &[&value])
+        let n = t
+            .execute("UPDATE settings SET tc_config = $1", &[&value])
             .await
             .map_err(|e| Error::Database(format!("set_tc_config: {e}")))?;
+        if n == 0 {
+            return Err(Error::Database(
+                "set_tc_config: no settings row found — \
+                 the Supabase trigger must seed it on first user login"
+                    .into(),
+            ));
+        }
         Ok(())
     }
 
@@ -525,6 +548,59 @@ mod test {
         fn invalid_data() {
             let data = "not valid json at all";
             assert!(parse_operation(data).is_err());
+        }
+    }
+
+    // Tests for build_config URL parsing — run without Postgres, always enabled.
+    mod build_config_tests {
+        use super::super::build_config;
+
+        #[test]
+        fn full_url() {
+            let cfg = build_config("postgres://db.example.com:5433/mydb", "tok").unwrap();
+            assert!(cfg.contains("host=db.example.com"), "host: {cfg}");
+            assert!(cfg.contains("port=5433"), "port: {cfg}");
+            assert!(cfg.contains("dbname=mydb"), "dbname: {cfg}");
+            assert!(cfg.contains("user='tok'"), "user: {cfg}");
+        }
+
+        #[test]
+        fn postgresql_scheme() {
+            let cfg = build_config("postgresql://localhost:5432/tasks", "tok").unwrap();
+            assert!(cfg.contains("host=localhost"), "{cfg}");
+            assert!(cfg.contains("port=5432"), "{cfg}");
+            assert!(cfg.contains("dbname=tasks"), "{cfg}");
+        }
+
+        #[test]
+        fn default_port_when_missing() {
+            let cfg = build_config("postgres://myhost/mydb", "tok").unwrap();
+            assert!(cfg.contains("host=myhost"), "{cfg}");
+            assert!(cfg.contains("port=5432"), "should default to 5432: {cfg}");
+        }
+
+        #[test]
+        fn default_dbname_when_no_slash() {
+            let cfg = build_config("postgres://myhost:5432", "tok").unwrap();
+            assert!(
+                cfg.contains("dbname=postgres"),
+                "should default to postgres: {cfg}"
+            );
+        }
+
+        #[test]
+        fn invalid_scheme_returns_error() {
+            let err = build_config("mysql://host/db", "tok").unwrap_err();
+            assert!(err.to_string().contains("postgres://"), "{err}");
+        }
+
+        #[test]
+        fn token_single_quote_escaped() {
+            let cfg = build_config("postgres://h:5432/db", "tok'en").unwrap();
+            assert!(
+                cfg.contains(r"tok\'en"),
+                "single quote should be escaped: {cfg}"
+            );
         }
     }
 
@@ -621,5 +697,12 @@ mod test {
     async fn tc_config_absent_returns_none() -> Result<()> {
         let s = storage().await.unwrap();
         crate::storage::test::tc_config_absent_returns_none(s).await
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn tc_config_overwrite() -> Result<()> {
+        let s = storage().await.unwrap();
+        crate::storage::test::tc_config_overwrite(s).await
     }
 }
