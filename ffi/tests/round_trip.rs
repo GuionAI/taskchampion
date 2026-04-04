@@ -2471,3 +2471,207 @@ async fn test_rename_xstatus_already_exists() {
         "expected XStatusAlreadyExists, got: {result:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Today-view reorder tests
+// ---------------------------------------------------------------------------
+
+async fn create_today_positioned(session: &FfiSession, desc: &str, pos: &str) -> String {
+    let uuid = Uuid::new_v4().to_string();
+    session
+        .create_task(uuid.clone(), desc.into())
+        .await
+        .expect("create");
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetTodayPosition {
+                value: Some(pos.into()),
+            }],
+        )
+        .await
+        .expect("set today_position");
+    uuid
+}
+
+#[tokio::test]
+async fn test_today_reorder_after_middle() {
+    let session = make_session();
+    let pos = sequential_positions(3);
+
+    // A(pos[0]) < B(pos[1]) < C(pos[2]). Move A after B → B < A < C.
+    let a = create_today_positioned(&session, "A", &pos[0]).await;
+    let b = create_today_positioned(&session, "B", &pos[1]).await;
+    let c = create_today_positioned(&session, "C", &pos[2]).await;
+
+    let task = session
+        .today_reorder_after(a.clone(), b.clone())
+        .await
+        .expect("today_reorder_after");
+
+    let new_pos = task.today_position.as_deref().expect("today_position set");
+    assert!(new_pos > pos[1].as_str(), "A should be after B");
+    assert!(new_pos < pos[2].as_str(), "A should be before C");
+    let _ = c;
+}
+
+#[tokio::test]
+async fn test_today_reorder_after_last() {
+    let session = make_session();
+    let pos = sequential_positions(2);
+
+    let a = create_today_positioned(&session, "A", &pos[0]).await;
+    let b = create_today_positioned(&session, "B", &pos[1]).await;
+
+    let task = session
+        .today_reorder_after(a.clone(), b.clone())
+        .await
+        .expect("today_reorder_after last");
+
+    let new_pos = task.today_position.as_deref().expect("today_position set");
+    assert!(new_pos > pos[1].as_str(), "A should be after B");
+}
+
+#[tokio::test]
+async fn test_today_reorder_before_middle() {
+    let session = make_session();
+    let pos = sequential_positions(3);
+
+    // A(pos[0]) < B(pos[1]) < C(pos[2]). Move C before B → A < C < B.
+    let a = create_today_positioned(&session, "A", &pos[0]).await;
+    let b = create_today_positioned(&session, "B", &pos[1]).await;
+    let c = create_today_positioned(&session, "C", &pos[2]).await;
+
+    let task = session
+        .today_reorder_before(c.clone(), b.clone())
+        .await
+        .expect("today_reorder_before");
+
+    let new_pos = task.today_position.as_deref().expect("today_position set");
+    assert!(new_pos > pos[0].as_str(), "C should be after A");
+    assert!(new_pos < pos[1].as_str(), "C should be before B");
+    let _ = a;
+}
+
+#[tokio::test]
+async fn test_today_reorder_before_first() {
+    let session = make_session();
+    let pos = sequential_positions(2);
+
+    let a = create_today_positioned(&session, "A", &pos[0]).await;
+    let b = create_today_positioned(&session, "B", &pos[1]).await;
+
+    let task = session
+        .today_reorder_before(b.clone(), a.clone())
+        .await
+        .expect("today_reorder_before first");
+
+    let new_pos = task.today_position.as_deref().expect("today_position set");
+    assert!(new_pos < pos[0].as_str(), "B should be before A");
+}
+
+#[tokio::test]
+async fn test_today_reorder_to_beginning_and_end() {
+    let session = make_session();
+    let pos = sequential_positions(3);
+
+    let a = create_today_positioned(&session, "A", &pos[0]).await;
+    let b = create_today_positioned(&session, "B", &pos[1]).await;
+    let c = create_today_positioned(&session, "C", &pos[2]).await;
+
+    // Move A to end → B < C < A.
+    let moved = session.today_reorder_to_end(a.clone()).await.unwrap();
+    let a_pos = moved.today_position.as_deref().expect("today_position");
+    assert!(a_pos > pos[2].as_str(), "A should be after C");
+
+    // Move C to beginning → C < B < A.
+    let moved = session.today_reorder_to_beginning(c.clone()).await.unwrap();
+    let c_pos = moved.today_position.as_deref().expect("today_position");
+    assert!(c_pos < pos[1].as_str(), "C should be before B");
+
+    let _ = b;
+}
+
+#[tokio::test]
+async fn test_today_reorder_anchor_no_today_position() {
+    let session = make_session();
+    let pos = sequential_positions(1);
+
+    let task = create_today_positioned(&session, "Task", &pos[0]).await;
+    // Anchor has no today_position.
+    let unpositioned = Uuid::new_v4().to_string();
+    session
+        .create_task(unpositioned.clone(), "Unpositioned".into())
+        .await
+        .expect("create");
+
+    let result = session
+        .today_reorder_after(task.clone(), unpositioned.clone())
+        .await;
+    assert!(
+        matches!(result, Err(FfiError::AnchorHasNoPosition { .. })),
+        "expected AnchorHasNoPosition"
+    );
+}
+
+#[tokio::test]
+async fn test_today_reorder_nonexistent_uuid() {
+    let session = make_session();
+    let pos = sequential_positions(1);
+    let anchor = create_today_positioned(&session, "Anchor", &pos[0]).await;
+    let ghost = Uuid::new_v4().to_string();
+
+    let result = session.today_reorder_after(ghost, anchor).await;
+    assert!(
+        matches!(result, Err(FfiError::TaskNotFound { .. })),
+        "expected TaskNotFound"
+    );
+}
+
+#[tokio::test]
+async fn test_today_reorder_nonexistent_anchor() {
+    let session = make_session();
+    let pos = sequential_positions(1);
+    let task = create_today_positioned(&session, "Task", &pos[0]).await;
+    let ghost = Uuid::new_v4().to_string();
+
+    let result = session.today_reorder_after(task, ghost).await;
+    assert!(
+        matches!(result, Err(FfiError::TaskNotFound { .. })),
+        "expected TaskNotFound"
+    );
+}
+
+#[tokio::test]
+async fn test_today_reorder_independent_of_parent() {
+    let session = make_session();
+    let pos = sequential_positions(2);
+
+    // Two tasks with different parents can still be today-reordered relative to each other.
+    let parent1 = Uuid::new_v4().to_string();
+    let parent2 = Uuid::new_v4().to_string();
+    session.create_task(parent1.clone(), "P1".into()).await.expect("create p1");
+    session.create_task(parent2.clone(), "P2".into()).await.expect("create p2");
+
+    let a = Uuid::new_v4().to_string();
+    session.create_task(a.clone(), "A".into()).await.expect("create a");
+    session.mutate_task(a.clone(), vec![
+        TaskMutation::SetParent { uuid: Some(parent1.clone()) },
+        TaskMutation::SetTodayPosition { value: Some(pos[0].clone()) },
+    ]).await.expect("mutate a");
+
+    let b = Uuid::new_v4().to_string();
+    session.create_task(b.clone(), "B".into()).await.expect("create b");
+    session.mutate_task(b.clone(), vec![
+        TaskMutation::SetParent { uuid: Some(parent2.clone()) },
+        TaskMutation::SetTodayPosition { value: Some(pos[1].clone()) },
+    ]).await.expect("mutate b");
+
+    // A and B have different parents but can be reordered in the today view.
+    let moved = session
+        .today_reorder_after(a.clone(), b.clone())
+        .await
+        .expect("today_reorder_after across parents");
+    let a_pos = moved.today_position.as_deref().expect("today_position");
+    assert!(a_pos > pos[1].as_str(), "A should be after B in today view");
+}
