@@ -288,8 +288,8 @@ mod test {
             "annotation_* keys should be in data blob, got: {obj:?}"
         );
         assert!(
-            !obj.contains_key("position"),
-            "position should not be in data blob, got: {obj:?}"
+            obj.contains_key("position"),
+            "position should be in data blob, got: {obj:?}"
         );
         assert!(
             obj.contains_key("dep_some-uuid"),

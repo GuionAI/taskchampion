@@ -46,7 +46,6 @@ pub(crate) struct RawTaskRow {
     pub(crate) end_at: Option<String>,
     pub(crate) wait_at: Option<String>,
     pub(crate) parent_id: Option<String>,
-    pub(crate) position: Option<String>,
     pub(crate) project_name: Option<String>,
     /// Raw project UUID from `tc_tasks.project_id` (not the join-resolved name).
     pub(crate) project_id: Option<String>,
@@ -70,9 +69,6 @@ pub(crate) fn raw_to_task(raw: RawTaskRow) -> Result<(Uuid, TaskMap)> {
     }
     if let Some(v) = raw.parent_id {
         task_map.insert("parent_id".into(), v);
-    }
-    if let Some(v) = raw.position {
-        task_map.insert("position".into(), v);
     }
     if let Some(v) = raw.project_name {
         task_map.insert("project".into(), v);
@@ -108,7 +104,7 @@ pub(crate) fn raw_to_task(raw: RawTaskRow) -> Result<(Uuid, TaskMap)> {
 /// Shared column projection for all tc_tasks queries (requires `t` and `p` aliases).
 pub(crate) const TASK_SELECT_COLS: &str = "t.id, t.data, t.status, t.description, t.priority, \
     t.entry_at, t.modified_at, t.due_at, t.scheduled_at, \
-    t.start_at, t.end_at, t.wait_at, t.parent_id, t.position, \
+    t.start_at, t.end_at, t.wait_at, t.parent_id, \
     p.name as project_name, t.project_id";
 
 #[cfg(test)]
@@ -200,7 +196,6 @@ mod tests {
             end_at: None,
             wait_at: None,
             parent_id: None,
-            position: None,
             project_name: None,
             project_id: None,
         }
@@ -223,7 +218,6 @@ mod tests {
         raw.description = Some("my task".into());
         raw.priority = Some("H".into());
         raw.parent_id = Some("parent-uuid".into());
-        raw.position = Some("80".into());
         raw.project_name = Some("work".into());
         let (_, task_map) = raw_to_task(raw).unwrap();
         assert_eq!(task_map.get("status").map(String::as_str), Some("pending"));
@@ -236,7 +230,6 @@ mod tests {
             task_map.get("parent_id").map(String::as_str),
             Some("parent-uuid")
         );
-        assert_eq!(task_map.get("position").map(String::as_str), Some("80"));
         assert_eq!(task_map.get("project").map(String::as_str), Some("work"));
     }
 
