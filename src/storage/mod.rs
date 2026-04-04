@@ -20,6 +20,8 @@ mod config;
 #[cfg(feature = "storage-external")]
 pub mod external;
 pub mod inmemory;
+#[cfg(feature = "storage-pgwire")]
+pub mod pgwire;
 #[cfg(feature = "storage-powersync")]
 pub mod powersync;
 #[cfg(feature = "storage-external")]
