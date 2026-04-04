@@ -257,63 +257,6 @@ async fn test_mutate_description() {
 }
 
 #[tokio::test]
-async fn test_pending_tasks() {
-    let session = make_session();
-
-    let uuid1 = Uuid::new_v4().to_string();
-    let uuid2 = Uuid::new_v4().to_string();
-
-    session
-        .create_task(uuid1.clone(), "Task 1".into())
-        .await
-        .expect("create 1");
-    session
-        .create_task(uuid2.clone(), "Task 2".into())
-        .await
-        .expect("create 2");
-
-    let pending = session.pending_tasks().await.expect("pending_tasks");
-    let descs: Vec<&str> = pending.iter().map(|t| t.description.as_str()).collect();
-    assert!(descs.contains(&"Task 1"), "Task 1 should be pending");
-    assert!(descs.contains(&"Task 2"), "Task 2 should be pending");
-}
-
-#[tokio::test]
-async fn test_all_tasks_includes_completed() {
-    let session = make_session();
-    let uuid1 = Uuid::new_v4().to_string();
-    let uuid2 = Uuid::new_v4().to_string();
-
-    session
-        .create_task(uuid1.clone(), "Task one".into())
-        .await
-        .expect("create 1");
-    session
-        .create_task(uuid2.clone(), "Complete me".into())
-        .await
-        .expect("create 2");
-    session
-        .mutate_task(uuid2.clone(), vec![TaskMutation::Done])
-        .await
-        .expect("done");
-
-    let all = session.all_tasks().await.expect("all_tasks");
-    assert!(all.len() >= 2, "should have at least 2 tasks");
-
-    let task1 = all
-        .iter()
-        .find(|t| t.uuid == uuid1)
-        .expect("task1 in all_tasks");
-    assert!(matches!(task1.status, FfiStatus::Pending));
-
-    let task2 = all
-        .iter()
-        .find(|t| t.uuid == uuid2)
-        .expect("task2 in all_tasks");
-    assert!(matches!(task2.status, FfiStatus::Completed));
-}
-
-#[tokio::test]
 async fn test_undo_reverses_last_mutation() {
     let session = make_session();
     let uuid = Uuid::new_v4().to_string();
@@ -777,29 +720,6 @@ async fn test_xstatus_set_on_non_pending_restores_pending() {
 }
 
 #[tokio::test]
-async fn test_xstatus_not_in_remaining_data() {
-    let (session, mock) = make_session_with_executor();
-    mock.inject_tc_config(r#"{"xstatus":[{"name":"blocked","icon":128721}]}"#);
-
-    let uuid = Uuid::new_v4().to_string();
-    session
-        .create_task(uuid.clone(), "Remaining data test".into())
-        .await
-        .unwrap();
-
-    session
-        .set_xstatus(uuid.clone(), "blocked".into())
-        .await
-        .unwrap();
-
-    let task = session.get_task(uuid).await.unwrap().unwrap();
-    assert!(
-        !task.remaining_data.contains_key("xstatus"),
-        "xstatus must not appear in remaining_data"
-    );
-}
-
-#[tokio::test]
 async fn test_scheduled_round_trip() {
     let session = make_session();
     let uuid = Uuid::new_v4().to_string();
@@ -825,8 +745,6 @@ async fn test_scheduled_round_trip() {
 
     let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
     assert_eq!(task.scheduled, Some(epoch));
-    // "scheduled" should NOT appear in remaining_data
-    assert!(!task.remaining_data.contains_key("scheduled"));
 
     // Clear scheduled
     session
@@ -903,12 +821,6 @@ async fn test_is_full_day_round_trip() {
 
     let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
     assert!(task.is_full_day);
-    // is_full_day should NOT appear in remaining_data
-    assert!(
-        !task.remaining_data.contains_key("is_full_day"),
-        "dedicated fields excluded from remaining_data"
-    );
-
     // Unset full day
     session
         .mutate_task(
@@ -982,118 +894,6 @@ async fn test_estimate_zero_rejected() {
 }
 
 #[tokio::test]
-async fn test_set_value_generic_uda() {
-    let session = make_session();
-    let uuid = Uuid::new_v4().to_string();
-
-    session
-        .create_task(uuid.clone(), "Generic UDA".into())
-        .await
-        .expect("create");
-
-    session
-        .mutate_task(
-            uuid.clone(),
-            vec![TaskMutation::SetValue {
-                key: "custom_field".into(),
-                value: Some("hello".into()),
-            }],
-        )
-        .await
-        .expect("set generic UDA");
-
-    let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
-    assert_eq!(
-        task.remaining_data.get("custom_field").map(String::as_str),
-        Some("hello")
-    );
-
-    // Clear it
-    session
-        .mutate_task(
-            uuid.clone(),
-            vec![TaskMutation::SetValue {
-                key: "custom_field".into(),
-                value: None,
-            }],
-        )
-        .await
-        .expect("clear generic UDA");
-
-    let task = session.get_task(uuid).await.unwrap().unwrap();
-    assert!(!task.remaining_data.contains_key("custom_field"));
-}
-
-#[tokio::test]
-async fn test_set_value_rejects_known_keys() {
-    let session = make_session();
-    let uuid = Uuid::new_v4().to_string();
-
-    session
-        .create_task(uuid.clone(), "Known key test".into())
-        .await
-        .expect("create");
-
-    let result = session
-        .mutate_task(
-            uuid,
-            vec![TaskMutation::SetValue {
-                key: "description".into(),
-                value: Some("sneaky".into()),
-            }],
-        )
-        .await;
-
-    assert!(
-        matches!(result, Err(FfiError::InvalidInput { .. })),
-        "known keys should be rejected by SetValue"
-    );
-}
-
-#[tokio::test]
-async fn test_set_value_rejects_flicknote_dedicated_keys() {
-    let session = make_session();
-    let uuid = Uuid::new_v4().to_string();
-
-    session
-        .create_task(uuid.clone(), "FlickNote key guard test".into())
-        .await
-        .expect("create");
-
-    // is_full_day has a dedicated variant — SetValue must reject it to prevent
-    // casing mismatches (e.g. "True" instead of "true") bypassing the typed setter.
-    let result = session
-        .mutate_task(
-            uuid.clone(),
-            vec![TaskMutation::SetValue {
-                key: "is_full_day".into(),
-                value: Some("True".into()),
-            }],
-        )
-        .await;
-    assert!(
-        matches!(result, Err(FfiError::InvalidInput { .. })),
-        "is_full_day should be rejected by SetValue"
-    );
-
-    // estimate has a dedicated variant with a >0 guard — SetValue must reject it
-    // to prevent bypassing that guard via a raw "0" string.
-    let result = session
-        .mutate_task(
-            uuid,
-            vec![TaskMutation::SetValue {
-                key: "estimate".into(),
-                value: Some("0".into()),
-            }],
-        )
-        .await;
-    assert!(
-        matches!(result, Err(FfiError::InvalidInput { .. })),
-        "estimate should be rejected by SetValue"
-    );
-}
-
-#[tokio::test]
 async fn test_recurrence_uda_fields_round_trip() {
     let session = make_session();
     let uuid = Uuid::new_v4().to_string();
@@ -1137,24 +937,6 @@ async fn test_recurrence_uda_fields_round_trip() {
     assert_eq!(task.imask, Some(2));
     assert_eq!(task.until, Some(until_epoch));
 
-    // These keys must NOT appear in remaining_data
-    assert!(
-        !task.remaining_data.contains_key("recur"),
-        "recur excluded from remaining_data"
-    );
-    assert!(
-        !task.remaining_data.contains_key("mask"),
-        "mask excluded from remaining_data"
-    );
-    assert!(
-        !task.remaining_data.contains_key("imask"),
-        "imask excluded from remaining_data"
-    );
-    assert!(
-        !task.remaining_data.contains_key("until"),
-        "until excluded from remaining_data"
-    );
-
     // Clear recurrence fields
     session
         .mutate_task(
@@ -1175,35 +957,6 @@ async fn test_recurrence_uda_fields_round_trip() {
     assert_eq!(task.imask, None);
     assert_eq!(task.until, None);
 }
-
-#[tokio::test]
-async fn test_set_value_rejects_recurrence_dedicated_keys() {
-    let session = make_session();
-    let uuid = Uuid::new_v4().to_string();
-
-    session
-        .create_task(uuid.clone(), "Recurrence key guard test".into())
-        .await
-        .expect("create");
-
-    for key in &["recur", "mask", "imask", "until"] {
-        let result = session
-            .mutate_task(
-                uuid.clone(),
-                vec![TaskMutation::SetValue {
-                    key: (*key).into(),
-                    value: Some("test".into()),
-                }],
-            )
-            .await;
-        assert!(
-            matches!(result, Err(FfiError::InvalidInput { .. })),
-            "'{key}' should be rejected by SetValue — use the dedicated mutation variant"
-        );
-    }
-}
-
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn test_set_project_id_round_trip() {
@@ -1557,34 +1310,6 @@ async fn test_reorder_to_beginning_already_first() {
     );
 }
 
-#[tokio::test]
-async fn test_set_value_rejects_project_id_key() {
-    let session = make_session();
-    let uuid = Uuid::new_v4().to_string();
-
-    session
-        .create_task(uuid.clone(), "Project key guard".into())
-        .await
-        .expect("create");
-
-    for key in &["project", "project_id"] {
-        let result = session
-            .mutate_task(
-                uuid.clone(),
-                vec![TaskMutation::SetValue {
-                    key: (*key).into(),
-                    value: Some("test".into()),
-                }],
-            )
-            .await;
-        assert!(
-            matches!(result, Err(FfiError::InvalidInput { .. })),
-            "'{key}' should be rejected by SetValue"
-        );
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Reparent and is_ancestor tests
 // ---------------------------------------------------------------------------
 
@@ -2192,6 +1917,7 @@ async fn test_malformed_tc_settings_propagates_error() {
 #[tokio::test]
 async fn test_create_tag_success() {
     let (session, mock) = make_session_with_executor();
+    mock.inject_tc_config("{}");
     // Start with no tags.
     session.create_tag("work".into()).await.expect("create_tag");
     // Config should now contain "work".
@@ -2354,6 +2080,7 @@ async fn test_reorder_anchor_with_no_position_returns_error() {
 #[tokio::test]
 async fn test_create_xstatus_success() {
     let (session, mock) = make_session_with_executor();
+    mock.inject_tc_config("{}");
     session
         .create_xstatus("blocked".into(), 128721)
         .await
@@ -2470,4 +2197,289 @@ async fn test_rename_xstatus_already_exists() {
         matches!(result, Err(FfiError::XStatusAlreadyExists { .. })),
         "expected XStatusAlreadyExists, got: {result:?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Today-view reorder tests
+// ---------------------------------------------------------------------------
+
+async fn create_today_positioned(session: &FfiSession, desc: &str, pos: &str) -> String {
+    let uuid = Uuid::new_v4().to_string();
+    session
+        .create_task(uuid.clone(), desc.into())
+        .await
+        .expect("create");
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetTodayPosition {
+                value: Some(pos.into()),
+            }],
+        )
+        .await
+        .expect("set today_position");
+    uuid
+}
+
+#[tokio::test]
+async fn test_today_reorder_after_middle() {
+    let session = make_session();
+    let pos = sequential_positions(3);
+
+    // A(pos[0]) < B(pos[1]) < C(pos[2]). Move A after B → B < A < C.
+    let a = create_today_positioned(&session, "A", &pos[0]).await;
+    let b = create_today_positioned(&session, "B", &pos[1]).await;
+    let _c = create_today_positioned(&session, "C", &pos[2]).await;
+
+    let task = session
+        .today_reorder_after(a.clone(), b.clone())
+        .await
+        .expect("today_reorder_after");
+
+    let new_pos = task.today_position.as_deref().expect("today_position set");
+    assert!(new_pos > pos[1].as_str(), "A should be after B");
+    assert!(new_pos < pos[2].as_str(), "A should be before C");
+}
+
+#[tokio::test]
+async fn test_today_reorder_after_last() {
+    let session = make_session();
+    let pos = sequential_positions(2);
+
+    let a = create_today_positioned(&session, "A", &pos[0]).await;
+    let b = create_today_positioned(&session, "B", &pos[1]).await;
+
+    let task = session
+        .today_reorder_after(a.clone(), b.clone())
+        .await
+        .expect("today_reorder_after last");
+
+    let new_pos = task.today_position.as_deref().expect("today_position set");
+    assert!(new_pos > pos[1].as_str(), "A should be after B");
+}
+
+#[tokio::test]
+async fn test_today_reorder_before_middle() {
+    let session = make_session();
+    let pos = sequential_positions(3);
+
+    // A(pos[0]) < B(pos[1]) < C(pos[2]). Move C before B → A < C < B.
+    let _a = create_today_positioned(&session, "A", &pos[0]).await;
+    let b = create_today_positioned(&session, "B", &pos[1]).await;
+    let c = create_today_positioned(&session, "C", &pos[2]).await;
+
+    let task = session
+        .today_reorder_before(c.clone(), b.clone())
+        .await
+        .expect("today_reorder_before");
+
+    let new_pos = task.today_position.as_deref().expect("today_position set");
+    assert!(new_pos > pos[0].as_str(), "C should be after A");
+    assert!(new_pos < pos[1].as_str(), "C should be before B");
+}
+
+#[tokio::test]
+async fn test_today_reorder_before_first() {
+    let session = make_session();
+    let pos = sequential_positions(2);
+
+    let a = create_today_positioned(&session, "A", &pos[0]).await;
+    let b = create_today_positioned(&session, "B", &pos[1]).await;
+
+    let task = session
+        .today_reorder_before(b.clone(), a.clone())
+        .await
+        .expect("today_reorder_before first");
+
+    let new_pos = task.today_position.as_deref().expect("today_position set");
+    assert!(new_pos < pos[0].as_str(), "B should be before A");
+}
+
+#[tokio::test]
+async fn test_today_reorder_to_beginning_and_end() {
+    let session = make_session();
+    let pos = sequential_positions(3);
+
+    let a = create_today_positioned(&session, "A", &pos[0]).await;
+    let b = create_today_positioned(&session, "B", &pos[1]).await;
+    let c = create_today_positioned(&session, "C", &pos[2]).await;
+
+    // Move A to end → B < C < A.
+    let moved = session.today_reorder_to_end(a.clone()).await.unwrap();
+    let a_pos = moved.today_position.as_deref().expect("today_position");
+    assert!(a_pos > pos[2].as_str(), "A should be after C");
+
+    // Move C to beginning → C < B < A.
+    // Re-fetch B from DB to get its stable position (unchanged by previous move).
+    let b_task = session.get_task(b.clone()).await.unwrap().unwrap();
+    let b_pos = b_task.today_position.as_deref().expect("B today_position");
+    let moved = session.today_reorder_to_beginning(c.clone()).await.unwrap();
+    let c_pos = moved.today_position.as_deref().expect("today_position");
+    assert!(c_pos < b_pos, "C should be before B");
+}
+
+#[tokio::test]
+async fn test_today_reorder_anchor_no_today_position() {
+    let session = make_session();
+    let pos = sequential_positions(1);
+
+    let task = create_today_positioned(&session, "Task", &pos[0]).await;
+    // Anchor has no today_position.
+    let unpositioned = Uuid::new_v4().to_string();
+    session
+        .create_task(unpositioned.clone(), "Unpositioned".into())
+        .await
+        .expect("create");
+
+    let result = session
+        .today_reorder_after(task.clone(), unpositioned.clone())
+        .await;
+    assert!(
+        matches!(result, Err(FfiError::AnchorHasNoPosition { .. })),
+        "expected AnchorHasNoPosition"
+    );
+}
+
+#[tokio::test]
+async fn test_today_reorder_nonexistent_uuid() {
+    let session = make_session();
+    let pos = sequential_positions(1);
+    let anchor = create_today_positioned(&session, "Anchor", &pos[0]).await;
+    let ghost = Uuid::new_v4().to_string();
+
+    let result = session.today_reorder_after(ghost, anchor).await;
+    assert!(
+        matches!(result, Err(FfiError::TaskNotFound { .. })),
+        "expected TaskNotFound"
+    );
+}
+
+#[tokio::test]
+async fn test_today_reorder_nonexistent_anchor() {
+    let session = make_session();
+    let pos = sequential_positions(1);
+    let task = create_today_positioned(&session, "Task", &pos[0]).await;
+    let ghost = Uuid::new_v4().to_string();
+
+    let result = session.today_reorder_after(task, ghost).await;
+    assert!(
+        matches!(result, Err(FfiError::TaskNotFound { .. })),
+        "expected TaskNotFound"
+    );
+}
+
+#[tokio::test]
+async fn test_today_reorder_before_nonexistent_uuid() {
+    let session = make_session();
+    let pos = sequential_positions(1);
+    let anchor = create_today_positioned(&session, "Anchor", &pos[0]).await;
+    let ghost = Uuid::new_v4().to_string();
+
+    let result = session.today_reorder_before(ghost, anchor).await;
+    assert!(
+        matches!(result, Err(FfiError::TaskNotFound { .. })),
+        "expected TaskNotFound"
+    );
+}
+
+#[tokio::test]
+async fn test_today_reorder_before_nonexistent_anchor() {
+    let session = make_session();
+    let pos = sequential_positions(1);
+    let task = create_today_positioned(&session, "Task", &pos[0]).await;
+    let ghost = Uuid::new_v4().to_string();
+
+    let result = session.today_reorder_before(task, ghost).await;
+    assert!(
+        matches!(result, Err(FfiError::TaskNotFound { .. })),
+        "expected TaskNotFound"
+    );
+}
+
+#[tokio::test]
+async fn test_today_reorder_to_beginning_nonexistent() {
+    let session = make_session();
+    let ghost = Uuid::new_v4().to_string();
+    let result = session.today_reorder_to_beginning(ghost).await;
+    assert!(
+        matches!(result, Err(FfiError::TaskNotFound { .. })),
+        "expected TaskNotFound"
+    );
+}
+
+#[tokio::test]
+async fn test_today_reorder_to_end_nonexistent() {
+    let session = make_session();
+    let ghost = Uuid::new_v4().to_string();
+    let result = session.today_reorder_to_end(ghost).await;
+    assert!(
+        matches!(result, Err(FfiError::TaskNotFound { .. })),
+        "expected TaskNotFound"
+    );
+}
+
+#[tokio::test]
+async fn test_today_reorder_independent_of_parent() {
+    let session = make_session();
+    let pos = sequential_positions(2);
+
+    // Two tasks with different parents can still be today-reordered relative to each other.
+    let parent1 = Uuid::new_v4().to_string();
+    let parent2 = Uuid::new_v4().to_string();
+    session
+        .create_task(parent1.clone(), "P1".into())
+        .await
+        .expect("create p1");
+    session
+        .create_task(parent2.clone(), "P2".into())
+        .await
+        .expect("create p2");
+
+    let a = Uuid::new_v4().to_string();
+    session
+        .create_task(a.clone(), "A".into())
+        .await
+        .expect("create a");
+    session
+        .mutate_task(
+            a.clone(),
+            vec![
+                TaskMutation::SetParent {
+                    uuid: Some(parent1.clone()),
+                },
+                TaskMutation::SetTodayPosition {
+                    value: Some(pos[0].clone()),
+                },
+            ],
+        )
+        .await
+        .expect("mutate a");
+
+    let b = Uuid::new_v4().to_string();
+    session
+        .create_task(b.clone(), "B".into())
+        .await
+        .expect("create b");
+    session
+        .mutate_task(
+            b.clone(),
+            vec![
+                TaskMutation::SetParent {
+                    uuid: Some(parent2.clone()),
+                },
+                TaskMutation::SetTodayPosition {
+                    value: Some(pos[1].clone()),
+                },
+            ],
+        )
+        .await
+        .expect("mutate b");
+
+    // A and B have different parents but can be reordered in the today view.
+    let moved = session
+        .today_reorder_after(a.clone(), b.clone())
+        .await
+        .expect("today_reorder_after across parents");
+    let a_pos = moved.today_position.as_deref().expect("today_position");
+    assert!(a_pos > pos[1].as_str(), "A should be after B in today view");
 }

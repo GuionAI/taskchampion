@@ -5,6 +5,7 @@
 //! polling mechanism drives execution from the foreign side, no tokio runtime
 //! is needed.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use taskchampion::{
     position::{append_position, between_position, prepend_position},
@@ -147,6 +148,18 @@ impl FfiSession {
                     message: "Task missing after create".into(),
                 })?;
             Ok(FfiTask::from(&created))
+        })
+        .await
+    }
+
+    /// Fetch a single task by UUID.
+    ///
+    /// Returns `None` if the task does not exist.
+    pub async fn get_task(&self, uuid: String) -> Result<Option<FfiTask>, FfiError> {
+        self.with_replica(|mut replica| async move {
+            let task_uuid = parse_uuid(&uuid)?;
+            let task = replica.get_task(task_uuid).await.map_err(FfiError::from)?;
+            Ok(task.as_ref().map(FfiTask::from))
         })
         .await
     }
@@ -672,6 +685,183 @@ impl FfiSession {
                 })
             })
             .await
+        })
+        .await
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Today-view reorder helpers
+// ---------------------------------------------------------------------------
+
+/// Returns all tasks that have `today_position` set, excluding `exclude`,
+/// sorted ascending by `today_position` string.
+fn sorted_today_positions(
+    all_tasks: &HashMap<uuid::Uuid, taskchampion::Task>,
+    exclude: uuid::Uuid,
+) -> Vec<(uuid::Uuid, String)> {
+    let mut positioned: Vec<(uuid::Uuid, String)> = all_tasks
+        .iter()
+        .filter(|(&u, _)| u != exclude)
+        .filter_map(|(&u, t)| t.get_value("today_position").map(|p| (u, p.to_string())))
+        .collect();
+    positioned.sort_by(|(_, a), (_, b)| a.cmp(b));
+    positioned
+}
+
+/// Set `new_pos` as `today_position` on task `uuid`, commit with an undo point, and re-fetch.
+async fn apply_today_position(
+    replica: &mut Replica<ExternalStorage>,
+    uuid: uuid::Uuid,
+    new_pos: String,
+) -> Result<FfiTask, FfiError> {
+    let mut ops = Operations::new();
+    ops.push(Operation::UndoPoint);
+    let mut task = replica
+        .get_task(uuid)
+        .await
+        .map_err(FfiError::from)?
+        .ok_or_else(|| FfiError::Internal {
+            message: "Task missing before set today_position".into(),
+        })?;
+    task.set_value("today_position", Some(new_pos), &mut ops)
+        .map_err(FfiError::from)?;
+    replica
+        .commit_operations(ops)
+        .await
+        .map_err(FfiError::from)?;
+    replica
+        .get_task(uuid)
+        .await
+        .map_err(FfiError::from)?
+        .ok_or_else(|| FfiError::Internal {
+            message: "Task missing after set today_position".into(),
+        })
+        .map(|t| FfiTask::from(&t))
+}
+
+// ---------------------------------------------------------------------------
+// Today-view reorder methods
+// ---------------------------------------------------------------------------
+
+#[uniffi::export]
+impl FfiSession {
+    /// Move `uuid` to a today_position immediately after `anchor_uuid` in the today view.
+    ///
+    /// Both tasks must exist. The anchor must have `today_position` set.
+    /// Returns `TaskNotFound` if either UUID does not exist.
+    /// Returns `AnchorHasNoPosition` if the anchor has no `today_position`.
+    pub async fn today_reorder_after(
+        &self,
+        uuid: String,
+        anchor_uuid: String,
+    ) -> Result<FfiTask, FfiError> {
+        self.with_replica(|mut replica| async move {
+            let uuid_parsed = parse_uuid(&uuid)?;
+            let anchor_parsed = parse_uuid(&anchor_uuid)?;
+
+            // Verify both tasks exist.
+            replica
+                .get_task(uuid_parsed)
+                .await
+                .map_err(FfiError::from)?
+                .ok_or_else(|| FfiError::TaskNotFound { uuid: uuid.clone() })?;
+            replica
+                .get_task(anchor_parsed)
+                .await
+                .map_err(FfiError::from)?
+                .ok_or_else(|| FfiError::TaskNotFound {
+                    uuid: anchor_uuid.clone(),
+                })?;
+
+            let all = replica.all_tasks().await.map_err(FfiError::from)?;
+            let today = sorted_today_positions(&all, uuid_parsed);
+            let idx = find_anchor_idx(&today, anchor_parsed, &anchor_uuid)?;
+            let new_pos = position_after_anchor(&today, idx)?;
+            apply_today_position(&mut replica, uuid_parsed, new_pos).await
+        })
+        .await
+    }
+
+    /// Move `uuid` to a today_position immediately before `anchor_uuid` in the today view.
+    ///
+    /// Both tasks must exist. The anchor must have `today_position` set.
+    /// Returns `TaskNotFound` if either UUID does not exist.
+    /// Returns `AnchorHasNoPosition` if the anchor has no `today_position`.
+    pub async fn today_reorder_before(
+        &self,
+        uuid: String,
+        anchor_uuid: String,
+    ) -> Result<FfiTask, FfiError> {
+        self.with_replica(|mut replica| async move {
+            let uuid_parsed = parse_uuid(&uuid)?;
+            let anchor_parsed = parse_uuid(&anchor_uuid)?;
+
+            // Verify both tasks exist.
+            replica
+                .get_task(uuid_parsed)
+                .await
+                .map_err(FfiError::from)?
+                .ok_or_else(|| FfiError::TaskNotFound { uuid: uuid.clone() })?;
+            replica
+                .get_task(anchor_parsed)
+                .await
+                .map_err(FfiError::from)?
+                .ok_or_else(|| FfiError::TaskNotFound {
+                    uuid: anchor_uuid.clone(),
+                })?;
+
+            let all = replica.all_tasks().await.map_err(FfiError::from)?;
+            let today = sorted_today_positions(&all, uuid_parsed);
+            let idx = find_anchor_idx(&today, anchor_parsed, &anchor_uuid)?;
+            let new_pos = position_before_anchor(&today, idx)?;
+            apply_today_position(&mut replica, uuid_parsed, new_pos).await
+        })
+        .await
+    }
+
+    /// Move `uuid` to the first position in the today view.
+    ///
+    /// Returns `TaskNotFound` if the UUID does not exist.
+    pub async fn today_reorder_to_beginning(&self, uuid: String) -> Result<FfiTask, FfiError> {
+        self.with_replica(|mut replica| async move {
+            let uuid_parsed = parse_uuid(&uuid)?;
+            replica
+                .get_task(uuid_parsed)
+                .await
+                .map_err(FfiError::from)?
+                .ok_or_else(|| FfiError::TaskNotFound { uuid: uuid.clone() })?;
+
+            let all = replica.all_tasks().await.map_err(FfiError::from)?;
+            let today = sorted_today_positions(&all, uuid_parsed);
+            let first_pos = today.first().map(|(_, p)| p.as_str());
+            let new_pos = prepend_position(first_pos).map_err(|e| FfiError::InvalidInput {
+                message: e.to_string(),
+            })?;
+            apply_today_position(&mut replica, uuid_parsed, new_pos).await
+        })
+        .await
+    }
+
+    /// Move `uuid` to the last position in the today view.
+    ///
+    /// Returns `TaskNotFound` if the UUID does not exist.
+    pub async fn today_reorder_to_end(&self, uuid: String) -> Result<FfiTask, FfiError> {
+        self.with_replica(|mut replica| async move {
+            let uuid_parsed = parse_uuid(&uuid)?;
+            replica
+                .get_task(uuid_parsed)
+                .await
+                .map_err(FfiError::from)?
+                .ok_or_else(|| FfiError::TaskNotFound { uuid: uuid.clone() })?;
+
+            let all = replica.all_tasks().await.map_err(FfiError::from)?;
+            let today = sorted_today_positions(&all, uuid_parsed);
+            let last_pos = today.last().map(|(_, p)| p.as_str());
+            let new_pos = append_position(last_pos).map_err(|e| FfiError::InvalidInput {
+                message: e.to_string(),
+            })?;
+            apply_today_position(&mut replica, uuid_parsed, new_pos).await
         })
         .await
     }
