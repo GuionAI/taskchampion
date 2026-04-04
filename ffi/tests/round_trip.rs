@@ -2650,22 +2650,54 @@ async fn test_today_reorder_independent_of_parent() {
     // Two tasks with different parents can still be today-reordered relative to each other.
     let parent1 = Uuid::new_v4().to_string();
     let parent2 = Uuid::new_v4().to_string();
-    session.create_task(parent1.clone(), "P1".into()).await.expect("create p1");
-    session.create_task(parent2.clone(), "P2".into()).await.expect("create p2");
+    session
+        .create_task(parent1.clone(), "P1".into())
+        .await
+        .expect("create p1");
+    session
+        .create_task(parent2.clone(), "P2".into())
+        .await
+        .expect("create p2");
 
     let a = Uuid::new_v4().to_string();
-    session.create_task(a.clone(), "A".into()).await.expect("create a");
-    session.mutate_task(a.clone(), vec![
-        TaskMutation::SetParent { uuid: Some(parent1.clone()) },
-        TaskMutation::SetTodayPosition { value: Some(pos[0].clone()) },
-    ]).await.expect("mutate a");
+    session
+        .create_task(a.clone(), "A".into())
+        .await
+        .expect("create a");
+    session
+        .mutate_task(
+            a.clone(),
+            vec![
+                TaskMutation::SetParent {
+                    uuid: Some(parent1.clone()),
+                },
+                TaskMutation::SetTodayPosition {
+                    value: Some(pos[0].clone()),
+                },
+            ],
+        )
+        .await
+        .expect("mutate a");
 
     let b = Uuid::new_v4().to_string();
-    session.create_task(b.clone(), "B".into()).await.expect("create b");
-    session.mutate_task(b.clone(), vec![
-        TaskMutation::SetParent { uuid: Some(parent2.clone()) },
-        TaskMutation::SetTodayPosition { value: Some(pos[1].clone()) },
-    ]).await.expect("mutate b");
+    session
+        .create_task(b.clone(), "B".into())
+        .await
+        .expect("create b");
+    session
+        .mutate_task(
+            b.clone(),
+            vec![
+                TaskMutation::SetParent {
+                    uuid: Some(parent2.clone()),
+                },
+                TaskMutation::SetTodayPosition {
+                    value: Some(pos[1].clone()),
+                },
+            ],
+        )
+        .await
+        .expect("mutate b");
 
     // A and B have different parents but can be reordered in the today view.
     let moved = session
