@@ -606,6 +606,13 @@ public protocol FfiSessionProtocol: AnyObject, Sendable {
     func dependencyMap() async throws  -> [FfiDependencyEdge]
     
     /**
+     * Fetch a single task by UUID.
+     *
+     * Returns `None` if the task does not exist.
+     */
+    func getTask(uuid: String) async throws  -> FfiTask?
+    
+    /**
      * Return `true` if `ancestor_uuid` is an ancestor of `uuid` in the task tree.
      *
      * Used for UI hints such as greying out invalid drag-and-drop targets.
@@ -692,6 +699,38 @@ public protocol FfiSessionProtocol: AnyObject, Sendable {
      * Returns `UnknownXStatus` if `name` is not in tc_config.xstatus definitions.
      */
     func setXstatus(taskUuid: String, name: String) async throws  -> FfiTask
+    
+    /**
+     * Move `uuid` to a today_position immediately after `anchor_uuid` in the today view.
+     *
+     * Both tasks must exist. The anchor must have `today_position` set.
+     * Returns `TaskNotFound` if either UUID does not exist.
+     * Returns `AnchorHasNoPosition` if the anchor has no `today_position`.
+     */
+    func todayReorderAfter(uuid: String, anchorUuid: String) async throws  -> FfiTask
+    
+    /**
+     * Move `uuid` to a today_position immediately before `anchor_uuid` in the today view.
+     *
+     * Both tasks must exist. The anchor must have `today_position` set.
+     * Returns `TaskNotFound` if either UUID does not exist.
+     * Returns `AnchorHasNoPosition` if the anchor has no `today_position`.
+     */
+    func todayReorderBefore(uuid: String, anchorUuid: String) async throws  -> FfiTask
+    
+    /**
+     * Move `uuid` to the first position in the today view.
+     *
+     * Returns `TaskNotFound` if the UUID does not exist.
+     */
+    func todayReorderToBeginning(uuid: String) async throws  -> FfiTask
+    
+    /**
+     * Move `uuid` to the last position in the today view.
+     *
+     * Returns `TaskNotFound` if the UUID does not exist.
+     */
+    func todayReorderToEnd(uuid: String) async throws  -> FfiTask
     
     /**
      * Return the task tree as a flat list of [`FfiTreeNode`]s.
@@ -952,6 +991,28 @@ open func dependencyMap()async throws  -> [FfiDependencyEdge]  {
 }
     
     /**
+     * Fetch a single task by UUID.
+     *
+     * Returns `None` if the task does not exist.
+     */
+open func getTask(uuid: String)async throws  -> FfiTask?  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_taskchampion_ffi_fn_method_ffisession_get_task(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(uuid)
+                )
+            },
+            pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterOptionTypeFfiTask.lift,
+            errorHandler: FfiConverterTypeFfiError_lift
+        )
+}
+    
+    /**
      * Return `true` if `ancestor_uuid` is an ancestor of `uuid` in the task tree.
      *
      * Used for UI hints such as greying out invalid drag-and-drop targets.
@@ -1164,6 +1225,98 @@ open func setXstatus(taskUuid: String, name: String)async throws  -> FfiTask  {
                 uniffi_taskchampion_ffi_fn_method_ffisession_set_xstatus(
                     self.uniffiCloneHandle(),
                     FfiConverterString.lower(taskUuid),FfiConverterString.lower(name)
+                )
+            },
+            pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeFfiTask_lift,
+            errorHandler: FfiConverterTypeFfiError_lift
+        )
+}
+    
+    /**
+     * Move `uuid` to a today_position immediately after `anchor_uuid` in the today view.
+     *
+     * Both tasks must exist. The anchor must have `today_position` set.
+     * Returns `TaskNotFound` if either UUID does not exist.
+     * Returns `AnchorHasNoPosition` if the anchor has no `today_position`.
+     */
+open func todayReorderAfter(uuid: String, anchorUuid: String)async throws  -> FfiTask  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_taskchampion_ffi_fn_method_ffisession_today_reorder_after(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(uuid),FfiConverterString.lower(anchorUuid)
+                )
+            },
+            pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeFfiTask_lift,
+            errorHandler: FfiConverterTypeFfiError_lift
+        )
+}
+    
+    /**
+     * Move `uuid` to a today_position immediately before `anchor_uuid` in the today view.
+     *
+     * Both tasks must exist. The anchor must have `today_position` set.
+     * Returns `TaskNotFound` if either UUID does not exist.
+     * Returns `AnchorHasNoPosition` if the anchor has no `today_position`.
+     */
+open func todayReorderBefore(uuid: String, anchorUuid: String)async throws  -> FfiTask  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_taskchampion_ffi_fn_method_ffisession_today_reorder_before(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(uuid),FfiConverterString.lower(anchorUuid)
+                )
+            },
+            pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeFfiTask_lift,
+            errorHandler: FfiConverterTypeFfiError_lift
+        )
+}
+    
+    /**
+     * Move `uuid` to the first position in the today view.
+     *
+     * Returns `TaskNotFound` if the UUID does not exist.
+     */
+open func todayReorderToBeginning(uuid: String)async throws  -> FfiTask  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_taskchampion_ffi_fn_method_ffisession_today_reorder_to_beginning(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(uuid)
+                )
+            },
+            pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeFfiTask_lift,
+            errorHandler: FfiConverterTypeFfiError_lift
+        )
+}
+    
+    /**
+     * Move `uuid` to the last position in the today view.
+     *
+     * Returns `TaskNotFound` if the UUID does not exist.
+     */
+open func todayReorderToEnd(uuid: String)async throws  -> FfiTask  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_taskchampion_ffi_fn_method_ffisession_today_reorder_to_end(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(uuid)
                 )
             },
             pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
@@ -5274,6 +5427,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_dependency_map() != 18621) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_get_task() != 6917) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_is_ancestor() != 58227) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -5299,6 +5455,18 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_set_xstatus() != 52144) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_today_reorder_after() != 46074) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_today_reorder_before() != 34439) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_today_reorder_to_beginning() != 39943) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_today_reorder_to_end() != 9821) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_tree_map() != 45281) {
