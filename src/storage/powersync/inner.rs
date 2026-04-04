@@ -100,7 +100,6 @@ impl PowerSyncStorageInner {
                 end_at TEXT,
                 wait_at TEXT,
                 parent_id TEXT,
-                position TEXT,
                 project_id TEXT
             );
             CREATE TABLE IF NOT EXISTS tc_operations (

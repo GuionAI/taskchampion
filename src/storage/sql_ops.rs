@@ -46,7 +46,6 @@ pub(crate) struct PreparedTask {
     pub(crate) description: Option<String>,
     pub(crate) priority: Option<String>,
     pub(crate) parent_id: Option<String>,
-    pub(crate) position: Option<String>,
     pub(crate) entry_at: Option<String>,
     pub(crate) modified_at: Option<String>,
     pub(crate) due_at: Option<String>,
@@ -66,7 +65,6 @@ pub(crate) fn prepare_task(mut task_data: TaskMap) -> Result<PreparedTask> {
     let description = task_data.remove("description");
     let priority = task_data.remove("priority");
     let parent_id = task_data.remove("parent_id");
-    let position = task_data.remove("position");
 
     // Extract timestamps (epoch → ISO).
     let entry_at = extract_timestamp(&mut task_data, "entry")?;
@@ -100,7 +98,6 @@ pub(crate) fn prepare_task(mut task_data: TaskMap) -> Result<PreparedTask> {
         description,
         priority,
         parent_id,
-        position,
         entry_at,
         modified_at,
         due_at,
@@ -138,7 +135,7 @@ pub(crate) fn set_task_stmts(
             sql: "UPDATE tc_tasks SET \
                   data = ?, status = ?, description = ?, priority = ?, \
                   entry_at = ?, modified_at = ?, due_at = ?, scheduled_at = ?, \
-                  start_at = ?, end_at = ?, wait_at = ?, parent_id = ?, position = ?, project_id = ? \
+                  start_at = ?, end_at = ?, wait_at = ?, parent_id = ?, project_id = ? \
                   WHERE id = ?"
                 .into(),
             params: vec![
@@ -154,7 +151,6 @@ pub(crate) fn set_task_stmts(
                 opt(&prepared.end_at),
                 opt(&prepared.wait_at),
                 opt(&prepared.parent_id),
-                opt(&prepared.position),
                 project_param,
                 SqlParam::Text(uuid_str),
             ],
@@ -164,8 +160,8 @@ pub(crate) fn set_task_stmts(
             sql: "INSERT INTO tc_tasks \
                   (id, data, status, description, priority, \
                    entry_at, modified_at, due_at, scheduled_at, start_at, end_at, wait_at, \
-                   parent_id, position, project_id) \
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                   parent_id, project_id) \
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 .into(),
             params: vec![
                 SqlParam::Text(uuid_str),
@@ -181,7 +177,6 @@ pub(crate) fn set_task_stmts(
                 opt(&prepared.end_at),
                 opt(&prepared.wait_at),
                 opt(&prepared.parent_id),
-                opt(&prepared.position),
                 project_param,
             ],
         });

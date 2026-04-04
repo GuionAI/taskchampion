@@ -21,7 +21,6 @@ pub(super) fn read_raw_task_row(r: &rusqlite::Row) -> rusqlite::Result<RawTaskRo
         end_at: r.get("end_at")?,
         wait_at: r.get("wait_at")?,
         parent_id: r.get("parent_id")?,
-        position: r.get("position")?,
         project_name: r.get("project_name")?,
         project_id: r.get("project_id")?,
     })
