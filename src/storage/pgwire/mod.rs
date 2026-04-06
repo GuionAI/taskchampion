@@ -96,6 +96,27 @@ impl<'a> PgWireTxn<'a> {
             .as_ref()
             .ok_or_else(|| Error::Database("Transaction already committed".into()))
     }
+
+    /// Resolve a project name to its UUID via the projects table.
+    async fn resolve_project_id(&self, name: &str) -> Result<String> {
+        let t = self.get_txn()?;
+        let rows = t
+            .query_opt(
+                "SELECT id FROM projects WHERE name = $1 ORDER BY created_at LIMIT 1",
+                &[&name],
+            )
+            .await
+            .map_err(|e| Error::Database(format!("resolve_project_id query: {e}")))?;
+        match rows {
+            Some(row) => {
+                let id: String = row
+                    .try_get(0)
+                    .map_err(|e| Error::Database(format!("resolve_project_id get id: {e}")))?;
+                Ok(id)
+            }
+            None => Err(Error::ProjectNotFound(name.to_string())),
+        }
+    }
 }
 
 impl Drop for PgWireTxn<'_> {
@@ -222,7 +243,17 @@ impl StorageTxn for PgWireTxn<'_> {
         let data_val: serde_json::Value = serde_json::from_str(&prepared.data_json)
             .map_err(|e| Error::Database(format!("set_task parse data: {e}")))?;
 
-        let project_id = prepared.project_id_raw.as_deref();
+        // Resolve project name first. If a project name is provided and cannot be resolved,
+        // the error propagates immediately — there is no fallback to raw UUID.
+        // If no name is provided, fall back to the raw UUID if present.
+        let project_id = if let Some(name) = &prepared.project_name {
+            match self.resolve_project_id(name).await {
+                Ok(id) => Some(id),
+                Err(e) => return Err(e),
+            }
+        } else {
+            prepared.project_id_raw.clone()
+        };
 
         if exists {
             t.execute(

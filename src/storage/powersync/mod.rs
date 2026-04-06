@@ -302,16 +302,18 @@ mod test {
         Ok(())
     }
 
-    /// Verify that the project name round-trips: set_task stores the name in the
-    /// projects table, and get_task JOINs it back into the returned TaskMap.
+    /// Verify that the project name round-trips: set_task resolves the name to a UUID,
+    /// stores it in the project_id column, and get_task JOINs it back into the TaskMap.
+    /// Also verifies the "project" key is NOT in the blob (extracted before serialization).
     #[tokio::test]
     async fn test_project_round_trip() -> Result<()> {
         let mut storage = PowerSyncStorageInner::new_for_test()?;
 
-        // Pre-seed the "home" project so resolve_project_id can find it.
+        // Pre-seed the "home" project and capture its UUID.
+        let home_uuid = Uuid::new_v4().to_string();
         storage.conn.execute(
             "INSERT INTO projects (id, name) VALUES (?, ?)",
-            rusqlite::params![Uuid::new_v4().to_string(), "home"],
+            rusqlite::params![home_uuid, "home"],
         )?;
 
         let mut txn = storage.txn().await?;
@@ -324,6 +326,29 @@ mod test {
         txn.commit().await?;
         drop(txn);
 
+        // Verify the blob does NOT contain the "project" key (extracted before serialization).
+        let data_str: String = storage.conn.query_row(
+            "SELECT data FROM tc_tasks WHERE id = ?",
+            [&uuid.to_string()],
+            |r| r.get(0),
+        )?;
+        let data_map: serde_json::Value = serde_json::from_str(&data_str)
+            .map_err(|e| crate::errors::Error::Database(e.to_string()))?;
+        let obj = data_map.as_object().unwrap();
+        assert!(
+            !obj.contains_key("project"),
+            "project key should not be in blob, got: {obj:?}"
+        );
+
+        // Verify the project_id column holds the resolved UUID.
+        let stored_project_id: String = storage.conn.query_row(
+            "SELECT project_id FROM tc_tasks WHERE id = ?",
+            [&uuid.to_string()],
+            |r| r.get(0),
+        )?;
+        assert_eq!(stored_project_id, home_uuid);
+
+        // Verify the round-trip name comes from the JOIN, not the blob.
         let mut txn = storage.txn().await?;
         let got = txn.get_task(uuid).await?.expect("task should exist");
         assert_eq!(got.get("project").map(String::as_str), Some("home"));
@@ -339,6 +364,62 @@ mod test {
         let mut txn = storage.txn().await?;
         let got2 = txn.get_task(uuid2).await?.expect("task2 should exist");
         assert_eq!(got2.get("project").map(String::as_str), Some("home"));
+        txn.commit().await?;
+        Ok(())
+    }
+
+    /// Verify that an unknown project name returns ProjectNotFound.
+    #[tokio::test]
+    async fn test_project_not_found() -> Result<()> {
+        let mut storage = PowerSyncStorageInner::new_for_test()?;
+        let mut txn = storage.txn().await?;
+
+        let uuid = Uuid::new_v4();
+        let mut task: TaskMap = TaskMap::new();
+        task.insert("project".into(), "nonexistent".into());
+
+        let result = txn.set_task(uuid, task).await;
+        assert!(result.is_err(), "expected ProjectNotFound error");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Project not found"),
+            "error should mention ProjectNotFound: {err_msg}"
+        );
+        Ok(())
+    }
+
+    /// Verify that a raw project_id (no name) still works via fallback.
+    #[tokio::test]
+    async fn test_raw_project_id_fallback() -> Result<()> {
+        let mut storage = PowerSyncStorageInner::new_for_test()?;
+        let raw_uuid = Uuid::new_v4().to_string();
+
+        let mut txn = storage.txn().await?;
+        let uuid = Uuid::new_v4();
+        let mut task: TaskMap = TaskMap::new();
+        task.insert("project_id".into(), raw_uuid.clone());
+
+        txn.set_task(uuid, task).await?;
+        txn.commit().await?;
+        drop(txn);
+
+        // Verify the project_id column holds the raw UUID directly.
+        let stored_project_id: String = storage.conn.query_row(
+            "SELECT project_id FROM tc_tasks WHERE id = ?",
+            [&uuid.to_string()],
+            |r| r.get(0),
+        )?;
+        assert_eq!(stored_project_id, raw_uuid);
+
+        // project column should be absent since there's no matching projects row
+        // and no name was provided (project_name from JOIN will be NULL).
+        let mut txn = storage.txn().await?;
+        let got = txn.get_task(uuid).await?.expect("task should exist");
+        assert!(got.get("project").is_none());
+        assert_eq!(
+            got.get("project_id").map(String::as_str),
+            Some(raw_uuid.as_str())
+        );
         txn.commit().await?;
         Ok(())
     }
