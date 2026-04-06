@@ -150,6 +150,22 @@ impl<'t> PowerSyncTxn<'t> {
             .as_ref()
             .ok_or_else(|| Error::Database("Transaction already committed".into()))
     }
+
+    /// Resolve a project name to its UUID via the projects table.
+    fn resolve_project_id(&self, name: &str) -> Result<String> {
+        let t = self.get_txn()?;
+        if let Some(id) = t
+            .query_row(
+                "SELECT id FROM projects WHERE name = ? ORDER BY created_at LIMIT 1",
+                [name],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?
+        {
+            return Ok(id);
+        }
+        Err(Error::ProjectNotFound(name.to_string()))
+    }
 }
 
 /// Parse an operation from a JSON string, handling double-encoded JSONB values.
@@ -230,9 +246,17 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
     async fn set_task(&mut self, uuid: Uuid, task: TaskMap) -> Result<()> {
         let prepared = prepare_task(task)?;
 
-        // project_id_raw wins — SetProjectId is the only write path.
-        // Project name is returned to the consumer via JOIN on read; the blob key is ignored.
-        let project_id: Option<String> = prepared.project_id_raw.clone();
+        // Resolve project name first. If a project name is provided and cannot be resolved,
+        // the error propagates immediately — there is no fallback to raw UUID.
+        // If no name is provided, fall back to the raw UUID if present.
+        let project_id = if let Some(name) = &prepared.project_name {
+            match self.resolve_project_id(name) {
+                Ok(id) => Some(id),
+                Err(e) => return Err(e),
+            }
+        } else {
+            prepared.project_id_raw.clone()
+        };
 
         // PowerSync views don't support UPSERT (INSERT ... ON CONFLICT DO UPDATE).
         // INSTEAD OF triggers also report 0 rows changed regardless of success,

@@ -91,6 +91,33 @@ struct ExternalStorageTxn<'a> {
 }
 
 impl ExternalStorageTxn<'_> {
+    /// Resolve a project name to its UUID via the projects table.
+    async fn resolve_project_id(&self, name: &str) -> Result<String> {
+        let row = self
+            .executor
+            .query_one(
+                "SELECT id FROM projects WHERE name = ? ORDER BY created_at LIMIT 1",
+                &[SqlParam::Text(name.to_string())],
+            )
+            .await?;
+        match row {
+            Some(json) => {
+                let v: serde_json::Value = serde_json::from_str(&json)
+                    .map_err(|e| Error::Database(format!("Failed to parse project row: {e}")))?;
+                match v.get("id") {
+                    Some(serde_json::Value::String(id)) => Ok(id.clone()),
+                    Some(serde_json::Value::Null) | None => {
+                        Err(Error::ProjectNotFound(name.to_string()))
+                    }
+                    Some(other) => Err(Error::Database(format!(
+                        "projects.id must be a string, got: {other}"
+                    ))),
+                }
+            }
+            None => Err(Error::ProjectNotFound(name.to_string())),
+        }
+    }
+
     /// Parse a JSON row into a `RawTaskRow`.
     fn parse_task_row(json: &str) -> Result<RawTaskRow> {
         let v: serde_json::Value = serde_json::from_str(json)
@@ -198,9 +225,17 @@ impl StorageTxn for ExternalStorageTxn<'_> {
         self.task_write_cache.insert(uuid, task.clone());
         let prepared = prepare_task(task)?;
 
-        // project_id_raw wins — SetProjectId is the only write path.
-        // Project name is returned to the consumer via JOIN on read; the blob key is ignored.
-        let project_id: Option<String> = prepared.project_id_raw.clone();
+        // Resolve project name first. If a project name is provided and cannot be resolved,
+        // the error propagates immediately — there is no fallback to raw UUID.
+        // If no name is provided, fall back to the raw UUID if present.
+        let project_id = if let Some(name) = &prepared.project_name {
+            match self.resolve_project_id(name).await {
+                Ok(id) => Some(id),
+                Err(e) => return Err(e),
+            }
+        } else {
+            prepared.project_id_raw.clone()
+        };
 
         // Check existence: pending_creates first, then host DB.
         let exists = if self.pending_creates.contains(&uuid) {
@@ -617,14 +652,15 @@ mod test {
     async fn test_external_project_round_trip() {
         let mut storage = storage().await;
 
-        // Pre-seed the "home" project so SetProject can resolve it.
+        // Pre-seed the "home" project and capture its UUID.
+        let home_uuid = Uuid::new_v4().to_string();
         {
             let executor = &storage.executor;
             executor
                 .execute_batch(&[SqlStatement {
                     sql: "INSERT INTO projects (id, name) VALUES (?, ?)".into(),
                     params: vec![
-                        SqlParam::Text(Uuid::new_v4().to_string()),
+                        SqlParam::Text(home_uuid.clone()),
                         SqlParam::Text("home".into()),
                     ],
                 }])
@@ -650,6 +686,48 @@ mod test {
         let got2 = txn.get_task(uuid2).await.unwrap().unwrap();
         assert_eq!(got1.get("project").map(String::as_str), Some("home"));
         assert_eq!(got2.get("project").map(String::as_str), Some("home"));
+    }
+
+    /// Verify that an unknown project name returns ProjectNotFound.
+    #[tokio::test]
+    async fn test_external_project_not_found() {
+        let mut storage = storage().await;
+        let uuid = Uuid::new_v4();
+
+        let mut txn = storage.txn().await.unwrap();
+        let mut task = TaskMap::new();
+        task.insert("project".into(), "nonexistent".into());
+        let result = txn.set_task(uuid, task).await;
+        assert!(result.is_err(), "expected ProjectNotFound error");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Project not found"),
+            "error should mention ProjectNotFound: {err_msg}"
+        );
+    }
+
+    /// Verify that a raw project_id (no name) still works via fallback.
+    #[tokio::test]
+    async fn test_external_raw_project_id_fallback() {
+        let mut storage = storage().await;
+        let raw_uuid = Uuid::new_v4().to_string();
+        let uuid = Uuid::new_v4();
+
+        let mut txn = storage.txn().await.unwrap();
+        let mut task = TaskMap::new();
+        task.insert("project_id".into(), raw_uuid.clone());
+        txn.set_task(uuid, task).await.unwrap();
+        txn.commit().await.unwrap();
+        drop(txn);
+
+        let mut txn = storage.txn().await.unwrap();
+        let got = txn.get_task(uuid).await.unwrap().unwrap();
+        // project column absent (no matching row in projects, no name provided)
+        assert!(got.get("project").is_none());
+        assert_eq!(
+            got.get("project_id").map(String::as_str),
+            Some(raw_uuid.as_str())
+        );
     }
 
     /// Verify write buffer is not flushed if commit is not called (drop = abort).

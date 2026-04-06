@@ -55,6 +55,8 @@ pub(crate) struct PreparedTask {
     pub(crate) wait_at: Option<String>,
     /// Raw project UUID set via `SetProjectId` (bypasses name resolution).
     pub(crate) project_id_raw: Option<String>,
+    /// Project name string from the TaskMap — resolved to a UUID via the projects table.
+    pub(crate) project_name: Option<String>,
 }
 
 /// Parse a TaskMap into its promoted columns and residual data blob.
@@ -77,6 +79,8 @@ pub(crate) fn prepare_task(mut task_data: TaskMap) -> Result<PreparedTask> {
 
     // Extract raw project_id.
     let project_id_raw = task_data.remove("project_id");
+    // Extract project name string for name-based resolution.
+    let project_name = task_data.remove("project");
 
     // Validate annotation keys have integer epoch suffixes.
     for k in task_data.keys().filter(|k| k.starts_with("annotation_")) {
@@ -106,6 +110,7 @@ pub(crate) fn prepare_task(mut task_data: TaskMap) -> Result<PreparedTask> {
         end_at,
         wait_at,
         project_id_raw,
+        project_name,
     })
 }
 
