@@ -983,9 +983,9 @@ checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
 
 [[package]]
 name = "powersync_core"
-version = "0.4.11"
+version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea6becb46fb7b7328822ff3aad25dd537287772bfbc21052e978cb4e10f3014e"
+checksum = "77f9c7f0117bda7f68ca872528e0c2c78de94d34f81a6e167e2046e8578bd080"
 dependencies = [
  "bytes",
  "const_format",
@@ -1003,9 +1003,9 @@ dependencies = [
 
 [[package]]
 name = "powersync_sqlite_nostd"
-version = "0.4.11"
+version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c9f1e5afe9c29d52a5e44550175eceb93b150067f05d97732bd65c57ef37827"
+checksum = "41a5a95198e2ab901965138fced0315621073ef557a04b5552a51774658abf13"
 dependencies = [
  "bindgen",
  "num-derive 0.4.2",
@@ -1866,9 +1866,9 @@ dependencies = [
 
 [[package]]
 name = "uuid"
-version = "1.22.0"
+version = "1.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a68d3c8f01c0cfa54a75291d83601161799e4a89a39e0929f4b0354d88757a37"
+checksum = "5ac8b6f42ead25368cf5b098aeb3dc8a1a2c05a3eee8a9a1a68c640edbfc79d9"
 dependencies = [
  "getrandom",
  "js-sys",
