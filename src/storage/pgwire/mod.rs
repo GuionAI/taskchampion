@@ -37,7 +37,7 @@ const PG_TC_CONFIG_READ_SQL: &str = "SELECT tc_config FROM settings LIMIT 1";
 ///
 /// The proxy validates Supabase JWTs per-connection and sets RLS context.
 /// Pass `DATABASE_URL` (full postgres:// URL with JWT as password) and `FLICKNOTE_TOKEN`
-/// (Supabase JWT, for parse_jwt_sub user_id extraction) to [`PgWireStorage::new`].
+/// (Supabase JWT, for user_id extraction from JWT sub claim) to [`PgWireStorage::new`].
 pub struct PgWireStorage {
     client: Client,
 }
@@ -46,9 +46,16 @@ impl PgWireStorage {
     /// Connect to Postgres via pgwire.
     ///
     /// - `database_url`: Postgres connection string, e.g. `postgres://user:password@host:port/dbname`.
-    ///   fn-agent constructs this URL with the JWT embedded as the password.
-    /// - `token`: Supabase JWT. Kept for backwards compatibility; the password is already
-    ///   embedded in `database_url`. The caller uses this token for `parse_jwt_sub`.
+    ///   The JWT should be embedded as the password in the URL (the caller constructs this).
+    /// - `token`: Supabase JWT. Kept for backwards compatibility — this parameter is no longer
+    ///   used internally. The caller may use this token for user_id extraction (JWT sub claim).
+    ///
+    /// # Connection background task
+    ///
+    /// tokio-postgres requires a background task to drive the connection protocol.
+    /// This task is spawned on the current tokio runtime. If it encounters a network
+    /// error, subsequent operations on the returned `PgWireStorage` will fail with
+    /// opaque "connection closed" errors from tokio-postgres.
     pub async fn new(database_url: &str, _token: &str) -> Result<Self> {
         let (client, connection) = tokio_postgres::connect(database_url, NoTls)
             .await
@@ -514,7 +521,7 @@ mod test {
     }
 
     // Integration tests requiring a live Postgres. Run with:
-    //   DATABASE_URL=postgres://host:port/dbname FLICKNOTE_TOKEN=... \
+    //   DATABASE_URL=postgres://user:JWT@host:port/dbname FLICKNOTE_TOKEN=... \
     //     cargo test --features storage-pgwire -- pgwire
     // Not run in CI (no Postgres available).
 
