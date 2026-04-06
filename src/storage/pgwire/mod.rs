@@ -36,8 +36,8 @@ const PG_TC_CONFIG_READ_SQL: &str = "SELECT tc_config FROM settings LIMIT 1";
 /// Postgres-backed storage that connects via the pgwire-supabase-proxy.
 ///
 /// The proxy validates Supabase JWTs per-connection and sets RLS context.
-/// Pass `DATABASE_URL` (host/port/db, no password) and `FLICKNOTE_TOKEN`
-/// (Supabase JWT) to [`PgWireStorage::new`].
+/// Pass `DATABASE_URL` (full postgres:// URL with JWT as password) and `FLICKNOTE_TOKEN`
+/// (Supabase JWT, for parse_jwt_sub user_id extraction) to [`PgWireStorage::new`].
 pub struct PgWireStorage {
     client: Client,
 }
@@ -45,20 +45,12 @@ pub struct PgWireStorage {
 impl PgWireStorage {
     /// Connect to Postgres via pgwire.
     ///
-    /// - `database_url`: Postgres connection string, e.g. `postgres://host:port/dbname`
-    ///   (no password — auth is via JWT in the user field)
-    /// - `token`: Supabase JWT, sent as the pgwire `user` field for authentication
-    ///
-    /// # Connection background task
-    ///
-    /// tokio-postgres requires a background task to drive the connection protocol.
-    /// This task is spawned on the current tokio runtime. If it encounters a network
-    /// error, subsequent operations on the returned `PgWireStorage` will fail with
-    /// opaque "connection closed" errors from tokio-postgres.
-    pub async fn new(database_url: &str, token: &str) -> Result<Self> {
-        let config_str = build_config(database_url, token)?;
-
-        let (client, connection) = tokio_postgres::connect(&config_str, NoTls)
+    /// - `database_url`: Postgres connection string, e.g. `postgres://user:password@host:port/dbname`.
+    ///   fn-agent constructs this URL with the JWT embedded as the password.
+    /// - `token`: Supabase JWT. Kept for backwards compatibility; the password is already
+    ///   embedded in `database_url`. The caller uses this token for `parse_jwt_sub`.
+    pub async fn new(database_url: &str, _token: &str) -> Result<Self> {
+        let (client, connection) = tokio_postgres::connect(database_url, NoTls)
             .await
             .map_err(|e| Error::Database(format!("pgwire connect failed: {e}")))?;
 
@@ -71,36 +63,6 @@ impl PgWireStorage {
 
         Ok(Self { client })
     }
-}
-
-/// Build a tokio-postgres config string with the JWT as the user field.
-fn build_config(database_url: &str, token: &str) -> Result<String> {
-    // Expected format: postgres://host:port/dbname or postgresql://host:port/dbname
-    let without_scheme = database_url
-        .strip_prefix("postgres://")
-        .or_else(|| database_url.strip_prefix("postgresql://"))
-        .ok_or_else(|| {
-            Error::Database("DATABASE_URL must start with postgres:// or postgresql://".into())
-        })?;
-
-    // Split off path (database name).
-    let (host_port, dbname) = match without_scheme.split_once('/') {
-        Some((hp, db)) => (hp, db),
-        None => (without_scheme, "postgres"),
-    };
-
-    // Split host and port.
-    let (host, port) = match host_port.split_once(':') {
-        Some((h, p)) => (h, p),
-        None => (host_port, "5432"),
-    };
-
-    // The JWT may contain special characters; use key=value format.
-    // We escape single quotes in the token (shouldn't happen in a JWT, but be safe).
-    let escaped_token = token.replace('\'', "\\'");
-    Ok(format!(
-        "host={host} port={port} dbname={dbname} user='{escaped_token}'"
-    ))
 }
 
 #[async_trait]
@@ -548,59 +510,6 @@ mod test {
         fn invalid_data() {
             let data = "not valid json at all";
             assert!(parse_operation(data).is_err());
-        }
-    }
-
-    // Tests for build_config URL parsing — run without Postgres, always enabled.
-    mod build_config_tests {
-        use super::super::build_config;
-
-        #[test]
-        fn full_url() {
-            let cfg = build_config("postgres://db.example.com:5433/mydb", "tok").unwrap();
-            assert!(cfg.contains("host=db.example.com"), "host: {cfg}");
-            assert!(cfg.contains("port=5433"), "port: {cfg}");
-            assert!(cfg.contains("dbname=mydb"), "dbname: {cfg}");
-            assert!(cfg.contains("user='tok'"), "user: {cfg}");
-        }
-
-        #[test]
-        fn postgresql_scheme() {
-            let cfg = build_config("postgresql://localhost:5432/tasks", "tok").unwrap();
-            assert!(cfg.contains("host=localhost"), "{cfg}");
-            assert!(cfg.contains("port=5432"), "{cfg}");
-            assert!(cfg.contains("dbname=tasks"), "{cfg}");
-        }
-
-        #[test]
-        fn default_port_when_missing() {
-            let cfg = build_config("postgres://myhost/mydb", "tok").unwrap();
-            assert!(cfg.contains("host=myhost"), "{cfg}");
-            assert!(cfg.contains("port=5432"), "should default to 5432: {cfg}");
-        }
-
-        #[test]
-        fn default_dbname_when_no_slash() {
-            let cfg = build_config("postgres://myhost:5432", "tok").unwrap();
-            assert!(
-                cfg.contains("dbname=postgres"),
-                "should default to postgres: {cfg}"
-            );
-        }
-
-        #[test]
-        fn invalid_scheme_returns_error() {
-            let err = build_config("mysql://host/db", "tok").unwrap_err();
-            assert!(err.to_string().contains("postgres://"), "{err}");
-        }
-
-        #[test]
-        fn token_single_quote_escaped() {
-            let cfg = build_config("postgres://h:5432/db", "tok'en").unwrap();
-            assert!(
-                cfg.contains(r"tok\'en"),
-                "single quote should be escaped: {cfg}"
-            );
         }
     }
 
