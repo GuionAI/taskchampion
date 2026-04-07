@@ -53,6 +53,12 @@ fn opt_str_to_uuid(s: &Option<String>) -> Result<Option<Uuid>> {
     }
 }
 
+/// Shared column projection for task SELECT queries (LEFT JOIN projects).
+const TASK_SELECT_COLS: &str = "t.id, t.data::text AS data, t.status, t.description, t.priority, \
+     t.entry_at, t.modified_at, t.due_at, t.scheduled_at, \
+     t.start_at, t.end_at, t.wait_at, t.parent_id, \
+     p.name AS project_name, t.project_id";
+
 // ── PgWireStorage ──────────────────────────────────────────────────────────
 
 /// Postgres-backed storage that connects via the pgwire-supabase-proxy.
@@ -177,12 +183,7 @@ impl StorageTxn for PgWireTxn<'_> {
         let t_alias = Alias::new("t");
         let p_alias = Alias::new("p");
         let (sql, vals) = Query::select()
-            .expr(Expr::cust(
-                "t.id, t.data::text AS data, t.status, t.description, t.priority, \
-                 t.entry_at, t.modified_at, t.due_at, t.scheduled_at, \
-                 t.start_at, t.end_at, t.wait_at, t.parent_id, \
-                 p.name AS project_name, t.project_id",
-            ))
+            .expr(Expr::cust(TASK_SELECT_COLS))
             .from_as(TcTasks::Table, t_alias.clone())
             .join_as(
                 JoinType::LeftJoin,
@@ -191,7 +192,7 @@ impl StorageTxn for PgWireTxn<'_> {
                 Expr::col((t_alias.clone(), TcTasks::ProjectId))
                     .equals((p_alias.clone(), Projects::Id)),
             )
-            .and_where(Expr::col((t_alias.clone(), TcTasks::Id)).eq(uuid))
+            .and_where(Expr::col((t_alias, TcTasks::Id)).eq(uuid))
             .limit(1)
             .build_postgres(PostgresQueryBuilder);
         let rows = t
@@ -213,12 +214,7 @@ impl StorageTxn for PgWireTxn<'_> {
         let t_alias = Alias::new("t");
         let p_alias = Alias::new("p");
         let (sql, vals) = Query::select()
-            .expr(Expr::cust(
-                "t.id, t.data::text AS data, t.status, t.description, t.priority, \
-                 t.entry_at, t.modified_at, t.due_at, t.scheduled_at, \
-                 t.start_at, t.end_at, t.wait_at, t.parent_id, \
-                 p.name AS project_name, t.project_id",
-            ))
+            .expr(Expr::cust(TASK_SELECT_COLS))
             .from_as(TcTasks::Table, t_alias.clone())
             .join_as(
                 JoinType::LeftJoin,
@@ -227,7 +223,7 @@ impl StorageTxn for PgWireTxn<'_> {
                 Expr::col((t_alias.clone(), TcTasks::ProjectId))
                     .equals((p_alias.clone(), Projects::Id)),
             )
-            .and_where(Expr::col((t_alias.clone(), TcTasks::Status)).eq("pending"))
+            .and_where(Expr::col((t_alias, TcTasks::Status)).eq("pending"))
             .build_postgres(PostgresQueryBuilder);
         let rows = t
             .query(sql.as_str(), &vals.as_params())
@@ -363,12 +359,7 @@ impl StorageTxn for PgWireTxn<'_> {
         let t_alias = Alias::new("t");
         let p_alias = Alias::new("p");
         let (sql, vals) = Query::select()
-            .expr(Expr::cust(
-                "t.id, t.data::text AS data, t.status, t.description, t.priority, \
-                 t.entry_at, t.modified_at, t.due_at, t.scheduled_at, \
-                 t.start_at, t.end_at, t.wait_at, t.parent_id, \
-                 p.name AS project_name, t.project_id",
-            ))
+            .expr(Expr::cust(TASK_SELECT_COLS))
             .from_as(TcTasks::Table, t_alias.clone())
             .join_as(
                 JoinType::LeftJoin,
@@ -406,11 +397,10 @@ impl StorageTxn for PgWireTxn<'_> {
     }
 
     async fn get_task_operations(&mut self, _uuid: Uuid) -> Result<Vec<Operation>> {
-        Err(Error::Database(
-            "get_task_operations is not supported on the pgwire backend — \
-             the remote Postgres has no operation log. Use a local backend for task history."
-                .into(),
-        ))
+        // pgwire backend has no operation log. Return empty — callers that need history
+        // should use a local backend (powersync / external / inmemory). This is
+        // consistent with add_operation being a silent no-op on write.
+        Ok(vec![])
     }
 
     async fn all_operations(&mut self) -> Result<Vec<Operation>> {
@@ -426,10 +416,9 @@ impl StorageTxn for PgWireTxn<'_> {
         // pgwire backend has no operation log — operations are local-only state
         // tracked by the replica. The remote Postgres is the source of truth for
         // task data; replaying operations against it is meaningless. We accept
-        // the call silently so commit_operations() (taskdb/mod.rs:29) — the canonical
-        // write path that calls this once per operation in the same write txn —
-        // continues to work for set_task / create_task. Returning Err here would
-        // brick all writes.
+        // the call silently so commit_operations() — the canonical write path that
+        // calls this once per operation in the same write txn — continues to work
+        // for set_task / create_task. Returning Err here would brick all writes.
         log::debug!("pgwire add_operation: ignored (operation log not persisted on this backend)");
         Ok(())
     }
@@ -473,7 +462,14 @@ impl StorageTxn for PgWireTxn<'_> {
             .query(sql.as_str(), &vals.as_params())
             .await
             .map_err(|e| Error::Database(format!("get_tc_config: {e}")))?;
-        Ok(rows.into_iter().next().and_then(|row| row.try_get(0).ok()))
+        match rows.into_iter().next() {
+            None => Ok(None),
+            Some(row) => row.try_get(0).map(Some).map_err(|e| {
+                Error::Database(format!(
+                    "get_tc_config: failed to read tc_config column: {e}"
+                ))
+            }),
+        }
     }
 
     async fn set_tc_config(&mut self, value: String) -> Result<()> {
