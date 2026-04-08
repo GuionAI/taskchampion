@@ -67,6 +67,28 @@ where
     Expr::col(col).cast_as(Alias::new("text"))
 }
 
+/// Cast a uuid column to text in a SELECT so tokio-postgres can decode
+/// it into a Rust `String`. Without this cast, reading uuid columns into
+/// `String` fails with "error deserializing column N" because tokio-postgres
+/// has no `FromSql<String>` for the uuid type OID.
+fn uuid_read<C>(col: C) -> SimpleExpr
+where
+    C: IntoColumnRef,
+{
+    Expr::col(col).cast_as(Alias::new("text"))
+}
+
+/// Cast a timestamptz column to text so tokio-postgres can decode it into
+/// a Rust `String` (ISO 8601). Same rationale as `uuid_read`: no
+/// `FromSql<String>` for the timestamptz type OID without `with-chrono`,
+/// and even with it the decoded type is `DateTime<Utc>`, not `String`.
+fn ts_read<C>(col: C) -> SimpleExpr
+where
+    C: IntoColumnRef,
+{
+    Expr::col(col).cast_as(Alias::new("text"))
+}
+
 /// Cast a Rust value (typically `String`) to jsonb in an INSERT/UPDATE
 /// so Postgres accepts it as a jsonb column. Emits `CAST($N AS jsonb)`.
 fn jsonb_write(value: String) -> SimpleExpr {
@@ -86,24 +108,24 @@ fn jsonb_write_json(value: serde_json::Value) -> SimpleExpr {
 /// uses string-based `try_get("name")` lookups — column ordering here is
 /// not load-bearing, but column **aliases** are.
 fn select_task_cols(q: &mut sea_query::SelectStatement, t: &Alias, p: &Alias) {
-    q.column((t.clone(), TcTasks::Id))
+    q.expr_as(uuid_read((t.clone(), TcTasks::Id)), Alias::new("id"))
         .expr_as(jsonb_read((t.clone(), TcTasks::Data)), Alias::new("data"))
         .column((t.clone(), TcTasks::Status))
         .column((t.clone(), TcTasks::Description))
         .column((t.clone(), TcTasks::Priority))
-        .column((t.clone(), TcTasks::EntryAt))
-        .column((t.clone(), TcTasks::ModifiedAt))
-        .column((t.clone(), TcTasks::DueAt))
-        .column((t.clone(), TcTasks::ScheduledAt))
-        .column((t.clone(), TcTasks::StartAt))
-        .column((t.clone(), TcTasks::EndAt))
-        .column((t.clone(), TcTasks::WaitAt))
-        .column((t.clone(), TcTasks::ParentId))
+        .expr_as(ts_read((t.clone(), TcTasks::EntryAt)), Alias::new("entry_at"))
+        .expr_as(ts_read((t.clone(), TcTasks::ModifiedAt)), Alias::new("modified_at"))
+        .expr_as(ts_read((t.clone(), TcTasks::DueAt)), Alias::new("due_at"))
+        .expr_as(ts_read((t.clone(), TcTasks::ScheduledAt)), Alias::new("scheduled_at"))
+        .expr_as(ts_read((t.clone(), TcTasks::StartAt)), Alias::new("start_at"))
+        .expr_as(ts_read((t.clone(), TcTasks::EndAt)), Alias::new("end_at"))
+        .expr_as(ts_read((t.clone(), TcTasks::WaitAt)), Alias::new("wait_at"))
+        .expr_as(uuid_read((t.clone(), TcTasks::ParentId)), Alias::new("parent_id"))
         .expr_as(
             Expr::col((p.clone(), Projects::Name)),
             Alias::new("project_name"),
         )
-        .column((t.clone(), TcTasks::ProjectId));
+        .expr_as(uuid_read((t.clone(), TcTasks::ProjectId)), Alias::new("project_id"));
 }
 
 // ── PgWireStorage ──────────────────────────────────────────────────────────
@@ -196,7 +218,7 @@ impl<'a> PgWireTxn<'a> {
     async fn resolve_project_id(&self, name: &str) -> Result<String> {
         let t = self.get_txn()?;
         let (sql, vals) = Query::select()
-            .column(Projects::Id)
+            .expr(uuid_read(Projects::Id))
             .from(Projects::Table)
             .and_where(Expr::col(Projects::Name).eq(name))
             .order_by(Projects::CreatedAt, sea_query::Order::Asc)
@@ -433,7 +455,7 @@ impl StorageTxn for PgWireTxn<'_> {
     async fn all_task_uuids(&mut self) -> Result<Vec<Uuid>> {
         let t = self.get_txn()?;
         let (sql, vals) = Query::select()
-            .column(TcTasks::Id)
+            .expr(uuid_read(TcTasks::Id))
             .from(TcTasks::Table)
             .build_postgres(PostgresQueryBuilder);
         let rows = t
