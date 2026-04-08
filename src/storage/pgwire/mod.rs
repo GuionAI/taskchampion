@@ -73,6 +73,12 @@ fn jsonb_write(value: String) -> SimpleExpr {
     Expr::value(value).cast_as(Alias::new("jsonb"))
 }
 
+/// Cast a `serde_json::Value` to jsonb so Postgres accepts it as a jsonb
+/// column. Emits `CAST($N AS jsonb)`.
+fn jsonb_write_json(value: serde_json::Value) -> SimpleExpr {
+    Expr::value(value).cast_as(Alias::new("jsonb"))
+}
+
 /// Apply the standard task SELECT column projection to a sea-query
 /// `SelectStatement`, with `TcTasks::Data` cast to text via [`jsonb_read`].
 ///
@@ -283,7 +289,10 @@ impl StorageTxn for PgWireTxn<'_> {
         let (sql, vals) = Query::insert()
             .into_table(TcTasks::Table)
             .columns([TcTasks::Id, TcTasks::Data])
-            .values_panic([uuid.into(), JsonValue::Object(Default::default()).into()])
+            .values_panic([
+                uuid.into(),
+                jsonb_write_json(JsonValue::Object(Default::default())),
+            ])
             .build_postgres(PostgresQueryBuilder);
         t.execute(sql.as_str(), &vals.as_params())
             .await
@@ -318,7 +327,7 @@ impl StorageTxn for PgWireTxn<'_> {
             let (sql, vals) = Query::update()
                 .table(TcTasks::Table)
                 .values([
-                    (TcTasks::Data, data_val.into()),
+                    (TcTasks::Data, jsonb_write_json(data_val.clone())),
                     (TcTasks::Status, prepared.status.clone().into()),
                     (TcTasks::Description, prepared.description.clone().into()),
                     (TcTasks::Priority, prepared.priority.clone().into()),
@@ -388,10 +397,11 @@ impl StorageTxn for PgWireTxn<'_> {
                 .from_table(TcTasks::Table)
                 .and_where(Expr::col(TcTasks::Id).eq(uuid))
                 .build_postgres(PostgresQueryBuilder);
-            t.execute(sql.as_str(), &vals.as_params())
+            let n = t
+                .execute(sql.as_str(), &vals.as_params())
                 .await
                 .map_err(|e| Error::Database(format!("delete_task: {e}")))?;
-            Ok(true)
+            Ok(n > 0)
         } else {
             Ok(false)
         }
