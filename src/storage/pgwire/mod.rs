@@ -70,8 +70,8 @@ fn jsonb_write_json(value: serde_json::Value) -> SimpleExpr {
 /// Cast a jsonb column to text in a SELECT so tokio-postgres can decode
 /// it into a Rust `String`. Emits `CAST("col" AS text)`.
 ///
-/// Use for any jsonb column read. Centralizes the workaround for
-/// `tokio-postgres`'s `FromSql for String` not accepting jsonb.
+/// Currently used only for `TcTasks::Data` and `Settings::TcConfig` (jsonb
+/// columns that must be passed as strings to `serde_json::from_str`).
 fn jsonb_read<C>(col: C) -> SimpleExpr
 where
     C: IntoColumnRef,

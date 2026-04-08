@@ -16,7 +16,8 @@ use crate::storage::TaskMap;
 /// produces strict RFC3339 (`2024-08-25T19:06:11+00:00`). This is the
 /// exact format the downstream `iso_to_epoch` parser in `raw_to_task`
 /// accepts — eliminating the format mismatch that pg's native
-/// `timestamptz::text` cast introduces (`2024-08-25 19:06:11+00`).
+/// `timestamptz::text` cast introduces (space-separated date+time,
+/// non-normalized offset without colon, e.g. `2024-08-25 19:06:11+00`).
 ///
 /// The `data` column stays cast-to-text via `jsonb_read` in the SQL
 /// projection because we still pass it to `serde_json::from_str` in
