@@ -368,7 +368,7 @@ impl StorageTxn for PgWireTxn<'_> {
                 ])
                 .values_panic([
                     uuid.into(),
-                    data_val.into(),
+                    jsonb_write_json(data_val),
                     prepared.status.into(),
                     prepared.description.into(),
                     prepared.priority.into(),
