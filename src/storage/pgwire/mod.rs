@@ -55,52 +55,6 @@ fn opt_str_to_uuid(s: &Option<String>) -> Result<Option<Uuid>> {
     }
 }
 
-/// Cast a column to text in a SELECT so tokio-postgres can decode it into a
-/// Rust `String`. Emits `CAST("col" AS text)`.
-///
-/// The shared implementation for [`jsonb_read`], [`uuid_read`], and [`ts_read`].
-/// Each wrapper exists for call-site clarity and targeted doc comments.
-fn col_as_text<C>(col: C) -> SimpleExpr
-where
-    C: IntoColumnRef,
-{
-    Expr::col(col).cast_as(Alias::new("text"))
-}
-
-/// Cast a jsonb column to text in a SELECT so tokio-postgres can decode
-/// it into a Rust `String`. Emits `CAST("col" AS text)`.
-///
-/// Use for any jsonb column read. Centralizes the workaround for
-/// `tokio-postgres`'s `FromSql for String` not accepting jsonb.
-fn jsonb_read<C>(col: C) -> SimpleExpr
-where
-    C: IntoColumnRef,
-{
-    col_as_text(col)
-}
-
-/// Cast a uuid column to text in a SELECT so tokio-postgres can decode
-/// it into a Rust `String`. Without this cast, reading uuid columns into
-/// `String` fails with "error deserializing column N" because tokio-postgres
-/// has no `FromSql<String>` for the uuid type OID.
-fn uuid_read<C>(col: C) -> SimpleExpr
-where
-    C: IntoColumnRef,
-{
-    col_as_text(col)
-}
-
-/// Cast a timestamptz column to text so tokio-postgres can decode it into
-/// a Rust `String` (ISO 8601). Same rationale as `uuid_read`: no
-/// `FromSql<String>` for the timestamptz type OID without `with-chrono`,
-/// and even with it the decoded type is `DateTime<Utc>`, not `String`.
-fn ts_read<C>(col: C) -> SimpleExpr
-where
-    C: IntoColumnRef,
-{
-    col_as_text(col)
-}
-
 /// Cast a Rust value (typically `String`) to jsonb in an INSERT/UPDATE
 /// so Postgres accepts it as a jsonb column. Emits `CAST($N AS jsonb)`.
 fn jsonb_write(value: String) -> SimpleExpr {
@@ -113,52 +67,48 @@ fn jsonb_write_json(value: serde_json::Value) -> SimpleExpr {
     Expr::value(value).cast_as(Alias::new("jsonb"))
 }
 
+/// Cast a jsonb column to text in a SELECT so tokio-postgres can decode
+/// it into a Rust `String`. Emits `CAST("col" AS text)`.
+///
+/// Currently used only for `TcTasks::Data` and `Settings::TcConfig` (jsonb
+/// columns that must be passed as strings to `serde_json::from_str`).
+fn jsonb_read<C>(col: C) -> SimpleExpr
+where
+    C: IntoColumnRef,
+{
+    Expr::col(col).cast_as(Alias::new("text"))
+}
+
 /// Apply the standard task SELECT column projection to a sea-query
-/// `SelectStatement`. All columns that tokio-postgres cannot directly decode
-/// into `String` are cast to text: [`jsonb_read`] for [`TcTasks::Data`],
-/// [`uuid_read`] for UUID columns (`Id`, `ParentId`, `ProjectId`), and
-/// [`ts_read`] for all timestamp columns.
+/// `SelectStatement`.
+///
+/// `data` stays cast-to-text via [`jsonb_read`] so `raw_to_task` can call
+/// `serde_json::from_str` on it. All other columns are decoded natively by
+/// tokio-postgres (`with-uuid-1` + `with-chrono-0_4` features) — no
+/// SQL-layer casts required.
 ///
 /// Mirrors the schema consumed by [`row_reader::read_raw_task_row`], which
 /// uses string-based `try_get("name")` lookups — column ordering here is
 /// not load-bearing, but column **aliases** are.
 fn select_task_cols(q: &mut sea_query::SelectStatement, t: &Alias, p: &Alias) {
-    q.expr_as(uuid_read((t.clone(), TcTasks::Id)), Alias::new("id"))
+    q.column((t.clone(), TcTasks::Id))
         .expr_as(jsonb_read((t.clone(), TcTasks::Data)), Alias::new("data"))
         .column((t.clone(), TcTasks::Status))
         .column((t.clone(), TcTasks::Description))
         .column((t.clone(), TcTasks::Priority))
-        .expr_as(
-            ts_read((t.clone(), TcTasks::EntryAt)),
-            Alias::new("entry_at"),
-        )
-        .expr_as(
-            ts_read((t.clone(), TcTasks::ModifiedAt)),
-            Alias::new("modified_at"),
-        )
-        .expr_as(ts_read((t.clone(), TcTasks::DueAt)), Alias::new("due_at"))
-        .expr_as(
-            ts_read((t.clone(), TcTasks::ScheduledAt)),
-            Alias::new("scheduled_at"),
-        )
-        .expr_as(
-            ts_read((t.clone(), TcTasks::StartAt)),
-            Alias::new("start_at"),
-        )
-        .expr_as(ts_read((t.clone(), TcTasks::EndAt)), Alias::new("end_at"))
-        .expr_as(ts_read((t.clone(), TcTasks::WaitAt)), Alias::new("wait_at"))
-        .expr_as(
-            uuid_read((t.clone(), TcTasks::ParentId)),
-            Alias::new("parent_id"),
-        )
+        .column((t.clone(), TcTasks::EntryAt))
+        .column((t.clone(), TcTasks::ModifiedAt))
+        .column((t.clone(), TcTasks::DueAt))
+        .column((t.clone(), TcTasks::ScheduledAt))
+        .column((t.clone(), TcTasks::StartAt))
+        .column((t.clone(), TcTasks::EndAt))
+        .column((t.clone(), TcTasks::WaitAt))
+        .column((t.clone(), TcTasks::ParentId))
         .expr_as(
             Expr::col((p.clone(), Projects::Name)),
             Alias::new("project_name"),
         )
-        .expr_as(
-            uuid_read((t.clone(), TcTasks::ProjectId)),
-            Alias::new("project_id"),
-        );
+        .column((t.clone(), TcTasks::ProjectId));
 }
 
 // ── PgWireStorage ──────────────────────────────────────────────────────────
@@ -251,7 +201,7 @@ impl<'a> PgWireTxn<'a> {
     async fn resolve_project_id(&self, name: &str) -> Result<String> {
         let t = self.get_txn()?;
         let (sql, vals) = Query::select()
-            .expr(uuid_read(Projects::Id))
+            .column(Projects::Id)
             .from(Projects::Table)
             .and_where(Expr::col(Projects::Name).eq(name))
             .order_by(Projects::CreatedAt, sea_query::Order::Asc)
@@ -262,9 +212,12 @@ impl<'a> PgWireTxn<'a> {
             .await
             .map_err(|e| Error::Database(format!("resolve_project_id query: {e}")))?;
         match row {
-            Some(row) => row
-                .try_get(0)
-                .map_err(|e| Error::Database(format!("resolve_project_id get id: {e}"))),
+            Some(row) => {
+                let id: Uuid = row
+                    .try_get(0)
+                    .map_err(|e| Error::Database(format!("resolve_project_id get id: {e}")))?;
+                Ok(id.to_string())
+            }
             None => Err(Error::ProjectNotFound(name.to_string())),
         }
     }
@@ -488,7 +441,7 @@ impl StorageTxn for PgWireTxn<'_> {
     async fn all_task_uuids(&mut self) -> Result<Vec<Uuid>> {
         let t = self.get_txn()?;
         let (sql, vals) = Query::select()
-            .expr(uuid_read(TcTasks::Id))
+            .column(TcTasks::Id)
             .from(TcTasks::Table)
             .build_postgres(PostgresQueryBuilder);
         let rows = t
@@ -497,10 +450,8 @@ impl StorageTxn for PgWireTxn<'_> {
             .map_err(|e| Error::Database(format!("all_task_uuids: {e}")))?;
         rows.into_iter()
             .map(|r| {
-                let s: String = r
-                    .try_get(0)
-                    .map_err(|e| Error::Database(format!("read uuid: {e}")))?;
-                Uuid::parse_str(&s).map_err(|e| Error::Database(format!("invalid UUID: {e}")))
+                r.try_get::<_, Uuid>(0)
+                    .map_err(|e| Error::Database(format!("read uuid: {e}")))
             })
             .collect()
     }
@@ -701,6 +652,8 @@ mod test {
         let (sql, _): (String, _) = q
             .from_as(super::TcTasks::Table, t.clone())
             .build_postgres(sea_query::PostgresQueryBuilder);
+        // Only the `data` column (jsonb) should be cast to text — all uuid and
+        // timestamptz columns are now decoded natively by tokio-postgres.
         assert!(
             sql.to_lowercase().contains("as text"),
             "expected data column cast to text, got: {sql}"
@@ -728,55 +681,31 @@ mod test {
                 "expected alias {alias} in SQL, got: {sql}"
             );
         }
-        // uuid columns must be cast to text (not emitted raw); sea-query emits table-qualified names
-        for col in [
-            "\"t\".\"id\"",
-            "\"t\".\"parent_id\"",
-            "\"t\".\"project_id\"",
-        ] {
-            assert!(
-                sql.contains(&format!("CAST({col} AS text)")),
-                "expected CAST({col} AS text) in SQL, got: {sql}"
-            );
-        }
-        // timestamptz columns must be cast to text
-        for col in [
-            "\"t\".\"entry_at\"",
-            "\"t\".\"modified_at\"",
-            "\"t\".\"due_at\"",
-            "\"t\".\"scheduled_at\"",
-            "\"t\".\"start_at\"",
-            "\"t\".\"end_at\"",
-            "\"t\".\"wait_at\"",
-        ] {
-            assert!(
-                sql.contains(&format!("CAST({col} AS text)")),
-                "expected CAST({col} AS text) in SQL, got: {sql}"
-            );
-        }
     }
 
     #[test]
-    fn resolve_project_id_sql_casts_uuid_to_text() {
+    fn resolve_project_id_decodes_uuid_natively() {
         let (sql, _): (String, _) = sea_query::Query::select()
-            .expr(super::uuid_read(super::Projects::Id))
+            .column(super::Projects::Id)
             .from(super::Projects::Table)
             .build_postgres(sea_query::PostgresQueryBuilder);
+        // Projects::Id is a uuid column decoded natively — no SQL cast.
         assert!(
-            sql.contains("CAST(") && sql.to_lowercase().contains("as text"),
-            "expected uuid_read cast in resolve_project_id SQL, got: {sql}"
+            !sql.to_lowercase().contains("cast"),
+            "expected no CAST for Projects::Id (decoded natively), got: {sql}"
         );
     }
 
     #[test]
-    fn all_task_uuids_sql_casts_uuid_to_text() {
+    fn all_task_uuids_decodes_uuid_natively() {
         let (sql, _): (String, _) = sea_query::Query::select()
-            .expr(super::uuid_read(super::TcTasks::Id))
+            .column(super::TcTasks::Id)
             .from(super::TcTasks::Table)
             .build_postgres(sea_query::PostgresQueryBuilder);
+        // TcTasks::Id is a uuid column decoded natively — no SQL cast.
         assert!(
-            sql.contains("CAST(") && sql.to_lowercase().contains("as text"),
-            "expected uuid_read cast in all_task_uuids SQL, got: {sql}"
+            !sql.to_lowercase().contains("cast"),
+            "expected no CAST for TcTasks::Id (decoded natively), got: {sql}"
         );
     }
 
