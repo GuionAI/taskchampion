@@ -5,7 +5,9 @@
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use sea_query::{Alias, Expr, ExprTrait, JoinType, PostgresQueryBuilder, Query};
+use sea_query::{
+    Alias, Expr, ExprTrait, IntoColumnRef, JoinType, PostgresQueryBuilder, Query, SimpleExpr,
+};
 use sea_query_postgres::PostgresBinder;
 use serde_json::Value as JsonValue;
 use tokio_postgres::{Client, NoTls, Transaction};
@@ -53,11 +55,50 @@ fn opt_str_to_uuid(s: &Option<String>) -> Result<Option<Uuid>> {
     }
 }
 
-/// Shared column projection for task SELECT queries (LEFT JOIN projects).
-const TASK_SELECT_COLS: &str = "t.id, t.data::text AS data, t.status, t.description, t.priority, \
-     t.entry_at, t.modified_at, t.due_at, t.scheduled_at, \
-     t.start_at, t.end_at, t.wait_at, t.parent_id, \
-     p.name AS project_name, t.project_id";
+/// Cast a jsonb column to text in a SELECT so tokio-postgres can decode
+/// it into a Rust `String`. Emits `CAST("col" AS text)`.
+///
+/// Use for any jsonb column read. Centralizes the workaround for
+/// `tokio-postgres`'s `FromSql for String` not accepting jsonb.
+fn jsonb_read<C>(col: C) -> SimpleExpr
+where
+    C: IntoColumnRef,
+{
+    Expr::col(col).cast_as(Alias::new("text"))
+}
+
+/// Cast a Rust value (typically `String`) to jsonb in an INSERT/UPDATE
+/// so Postgres accepts it as a jsonb column. Emits `CAST($N AS jsonb)`.
+fn jsonb_write(value: String) -> SimpleExpr {
+    Expr::value(value).cast_as(Alias::new("jsonb"))
+}
+
+/// Apply the standard task SELECT column projection to a sea-query
+/// `SelectStatement`, with `TcTasks::Data` cast to text via [`jsonb_read`].
+///
+/// Mirrors the schema consumed by [`row_reader::read_raw_task_row`], which
+/// uses string-based `try_get("name")` lookups — column ordering here is
+/// not load-bearing, but column **aliases** are.
+fn select_task_cols(q: &mut sea_query::SelectStatement, t: &Alias, p: &Alias) {
+    q.column((t.clone(), TcTasks::Id))
+        .expr_as(jsonb_read((t.clone(), TcTasks::Data)), Alias::new("data"))
+        .column((t.clone(), TcTasks::Status))
+        .column((t.clone(), TcTasks::Description))
+        .column((t.clone(), TcTasks::Priority))
+        .column((t.clone(), TcTasks::EntryAt))
+        .column((t.clone(), TcTasks::ModifiedAt))
+        .column((t.clone(), TcTasks::DueAt))
+        .column((t.clone(), TcTasks::ScheduledAt))
+        .column((t.clone(), TcTasks::StartAt))
+        .column((t.clone(), TcTasks::EndAt))
+        .column((t.clone(), TcTasks::WaitAt))
+        .column((t.clone(), TcTasks::ParentId))
+        .expr_as(
+            Expr::col((p.clone(), Projects::Name)),
+            Alias::new("project_name"),
+        )
+        .column((t.clone(), TcTasks::ProjectId));
+}
 
 // ── PgWireStorage ──────────────────────────────────────────────────────────
 
@@ -182,8 +223,9 @@ impl StorageTxn for PgWireTxn<'_> {
         let t = self.get_txn()?;
         let t_alias = Alias::new("t");
         let p_alias = Alias::new("p");
-        let (sql, vals) = Query::select()
-            .expr(Expr::cust(TASK_SELECT_COLS))
+        let mut q = Query::select();
+        select_task_cols(&mut q, &t_alias, &p_alias);
+        let (sql, vals) = q
             .from_as(TcTasks::Table, t_alias.clone())
             .join_as(
                 JoinType::LeftJoin,
@@ -213,8 +255,9 @@ impl StorageTxn for PgWireTxn<'_> {
         let t = self.get_txn()?;
         let t_alias = Alias::new("t");
         let p_alias = Alias::new("p");
-        let (sql, vals) = Query::select()
-            .expr(Expr::cust(TASK_SELECT_COLS))
+        let mut q = Query::select();
+        select_task_cols(&mut q, &t_alias, &p_alias);
+        let (sql, vals) = q
             .from_as(TcTasks::Table, t_alias.clone())
             .join_as(
                 JoinType::LeftJoin,
@@ -358,8 +401,9 @@ impl StorageTxn for PgWireTxn<'_> {
         let t = self.get_txn()?;
         let t_alias = Alias::new("t");
         let p_alias = Alias::new("p");
-        let (sql, vals) = Query::select()
-            .expr(Expr::cust(TASK_SELECT_COLS))
+        let mut q = Query::select();
+        select_task_cols(&mut q, &t_alias, &p_alias);
+        let (sql, vals) = q
             .from_as(TcTasks::Table, t_alias.clone())
             .join_as(
                 JoinType::LeftJoin,
@@ -454,7 +498,7 @@ impl StorageTxn for PgWireTxn<'_> {
     async fn get_tc_config(&mut self) -> Result<Option<String>> {
         let t = self.get_txn()?;
         let (sql, vals) = Query::select()
-            .column(Settings::TcConfig)
+            .expr(jsonb_read(Settings::TcConfig))
             .from(Settings::Table)
             .limit(1)
             .build_postgres(PostgresQueryBuilder);
@@ -476,7 +520,7 @@ impl StorageTxn for PgWireTxn<'_> {
         let t = self.get_txn()?;
         let (sql, vals) = Query::update()
             .table(Settings::Table)
-            .values([(Settings::TcConfig, value.into())])
+            .value(Settings::TcConfig, jsonb_write(value))
             .build_postgres(PostgresQueryBuilder);
         let n = t
             .execute(sql.as_str(), &vals.as_params())
@@ -508,6 +552,8 @@ impl StorageTxn for PgWireTxn<'_> {
 
 #[cfg(test)]
 mod test {
+    use sea_query_postgres::PostgresBinder;
+
     // Unit tests for helpers — no DB required.
 
     #[test]
@@ -551,6 +597,72 @@ mod test {
     fn opt_str_to_uuid_invalid() {
         let s = Some("not-a-uuid".to_string());
         assert!(super::opt_str_to_uuid(&s).is_err());
+    }
+
+    #[test]
+    fn get_tc_config_sql_casts_jsonb_to_text() {
+        let (sql, _): (String, _) = sea_query::Query::select()
+            .expr(super::jsonb_read(super::Settings::TcConfig))
+            .from(super::Settings::Table)
+            .limit(1)
+            .build_postgres(sea_query::PostgresQueryBuilder);
+        assert!(
+            sql.contains("CAST(") && sql.to_lowercase().contains("as text"),
+            "expected jsonb_read cast in SQL, got: {sql}"
+        );
+    }
+
+    #[test]
+    fn set_tc_config_sql_casts_text_to_jsonb() {
+        let (sql, _): (String, _) = sea_query::Query::update()
+            .table(super::Settings::Table)
+            .value(
+                super::Settings::TcConfig,
+                super::jsonb_write("dummy".to_string()),
+            )
+            .build_postgres(sea_query::PostgresQueryBuilder);
+        assert!(
+            sql.contains("CAST(") && sql.to_lowercase().contains("as jsonb"),
+            "expected jsonb_write cast in SQL, got: {sql}"
+        );
+    }
+
+    #[test]
+    fn task_select_cols_casts_data_to_text() {
+        let t = sea_query::Alias::new("t");
+        let p = sea_query::Alias::new("p");
+        let mut q = sea_query::Query::select();
+        super::select_task_cols(&mut q, &t, &p);
+        let (sql, _): (String, _) = q
+            .from_as(super::TcTasks::Table, t.clone())
+            .build_postgres(sea_query::PostgresQueryBuilder);
+        assert!(
+            sql.to_lowercase().contains("as text"),
+            "expected data column cast to text, got: {sql}"
+        );
+        // Aliases must match what read_raw_task_row looks up.
+        for alias in [
+            "id",
+            "data",
+            "status",
+            "description",
+            "priority",
+            "entry_at",
+            "modified_at",
+            "due_at",
+            "scheduled_at",
+            "start_at",
+            "end_at",
+            "wait_at",
+            "parent_id",
+            "project_name",
+            "project_id",
+        ] {
+            assert!(
+                sql.contains(alias),
+                "expected alias {alias} in SQL, got: {sql}"
+            );
+        }
     }
 
     // Integration tests requiring a live Postgres. Run with:
@@ -646,5 +758,12 @@ mod test {
     async fn tc_config_overwrite() -> crate::errors::Result<()> {
         let s = storage().await.unwrap();
         crate::storage::test::tc_config_overwrite(s).await
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn tc_config_round_trip() -> crate::errors::Result<()> {
+        let s = storage().await.unwrap();
+        crate::storage::test::tc_config_round_trip(s).await
     }
 }
