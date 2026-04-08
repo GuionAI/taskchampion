@@ -113,19 +113,37 @@ fn select_task_cols(q: &mut sea_query::SelectStatement, t: &Alias, p: &Alias) {
         .column((t.clone(), TcTasks::Status))
         .column((t.clone(), TcTasks::Description))
         .column((t.clone(), TcTasks::Priority))
-        .expr_as(ts_read((t.clone(), TcTasks::EntryAt)), Alias::new("entry_at"))
-        .expr_as(ts_read((t.clone(), TcTasks::ModifiedAt)), Alias::new("modified_at"))
+        .expr_as(
+            ts_read((t.clone(), TcTasks::EntryAt)),
+            Alias::new("entry_at"),
+        )
+        .expr_as(
+            ts_read((t.clone(), TcTasks::ModifiedAt)),
+            Alias::new("modified_at"),
+        )
         .expr_as(ts_read((t.clone(), TcTasks::DueAt)), Alias::new("due_at"))
-        .expr_as(ts_read((t.clone(), TcTasks::ScheduledAt)), Alias::new("scheduled_at"))
-        .expr_as(ts_read((t.clone(), TcTasks::StartAt)), Alias::new("start_at"))
+        .expr_as(
+            ts_read((t.clone(), TcTasks::ScheduledAt)),
+            Alias::new("scheduled_at"),
+        )
+        .expr_as(
+            ts_read((t.clone(), TcTasks::StartAt)),
+            Alias::new("start_at"),
+        )
         .expr_as(ts_read((t.clone(), TcTasks::EndAt)), Alias::new("end_at"))
         .expr_as(ts_read((t.clone(), TcTasks::WaitAt)), Alias::new("wait_at"))
-        .expr_as(uuid_read((t.clone(), TcTasks::ParentId)), Alias::new("parent_id"))
+        .expr_as(
+            uuid_read((t.clone(), TcTasks::ParentId)),
+            Alias::new("parent_id"),
+        )
         .expr_as(
             Expr::col((p.clone(), Projects::Name)),
             Alias::new("project_name"),
         )
-        .expr_as(uuid_read((t.clone(), TcTasks::ProjectId)), Alias::new("project_id"));
+        .expr_as(
+            uuid_read((t.clone(), TcTasks::ProjectId)),
+            Alias::new("project_id"),
+        );
 }
 
 // ── PgWireStorage ──────────────────────────────────────────────────────────
@@ -695,6 +713,56 @@ mod test {
                 "expected alias {alias} in SQL, got: {sql}"
             );
         }
+        // uuid columns must be cast to text (not emitted raw); sea-query emits table-qualified names
+        for col in [
+            "\"t\".\"id\"",
+            "\"t\".\"parent_id\"",
+            "\"t\".\"project_id\"",
+        ] {
+            assert!(
+                sql.contains(&format!("CAST({col} AS text)")),
+                "expected CAST({col} AS text) in SQL, got: {sql}"
+            );
+        }
+        // timestamptz columns must be cast to text
+        for col in [
+            "\"t\".\"entry_at\"",
+            "\"t\".\"modified_at\"",
+            "\"t\".\"due_at\"",
+            "\"t\".\"scheduled_at\"",
+            "\"t\".\"start_at\"",
+            "\"t\".\"end_at\"",
+            "\"t\".\"wait_at\"",
+        ] {
+            assert!(
+                sql.contains(&format!("CAST({col} AS text)")),
+                "expected CAST({col} AS text) in SQL, got: {sql}"
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_project_id_sql_casts_uuid_to_text() {
+        let (sql, _): (String, _) = sea_query::Query::select()
+            .expr(super::uuid_read(super::Projects::Id))
+            .from(super::Projects::Table)
+            .build_postgres(sea_query::PostgresQueryBuilder);
+        assert!(
+            sql.contains("CAST(") && sql.to_lowercase().contains("as text"),
+            "expected uuid_read cast in resolve_project_id SQL, got: {sql}"
+        );
+    }
+
+    #[test]
+    fn all_task_uuids_sql_casts_uuid_to_text() {
+        let (sql, _): (String, _) = sea_query::Query::select()
+            .expr(super::uuid_read(super::TcTasks::Id))
+            .from(super::TcTasks::Table)
+            .build_postgres(sea_query::PostgresQueryBuilder);
+        assert!(
+            sql.contains("CAST(") && sql.to_lowercase().contains("as text"),
+            "expected uuid_read cast in all_task_uuids SQL, got: {sql}"
+        );
     }
 
     // Integration tests requiring a live Postgres. Run with:
