@@ -55,6 +55,18 @@ fn opt_str_to_uuid(s: &Option<String>) -> Result<Option<Uuid>> {
     }
 }
 
+/// Cast a column to text in a SELECT so tokio-postgres can decode it into a
+/// Rust `String`. Emits `CAST("col" AS text)`.
+///
+/// The shared implementation for [`jsonb_read`], [`uuid_read`], and [`ts_read`].
+/// Each wrapper exists for call-site clarity and targeted doc comments.
+fn col_as_text<C>(col: C) -> SimpleExpr
+where
+    C: IntoColumnRef,
+{
+    Expr::col(col).cast_as(Alias::new("text"))
+}
+
 /// Cast a jsonb column to text in a SELECT so tokio-postgres can decode
 /// it into a Rust `String`. Emits `CAST("col" AS text)`.
 ///
@@ -64,7 +76,7 @@ fn jsonb_read<C>(col: C) -> SimpleExpr
 where
     C: IntoColumnRef,
 {
-    Expr::col(col).cast_as(Alias::new("text"))
+    col_as_text(col)
 }
 
 /// Cast a uuid column to text in a SELECT so tokio-postgres can decode
@@ -75,7 +87,7 @@ fn uuid_read<C>(col: C) -> SimpleExpr
 where
     C: IntoColumnRef,
 {
-    Expr::col(col).cast_as(Alias::new("text"))
+    col_as_text(col)
 }
 
 /// Cast a timestamptz column to text so tokio-postgres can decode it into
@@ -86,7 +98,7 @@ fn ts_read<C>(col: C) -> SimpleExpr
 where
     C: IntoColumnRef,
 {
-    Expr::col(col).cast_as(Alias::new("text"))
+    col_as_text(col)
 }
 
 /// Cast a Rust value (typically `String`) to jsonb in an INSERT/UPDATE
@@ -102,7 +114,10 @@ fn jsonb_write_json(value: serde_json::Value) -> SimpleExpr {
 }
 
 /// Apply the standard task SELECT column projection to a sea-query
-/// `SelectStatement`, with `TcTasks::Data` cast to text via [`jsonb_read`].
+/// `SelectStatement`. All columns that tokio-postgres cannot directly decode
+/// into `String` are cast to text: [`jsonb_read`] for [`TcTasks::Data`],
+/// [`uuid_read`] for UUID columns (`Id`, `ParentId`, `ProjectId`), and
+/// [`ts_read`] for all timestamp columns.
 ///
 /// Mirrors the schema consumed by [`row_reader::read_raw_task_row`], which
 /// uses string-based `try_get("name")` lookups — column ordering here is
