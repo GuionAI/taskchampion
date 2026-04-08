@@ -7,8 +7,9 @@ use uuid::Uuid;
 
 /// Read a `RawTaskRow` from a `tokio_postgres::Row`.
 ///
-/// Expects the row to use `t.data::text` in the SELECT (the JSONB column cast
-/// to TEXT), so `data` arrives as a plain string and can be read directly.
+/// Expects the row to use `jsonb_read((t, TcTasks::Data))` in the SELECT (the
+/// JSONB column cast to TEXT via `CAST(... AS text)`), so `data` arrives as a
+/// plain string and can be read directly.
 pub(super) fn read_raw_task_row(r: &Row) -> Result<RawTaskRow> {
     Ok(RawTaskRow {
         id: r

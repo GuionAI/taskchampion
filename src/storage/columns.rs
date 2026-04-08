@@ -119,6 +119,7 @@ pub(crate) const TASK_SELECT_COLS: &str = "t.id, t.data, t.status, t.description
 /// // Postgres (pgwire)
 /// task_select_cols("t.data::text")
 /// ```
+#[allow(dead_code)]
 pub(crate) fn task_select_cols(data_expr: &str) -> String {
     format!(
         "t.id, {data_expr}, t.status, t.description, t.priority, \
