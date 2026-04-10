@@ -50,8 +50,7 @@ pub(super) struct RawTaskRow {
     pub(super) project_name: Option<String>,
     /// Raw project UUID from `tc_tasks.project_id` (not the join-resolved name).
     pub(super) project_id: Option<String>,
-    /// Note UUID — powersync schema has no note_id column; always None here.
-    /// The field exists so the type matches the base RawTaskRow.
+    /// Note UUID from `tc_tasks.note_id` (FlickNote integration).
     pub(super) note_id: Option<String>,
 }
 
@@ -72,7 +71,7 @@ pub(super) fn read_raw_task_row(r: &rusqlite::Row) -> rusqlite::Result<RawTaskRo
         parent_id: r.get("parent_id")?,
         project_name: r.get("project_name")?,
         project_id: r.get("project_id")?,
-        note_id: None,
+        note_id: r.get("note_id")?,
     })
 }
 

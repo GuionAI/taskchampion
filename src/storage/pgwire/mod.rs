@@ -351,7 +351,9 @@ impl StorageTxn for PgWireTxn<'_> {
         Ok(true)
     }
 
-    async fn set_task(&mut self, uuid: Uuid, task: TaskMap) -> Result<()> {
+    async fn set_task(&mut self, uuid: Uuid, mut task: TaskMap) -> Result<()> {
+        // Extract note_id before prepare_task consumes task_data so it stays out of data_json.
+        let note_id_str = task.remove("note_id");
         let prepared = prepare_task(task)?;
 
         let project_id_str = if let Some(name) = &prepared.project_name {
@@ -369,7 +371,7 @@ impl StorageTxn for PgWireTxn<'_> {
         let start_at = iso_to_datetime_utc(&prepared.start_at)?;
         let end_at = iso_to_datetime_utc(&prepared.end_at)?;
         let wait_at = iso_to_datetime_utc(&prepared.wait_at)?;
-        let note_id = opt_str_to_uuid(&prepared.note_id)?;
+        let note_id = opt_str_to_uuid(&note_id_str)?;
 
         let data_val: JsonValue = serde_json::from_str(&prepared.data_json)
             .map_err(|e| Error::Database(format!("set_task parse data: {e}")))?;
