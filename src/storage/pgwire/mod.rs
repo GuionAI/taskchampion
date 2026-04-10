@@ -21,8 +21,10 @@ use crate::storage::sql_ops::prepare_task;
 use crate::storage::{Storage, StorageTxn, TaskMap};
 
 mod iden;
+mod row;
 mod row_reader;
-use row_reader::{read_raw_task_row, rows_to_tasks};
+use row::{SettingsPgRow, TaskPgRow};
+use row_reader::rows_to_tasks;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -53,12 +55,6 @@ fn opt_str_to_uuid(s: &Option<String>) -> Result<Option<Uuid>> {
             ))
         }),
     }
-}
-
-/// Cast a Rust value (typically `String`) to jsonb in an INSERT/UPDATE
-/// so Postgres accepts it as a jsonb column. Emits `CAST($N AS jsonb)`.
-fn jsonb_write(value: String) -> SimpleExpr {
-    Expr::value(value).cast_as(Alias::new("jsonb"))
 }
 
 /// Cast a `serde_json::Value` to jsonb so Postgres accepts it as a jsonb
@@ -137,9 +133,8 @@ impl PgWireStorage {
     /// error, subsequent operations on the returned `PgWireStorage` will fail with
     /// opaque "connection closed" errors from tokio-postgres.
     pub async fn new(database_url: &str, _token: &str) -> Result<Self> {
-        let (client, connection) = tokio_postgres::connect(database_url, NoTls)
-            .await
-            .map_err(|e| Error::Database(format!("pgwire connect failed: {e}")))?;
+        /* pgwire connect */
+        let (client, connection) = tokio_postgres::connect(database_url, NoTls).await?;
 
         // Spawn the connection task — it drives the protocol until the client drops.
         tokio::spawn(async move {
@@ -155,11 +150,8 @@ impl PgWireStorage {
 #[async_trait]
 impl Storage for PgWireStorage {
     async fn txn<'a>(&'a mut self) -> Result<Box<dyn StorageTxn + Send + 'a>> {
-        let txn = self
-            .client
-            .transaction()
-            .await
-            .map_err(|e| Error::Database(format!("begin transaction: {e}")))?;
+        /* begin transaction */
+        let txn = self.client.transaction().await?;
         Ok(Box::new(PgWireTxn { txn: Some(txn) }))
     }
 }
@@ -189,12 +181,13 @@ impl<'a> PgWireTxn<'a> {
                     .take(),
             ))
             .build_postgres(PostgresQueryBuilder);
-        let row = t
-            .query_one(sql.as_str(), &vals.as_params())
-            .await
-            .map_err(|e| Error::Database(format!("task_exists query: {e}")))?;
-        row.try_get(0)
-            .map_err(|e| Error::Database(format!("task_exists get: {e}")))
+        /* task_exists query */
+        let row = t.query_one(sql.as_str(), &vals.as_params()).await?;
+        /* task_exists get */
+        match row.try_get::<_, bool>(0) {
+            Ok(v) => Ok(v),
+            Err(e) => Err(Error::PgWire(e)),
+        }
     }
 
     /// Resolve a project name to its UUID via the projects table.
@@ -207,15 +200,15 @@ impl<'a> PgWireTxn<'a> {
             .order_by(Projects::CreatedAt, sea_query::Order::Asc)
             .limit(1)
             .build_postgres(PostgresQueryBuilder);
-        let row = t
-            .query_opt(sql.as_str(), &vals.as_params())
-            .await
-            .map_err(|e| Error::Database(format!("resolve_project_id query: {e}")))?;
+        /* resolve_project_id query */
+        let row = t.query_opt(sql.as_str(), &vals.as_params()).await?;
         match row {
             Some(row) => {
-                let id: Uuid = row
-                    .try_get(0)
-                    .map_err(|e| Error::Database(format!("resolve_project_id get id: {e}")))?;
+                /* resolve_project_id get id */
+                let id: Uuid = match row.try_get(0) {
+                    Ok(v) => v,
+                    Err(e) => return Err(Error::PgWire(e)),
+                };
                 Ok(id.to_string())
             }
             None => Err(Error::ProjectNotFound(name.to_string())),
@@ -251,14 +244,12 @@ impl StorageTxn for PgWireTxn<'_> {
             .and_where(Expr::col((t_alias, TcTasks::Id)).eq(uuid))
             .limit(1)
             .build_postgres(PostgresQueryBuilder);
-        let rows = t
-            .query(sql.as_str(), &vals.as_params())
-            .await
-            .map_err(|e| Error::Database(format!("get_task query: {e}")))?;
+        /* get_task query */
+        let rows = t.query(sql.as_str(), &vals.as_params()).await?;
         match rows.into_iter().next() {
             None => Ok(None),
             Some(row) => {
-                let raw = read_raw_task_row(&row)?;
+                let raw = TaskPgRow::from_row(&row)?.into();
                 let (_, task_map) = raw_to_task(raw)?;
                 Ok(Some(task_map))
             }
@@ -282,10 +273,8 @@ impl StorageTxn for PgWireTxn<'_> {
             )
             .and_where(Expr::col((t_alias, TcTasks::Status)).eq("pending"))
             .build_postgres(PostgresQueryBuilder);
-        let rows = t
-            .query(sql.as_str(), &vals.as_params())
-            .await
-            .map_err(|e| Error::Database(format!("get_pending_tasks: {e}")))?;
+        /* get_pending_tasks */
+        let rows = t.query(sql.as_str(), &vals.as_params()).await?;
         rows_to_tasks(rows)
     }
 
@@ -302,9 +291,8 @@ impl StorageTxn for PgWireTxn<'_> {
                 jsonb_write_json(JsonValue::Object(Default::default())),
             ])
             .build_postgres(PostgresQueryBuilder);
-        t.execute(sql.as_str(), &vals.as_params())
-            .await
-            .map_err(|e| Error::Database(format!("create_task insert: {e}")))?;
+        /* create_task insert */
+        t.execute(sql.as_str(), &vals.as_params()).await?;
         Ok(true)
     }
 
@@ -351,9 +339,8 @@ impl StorageTxn for PgWireTxn<'_> {
                 ])
                 .and_where(Expr::col(TcTasks::Id).eq(uuid))
                 .build_postgres(PostgresQueryBuilder);
-            t.execute(sql.as_str(), &vals.as_params())
-                .await
-                .map_err(|e| Error::Database(format!("set_task update: {e}")))?;
+            /* set_task update */
+            t.execute(sql.as_str(), &vals.as_params()).await?;
         } else {
             let t = self.get_txn()?;
             let (sql, vals) = Query::insert()
@@ -391,9 +378,8 @@ impl StorageTxn for PgWireTxn<'_> {
                     project_id.into(),
                 ])
                 .build_postgres(PostgresQueryBuilder);
-            t.execute(sql.as_str(), &vals.as_params())
-                .await
-                .map_err(|e| Error::Database(format!("set_task insert: {e}")))?;
+            /* set_task insert */
+            t.execute(sql.as_str(), &vals.as_params()).await?;
         }
         Ok(())
     }
@@ -405,10 +391,8 @@ impl StorageTxn for PgWireTxn<'_> {
                 .from_table(TcTasks::Table)
                 .and_where(Expr::col(TcTasks::Id).eq(uuid))
                 .build_postgres(PostgresQueryBuilder);
-            let n = t
-                .execute(sql.as_str(), &vals.as_params())
-                .await
-                .map_err(|e| Error::Database(format!("delete_task: {e}")))?;
+            /* delete_task */
+            let n = t.execute(sql.as_str(), &vals.as_params()).await?;
             Ok(n > 0)
         } else {
             Ok(false)
@@ -431,10 +415,8 @@ impl StorageTxn for PgWireTxn<'_> {
                     .equals((p_alias.clone(), Projects::Id)),
             )
             .build_postgres(PostgresQueryBuilder);
-        let rows = t
-            .query(sql.as_str(), &vals.as_params())
-            .await
-            .map_err(|e| Error::Database(format!("all_tasks: {e}")))?;
+        /* all_tasks */
+        let rows = t.query(sql.as_str(), &vals.as_params()).await?;
         rows_to_tasks(rows)
     }
 
@@ -444,14 +426,12 @@ impl StorageTxn for PgWireTxn<'_> {
             .column(TcTasks::Id)
             .from(TcTasks::Table)
             .build_postgres(PostgresQueryBuilder);
-        let rows = t
-            .query(sql.as_str(), &vals.as_params())
-            .await
-            .map_err(|e| Error::Database(format!("all_task_uuids: {e}")))?;
+        /* all_task_uuids */
+        let rows = t.query(sql.as_str(), &vals.as_params()).await?;
         rows.into_iter()
-            .map(|r| {
-                r.try_get::<_, Uuid>(0)
-                    .map_err(|e| Error::Database(format!("read uuid: {e}")))
+            .map(|r| match r.try_get::<_, Uuid>(0) {
+                Ok(v) => Ok(v),
+                Err(e) => Err(Error::PgWire(e)),
             })
             .collect()
     }
@@ -497,15 +477,15 @@ impl StorageTxn for PgWireTxn<'_> {
                    FROM tc_tasks, jsonb_each_text(data) AS kv \
                    WHERE kv.key LIKE 'tag_%' \
                    ORDER BY name";
-        let rows = t
-            .query(sql, &[])
-            .await
-            .map_err(|e| Error::Database(format!("get_all_tags: {e}")))?;
+        /* get_all_tags */
+        let rows = t.query(sql, &[]).await?;
         rows.into_iter()
             .map(|r| {
-                let key: String = r
-                    .try_get(0)
-                    .map_err(|e| Error::Database(format!("read tag key: {e}")))?;
+                /* read tag key */
+                let key: String = match r.try_get(0) {
+                    Ok(v) => v,
+                    Err(e) => return Err(Error::PgWire(e)),
+                };
                 Ok(key.strip_prefix("tag_").unwrap_or(&key).to_string())
             })
             .collect()
@@ -518,30 +498,27 @@ impl StorageTxn for PgWireTxn<'_> {
             .from(Settings::Table)
             .limit(1)
             .build_postgres(PostgresQueryBuilder);
-        let rows = t
-            .query(sql.as_str(), &vals.as_params())
-            .await
-            .map_err(|e| Error::Database(format!("get_tc_config: {e}")))?;
+        /* get_tc_config */
+        let rows = t.query(sql.as_str(), &vals.as_params()).await?;
         match rows.into_iter().next() {
             None => Ok(None),
-            Some(row) => row.try_get(0).map(Some).map_err(|e| {
-                Error::Database(format!(
-                    "get_tc_config: failed to read tc_config column: {e}"
-                ))
-            }),
+            Some(row) => Ok(SettingsPgRow::from_row(&row)?.tc_config),
         }
     }
 
     async fn set_tc_config(&mut self, value: String) -> Result<()> {
+        // Parse the JSON string to a serde_json::Value before sending to Postgres.
+        // `jsonb_write` (CAST text AS jsonb) produces text-format JSON without the
+        // required binary jsonb header byte (\x01), causing "unsupported jsonb version".
+        let json_val: serde_json::Value = serde_json::from_str(&value)
+            .map_err(|e| Error::Database(format!("set_tc_config parse: {e}")))?;
         let t = self.get_txn()?;
         let (sql, vals) = Query::update()
             .table(Settings::Table)
-            .value(Settings::TcConfig, jsonb_write(value))
+            .value(Settings::TcConfig, jsonb_write_json(json_val))
             .build_postgres(PostgresQueryBuilder);
-        let n = t
-            .execute(sql.as_str(), &vals.as_params())
-            .await
-            .map_err(|e| Error::Database(format!("set_tc_config: {e}")))?;
+        /* set_tc_config */
+        let n = t.execute(sql.as_str(), &vals.as_params()).await?;
         if n == 0 {
             return Err(Error::Database(
                 "set_tc_config: no settings row found — \
@@ -557,9 +534,8 @@ impl StorageTxn for PgWireTxn<'_> {
             .txn
             .take()
             .ok_or_else(|| Error::Database("Transaction already committed".into()))?;
-        t.commit()
-            .await
-            .map_err(|e| Error::Database(format!("commit: {e}")))?;
+        /* commit */
+        t.commit().await?;
         Ok(())
     }
 }
@@ -629,17 +605,17 @@ mod test {
     }
 
     #[test]
-    fn set_tc_config_sql_casts_text_to_jsonb() {
+    fn set_tc_config_sql_casts_value_to_jsonb() {
         let (sql, _): (String, _) = sea_query::Query::update()
             .table(super::Settings::Table)
             .value(
                 super::Settings::TcConfig,
-                super::jsonb_write("dummy".to_string()),
+                super::jsonb_write_json(serde_json::json!({})),
             )
             .build_postgres(sea_query::PostgresQueryBuilder);
         assert!(
             sql.contains("CAST(") && sql.to_lowercase().contains("as jsonb"),
-            "expected jsonb_write cast in SQL, got: {sql}"
+            "expected jsonb_write_json cast in SQL, got: {sql}"
         );
     }
 
