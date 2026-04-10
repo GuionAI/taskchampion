@@ -179,7 +179,13 @@ impl<'a> PgWireTxn<'a> {
         let (sql, vals) = Query::select()
             .expr(Expr::exists(
                 Query::select()
-                    .expr(Expr::val(1))
+                    // NOTE: must use `Expr::cust("1")` (inline SQL literal), NOT
+                    // `Expr::val(1)`.  `Expr::val(1)` generates a parameterized `$1`
+                    // which PostgreSQL infers as `text` inside EXISTS (no type context).
+                    // `i32::to_sql(Type::TEXT, …)` then writes binary i32 bytes
+                    // (`\x00\x00\x00\x01`) — null bytes cause
+                    // "invalid byte sequence for encoding UTF8: 0x00".
+                    .expr(Expr::cust("1"))
                     .from(TcTasks::Table)
                     .and_where(Expr::col(TcTasks::Id).eq(uuid))
                     .take(),
