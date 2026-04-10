@@ -57,6 +57,10 @@ pub(crate) struct PreparedTask {
     pub(crate) project_id_raw: Option<String>,
     /// Project name string from the TaskMap — resolved to a UUID via the projects table.
     pub(crate) project_name: Option<String>,
+    /// Note UUID set via `SetNoteId` — stored as a raw uuid column in tc_tasks.
+    #[allow(dead_code)]
+    #[cfg(feature = "storage-pgwire")]
+    pub(crate) note_id: Option<String>,
 }
 
 /// Parse a TaskMap into its promoted columns and residual data blob.
@@ -81,6 +85,9 @@ pub(crate) fn prepare_task(mut task_data: TaskMap) -> Result<PreparedTask> {
     let project_id_raw = task_data.remove("project_id");
     // Extract project name string for name-based resolution.
     let project_name = task_data.remove("project");
+    // Extract note_id — stored as a raw uuid column in tc_tasks.
+    #[cfg(feature = "storage-pgwire")]
+    let note_id = task_data.remove("note_id");
 
     // Validate annotation keys have integer epoch suffixes.
     for k in task_data.keys().filter(|k| k.starts_with("annotation_")) {
@@ -111,6 +118,8 @@ pub(crate) fn prepare_task(mut task_data: TaskMap) -> Result<PreparedTask> {
         wait_at,
         project_id_raw,
         project_name,
+        #[cfg(feature = "storage-pgwire")]
+        note_id,
     })
 }
 

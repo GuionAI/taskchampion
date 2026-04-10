@@ -303,6 +303,21 @@ impl Task {
         self.set_value("position", position, ops)
     }
 
+    /// Get the UUID of the linked FlickNote note, if set.
+    pub fn get_note_id(&self) -> Option<Uuid> {
+        self.data
+            .get("note_id")
+            .and_then(|s| Uuid::parse_str(s).ok())
+    }
+
+    /// Set or clear the linked FlickNote note UUID.
+    ///
+    /// Writes the `note_id` column directly. The caller is responsible for
+    /// passing a valid note UUID — no existence check is performed.
+    pub fn set_note_id(&mut self, note_id: Option<Uuid>, ops: &mut Operations) -> Result<()> {
+        self.set_value("note_id", note_id.map(|u| u.to_string()), ops)
+    }
+
     /// Get the UUIDs of tasks on which this task depends.
     ///
     /// This includes all dependencies, regardless of their status.  In fact, it may include

@@ -23,6 +23,7 @@ pub(super) enum TcTasks {
     WaitAt,
     ParentId,
     ProjectId,
+    NoteId,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, IdenStatic)]

@@ -59,6 +59,7 @@ impl From<&Task> for FfiTask {
             project: task.get_value("project").map(|v| v.to_string()),
             project_id: task.get_value("project_id").map(|v| v.to_string()),
             today_position: task.get_value("today_position").map(|v| v.to_string()),
+            note_id: task.get_note_id().map(|u| u.to_string()),
         }
     }
 }

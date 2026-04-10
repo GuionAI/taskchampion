@@ -49,6 +49,8 @@ pub(crate) struct RawTaskRow {
     pub(crate) project_name: Option<String>,
     /// Raw project UUID from `tc_tasks.project_id` (not the join-resolved name).
     pub(crate) project_id: Option<String>,
+    /// Note UUID from `tc_tasks.note_id` (FlickNote integration).
+    pub(crate) note_id: Option<String>,
 }
 
 pub(crate) fn raw_to_task(raw: RawTaskRow) -> Result<(Uuid, TaskMap)> {
@@ -75,6 +77,9 @@ pub(crate) fn raw_to_task(raw: RawTaskRow) -> Result<(Uuid, TaskMap)> {
     }
     if let Some(v) = raw.project_id {
         task_map.insert("project_id".into(), v);
+    }
+    if let Some(v) = raw.note_id {
+        task_map.insert("note_id".into(), v);
     }
 
     // Inject timestamp columns (ISO 8601 → epoch string) back into the task map.
@@ -105,7 +110,7 @@ pub(crate) fn raw_to_task(raw: RawTaskRow) -> Result<(Uuid, TaskMap)> {
 pub(crate) const TASK_SELECT_COLS: &str = "t.id, t.data, t.status, t.description, t.priority, \
     t.entry_at, t.modified_at, t.due_at, t.scheduled_at, \
     t.start_at, t.end_at, t.wait_at, t.parent_id, \
-    p.name as project_name, t.project_id";
+    p.name as project_name, t.project_id, t.note_id";
 
 #[cfg(feature = "storage-pgwire")]
 /// Build the tc_tasks column projection with a caller-supplied `data` expression.
@@ -125,7 +130,7 @@ pub(crate) fn task_select_cols(data_expr: &str) -> String {
         "t.id, {data_expr}, t.status, t.description, t.priority, \
         t.entry_at, t.modified_at, t.due_at, t.scheduled_at, \
         t.start_at, t.end_at, t.wait_at, t.parent_id, \
-        p.name as project_name, t.project_id"
+        p.name as project_name, t.project_id, t.note_id"
     )
 }
 
@@ -220,6 +225,7 @@ mod tests {
             parent_id: None,
             project_name: None,
             project_id: None,
+            note_id: None,
         }
     }
 

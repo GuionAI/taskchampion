@@ -25,9 +25,7 @@ pub(super) fn rows_to_tasks(rows: Vec<Row>) -> Result<Vec<(Uuid, TaskMap)>> {
             // Extract UUID first (separate from full row deserialization) so we can
             // log it even if the `data` column is corrupted (e.g. 0x00 byte). UUID is
             // a native PG type stored independently of `data`, so this read is safe.
-            let id: Uuid = r
-                .try_get::<_, Uuid>("id")
-                .map_err(Error::PgWire)?;
+            let id: Uuid = r.try_get::<_, Uuid>("id").map_err(Error::PgWire)?;
             log::debug!("pgwire: deserializing task {id}");
             let raw = TaskPgRow::from_row(&r)?.into();
             raw_to_task(raw)

@@ -258,6 +258,10 @@ fn apply_mutation(
             task.set_value("today_position", value, ops)
                 .map_err(FfiError::from)?;
         }
+        TaskMutation::SetNoteId { value } => {
+            let note_uuid = value.as_ref().map(|v| parse_uuid(v)).transpose()?;
+            task.set_note_id(note_uuid, ops).map_err(FfiError::from)?;
+        }
     }
     Ok(())
 }

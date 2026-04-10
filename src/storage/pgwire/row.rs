@@ -43,6 +43,7 @@ pub(super) struct TaskPgRow {
     pub parent_id: Option<Uuid>,
     pub project_name: Option<String>,
     pub project_id: Option<Uuid>,
+    pub note_id: Option<Uuid>,
 }
 
 impl TaskPgRow {
@@ -95,6 +96,9 @@ impl TaskPgRow {
             project_id: row
                 .try_get::<_, Option<Uuid>>("project_id")
                 .map_err(Error::PgWire)?,
+            note_id: row
+                .try_get::<_, Option<Uuid>>("note_id")
+                .map_err(Error::PgWire)?,
         })
     }
 }
@@ -123,6 +127,7 @@ impl From<TaskPgRow> for RawTaskRow {
             parent_id: r.parent_id.map(|u| u.to_string()),
             project_name: r.project_name,
             project_id: r.project_id.map(|u| u.to_string()),
+            note_id: r.note_id.map(|u| u.to_string()),
         }
     }
 }

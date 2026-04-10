@@ -83,6 +83,10 @@ pub struct FfiTask {
     ///
     /// Stored as UDA `"today_position"` in the task.
     pub today_position: Option<String>,
+    /// FlickNote: UUID of the linked note, or `None` if not set.
+    ///
+    /// Stored as `note_id` column in `tc_tasks`.
+    pub note_id: Option<String>,
 }
 
 /// A node in the task tree (parent/child hierarchy).
@@ -219,6 +223,13 @@ pub enum TaskMutation {
     ///
     /// Stored as UDA `"today_position"` in the task.
     SetTodayPosition {
+        value: Option<String>,
+    },
+    /// Set the linked FlickNote note UUID. `None` clears the field.
+    ///
+    /// Writes the `note_id` column directly. The caller is responsible for
+    /// passing a valid note UUID — no existence check is performed.
+    SetNoteId {
         value: Option<String>,
     },
 }

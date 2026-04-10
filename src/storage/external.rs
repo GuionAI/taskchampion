@@ -148,6 +148,7 @@ impl ExternalStorageTxn<'_> {
             parent_id: get_opt_str(obj, "parent_id"),
             project_name: get_opt_str(obj, "project_name"),
             project_id: get_opt_str(obj, "project_id"),
+            note_id: get_opt_str(obj, "note_id"),
         })
     }
 }

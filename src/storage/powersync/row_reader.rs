@@ -23,6 +23,7 @@ pub(super) fn read_raw_task_row(r: &rusqlite::Row) -> rusqlite::Result<RawTaskRo
         parent_id: r.get("parent_id")?,
         project_name: r.get("project_name")?,
         project_id: r.get("project_id")?,
+        note_id: None,
     })
 }
 
