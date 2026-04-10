@@ -33,7 +33,8 @@ impl MockFfiSqlExecutor {
                 data TEXT NOT NULL DEFAULT '{}', entry_at TEXT, status TEXT,
                 description TEXT, priority TEXT, modified_at TEXT,
                 due_at TEXT, scheduled_at TEXT, start_at TEXT, end_at TEXT,
-                wait_at TEXT, parent_id TEXT, position TEXT, project_id TEXT
+                wait_at TEXT, parent_id TEXT, position TEXT, project_id TEXT,
+                note_id TEXT
             );
             CREATE TABLE IF NOT EXISTS tc_operations (
                 id TEXT PRIMARY KEY,
