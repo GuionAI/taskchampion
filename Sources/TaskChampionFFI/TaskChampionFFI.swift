@@ -2655,6 +2655,12 @@ public struct FfiTask: Equatable, Hashable {
      * Stored as UDA `"today_position"` in the task.
      */
     public var todayPosition: String?
+    /**
+     * FlickNote: UUID of the linked note, or `None` if not set.
+     *
+     * Stored as `note_id` column in `tc_tasks`.
+     */
+    public var noteId: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -2717,7 +2723,12 @@ public struct FfiTask: Equatable, Hashable {
          * FlickNote: position of this task in the today view. `None` if not set.
          *
          * Stored as UDA `"today_position"` in the task.
-         */todayPosition: String?) {
+         */todayPosition: String?, 
+        /**
+         * FlickNote: UUID of the linked note, or `None` if not set.
+         *
+         * Stored as `note_id` column in `tc_tasks`.
+         */noteId: String?) {
         self.uuid = uuid
         self.status = status
         self.description = description
@@ -2745,6 +2756,7 @@ public struct FfiTask: Equatable, Hashable {
         self.project = project
         self.projectId = projectId
         self.todayPosition = todayPosition
+        self.noteId = noteId
     }
 
     
@@ -2789,7 +2801,8 @@ public struct FfiConverterTypeFfiTask: FfiConverterRustBuffer {
                 xstatus: FfiConverterOptionString.read(from: &buf), 
                 project: FfiConverterOptionString.read(from: &buf), 
                 projectId: FfiConverterOptionString.read(from: &buf), 
-                todayPosition: FfiConverterOptionString.read(from: &buf)
+                todayPosition: FfiConverterOptionString.read(from: &buf), 
+                noteId: FfiConverterOptionString.read(from: &buf)
         )
     }
 
@@ -2821,6 +2834,7 @@ public struct FfiConverterTypeFfiTask: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.project, into: &buf)
         FfiConverterOptionString.write(value.projectId, into: &buf)
         FfiConverterOptionString.write(value.todayPosition, into: &buf)
+        FfiConverterOptionString.write(value.noteId, into: &buf)
     }
 }
 
@@ -4270,6 +4284,14 @@ public enum TaskMutation: Equatable, Hashable {
      */
     case setTodayPosition(value: String?
     )
+    /**
+     * Set the linked FlickNote note UUID. `None` clears the field.
+     *
+     * Writes the `note_id` column directly. The caller is responsible for
+     * passing a valid note UUID — no existence check is performed.
+     */
+    case setNoteId(value: String?
+    )
 
 
 
@@ -4366,6 +4388,9 @@ public struct FfiConverterTypeTaskMutation: FfiConverterRustBuffer {
         )
         
         case 27: return .setTodayPosition(value: try FfiConverterOptionString.read(from: &buf)
+        )
+        
+        case 28: return .setNoteId(value: try FfiConverterOptionString.read(from: &buf)
         )
         
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -4505,6 +4530,11 @@ public struct FfiConverterTypeTaskMutation: FfiConverterRustBuffer {
         
         case let .setTodayPosition(value):
             writeInt(&buf, Int32(27))
+            FfiConverterOptionString.write(value, into: &buf)
+            
+        
+        case let .setNoteId(value):
+            writeInt(&buf, Int32(28))
             FfiConverterOptionString.write(value, into: &buf)
             
         }
