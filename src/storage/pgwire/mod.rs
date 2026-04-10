@@ -151,7 +151,11 @@ impl PgWireStorage {
 impl Storage for PgWireStorage {
     async fn txn<'a>(&'a mut self) -> Result<Box<dyn StorageTxn + Send + 'a>> {
         /* begin transaction */
-        let txn = self.client.transaction().await?;
+        let txn = self
+            .client
+            .transaction()
+            .await
+            .map_err(|e| Error::Database(format!("begin transaction: {}", crate::errors::format_pg_err(&e))))?;
         Ok(Box::new(PgWireTxn { txn: Some(txn) }))
     }
 }
@@ -182,7 +186,10 @@ impl<'a> PgWireTxn<'a> {
             ))
             .build_postgres(PostgresQueryBuilder);
         /* task_exists query */
-        let row = t.query_one(sql.as_str(), &vals.as_params()).await?;
+        let row = t
+            .query_one(sql.as_str(), &vals.as_params())
+            .await
+            .map_err(|e| Error::Database(format!("task_exists query: {}", crate::errors::format_pg_err(&e))))?;
         /* task_exists get */
         match row.try_get::<_, bool>(0) {
             Ok(v) => Ok(v),
@@ -201,7 +208,10 @@ impl<'a> PgWireTxn<'a> {
             .limit(1)
             .build_postgres(PostgresQueryBuilder);
         /* resolve_project_id query */
-        let row = t.query_opt(sql.as_str(), &vals.as_params()).await?;
+        let row = t
+            .query_opt(sql.as_str(), &vals.as_params())
+            .await
+            .map_err(|e| Error::Database(format!("resolve_project_id query (name={name}): {}", crate::errors::format_pg_err(&e))))?;
         match row {
             Some(row) => {
                 /* resolve_project_id get id */
@@ -245,10 +255,17 @@ impl StorageTxn for PgWireTxn<'_> {
             .limit(1)
             .build_postgres(PostgresQueryBuilder);
         /* get_task query */
-        let rows = t.query(sql.as_str(), &vals.as_params()).await?;
+        let rows = t
+            .query(sql.as_str(), &vals.as_params())
+            .await
+            .map_err(|e| Error::Database(format!("get_task query (uuid={uuid}): {}", crate::errors::format_pg_err(&e))))?;
         match rows.into_iter().next() {
             None => Ok(None),
             Some(row) => {
+                // Log UUID before deserializing `data` column — if it contains a 0x00
+                // byte the error fires inside `from_row`, so this is the only chance
+                // to emit the task ID in the trace.
+                log::debug!("pgwire: get_task deserializing {uuid}");
                 let raw = TaskPgRow::from_row(&row)?.into();
                 let (_, task_map) = raw_to_task(raw)?;
                 Ok(Some(task_map))
@@ -274,7 +291,10 @@ impl StorageTxn for PgWireTxn<'_> {
             .and_where(Expr::col((t_alias, TcTasks::Status)).eq("pending"))
             .build_postgres(PostgresQueryBuilder);
         /* get_pending_tasks */
-        let rows = t.query(sql.as_str(), &vals.as_params()).await?;
+        let rows = t
+            .query(sql.as_str(), &vals.as_params())
+            .await
+            .map_err(|e| Error::Database(format!("get_pending_tasks query: {}", crate::errors::format_pg_err(&e))))?;
         rows_to_tasks(rows)
     }
 
@@ -292,7 +312,9 @@ impl StorageTxn for PgWireTxn<'_> {
             ])
             .build_postgres(PostgresQueryBuilder);
         /* create_task insert */
-        t.execute(sql.as_str(), &vals.as_params()).await?;
+        t.execute(sql.as_str(), &vals.as_params())
+            .await
+            .map_err(|e| Error::Database(format!("create_task insert (uuid={uuid}): {}", crate::errors::format_pg_err(&e))))?;
         Ok(true)
     }
 
@@ -340,7 +362,9 @@ impl StorageTxn for PgWireTxn<'_> {
                 .and_where(Expr::col(TcTasks::Id).eq(uuid))
                 .build_postgres(PostgresQueryBuilder);
             /* set_task update */
-            t.execute(sql.as_str(), &vals.as_params()).await?;
+            t.execute(sql.as_str(), &vals.as_params())
+                .await
+                .map_err(|e| Error::Database(format!("set_task update (uuid={uuid}): {}", crate::errors::format_pg_err(&e))))?;
         } else {
             let t = self.get_txn()?;
             let (sql, vals) = Query::insert()
@@ -379,7 +403,9 @@ impl StorageTxn for PgWireTxn<'_> {
                 ])
                 .build_postgres(PostgresQueryBuilder);
             /* set_task insert */
-            t.execute(sql.as_str(), &vals.as_params()).await?;
+            t.execute(sql.as_str(), &vals.as_params())
+                .await
+                .map_err(|e| Error::Database(format!("set_task insert (uuid={uuid}): {}", crate::errors::format_pg_err(&e))))?;
         }
         Ok(())
     }
@@ -392,7 +418,10 @@ impl StorageTxn for PgWireTxn<'_> {
                 .and_where(Expr::col(TcTasks::Id).eq(uuid))
                 .build_postgres(PostgresQueryBuilder);
             /* delete_task */
-            let n = t.execute(sql.as_str(), &vals.as_params()).await?;
+            let n = t
+                .execute(sql.as_str(), &vals.as_params())
+                .await
+                .map_err(|e| Error::Database(format!("delete_task (uuid={uuid}): {}", crate::errors::format_pg_err(&e))))?;
             Ok(n > 0)
         } else {
             Ok(false)
@@ -416,7 +445,10 @@ impl StorageTxn for PgWireTxn<'_> {
             )
             .build_postgres(PostgresQueryBuilder);
         /* all_tasks */
-        let rows = t.query(sql.as_str(), &vals.as_params()).await?;
+        let rows = t
+            .query(sql.as_str(), &vals.as_params())
+            .await
+            .map_err(|e| Error::Database(format!("all_tasks query: {}", crate::errors::format_pg_err(&e))))?;
         rows_to_tasks(rows)
     }
 
@@ -427,7 +459,10 @@ impl StorageTxn for PgWireTxn<'_> {
             .from(TcTasks::Table)
             .build_postgres(PostgresQueryBuilder);
         /* all_task_uuids */
-        let rows = t.query(sql.as_str(), &vals.as_params()).await?;
+        let rows = t
+            .query(sql.as_str(), &vals.as_params())
+            .await
+            .map_err(|e| Error::Database(format!("all_task_uuids query: {}", crate::errors::format_pg_err(&e))))?;
         rows.into_iter()
             .map(|r| match r.try_get::<_, Uuid>(0) {
                 Ok(v) => Ok(v),
@@ -478,7 +513,10 @@ impl StorageTxn for PgWireTxn<'_> {
                    WHERE kv.key LIKE 'tag_%' \
                    ORDER BY name";
         /* get_all_tags */
-        let rows = t.query(sql, &[]).await?;
+        let rows = t
+            .query(sql, &[])
+            .await
+            .map_err(|e| Error::Database(format!("get_all_tags query: {}", crate::errors::format_pg_err(&e))))?;
         rows.into_iter()
             .map(|r| {
                 /* read tag key */
@@ -499,7 +537,10 @@ impl StorageTxn for PgWireTxn<'_> {
             .limit(1)
             .build_postgres(PostgresQueryBuilder);
         /* get_tc_config */
-        let rows = t.query(sql.as_str(), &vals.as_params()).await?;
+        let rows = t
+            .query(sql.as_str(), &vals.as_params())
+            .await
+            .map_err(|e| Error::Database(format!("get_tc_config query: {}", crate::errors::format_pg_err(&e))))?;
         match rows.into_iter().next() {
             None => Ok(None),
             Some(row) => Ok(SettingsPgRow::from_row(&row)?.tc_config),
@@ -518,7 +559,10 @@ impl StorageTxn for PgWireTxn<'_> {
             .value(Settings::TcConfig, jsonb_write_json(json_val))
             .build_postgres(PostgresQueryBuilder);
         /* set_tc_config */
-        let n = t.execute(sql.as_str(), &vals.as_params()).await?;
+        let n = t
+            .execute(sql.as_str(), &vals.as_params())
+            .await
+            .map_err(|e| Error::Database(format!("set_tc_config update: {}", crate::errors::format_pg_err(&e))))?;
         if n == 0 {
             return Err(Error::Database(
                 "set_tc_config: no settings row found — \
@@ -535,7 +579,9 @@ impl StorageTxn for PgWireTxn<'_> {
             .take()
             .ok_or_else(|| Error::Database("Transaction already committed".into()))?;
         /* commit */
-        t.commit().await?;
+        t.commit()
+            .await
+            .map_err(|e| Error::Database(format!("commit: {}", crate::errors::format_pg_err(&e))))?;
         Ok(())
     }
 }

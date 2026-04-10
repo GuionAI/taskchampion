@@ -7,7 +7,7 @@
 use tokio_postgres::Row;
 use uuid::Uuid;
 
-use crate::errors::Result;
+use crate::errors::{Error, Result};
 use crate::storage::columns::raw_to_task;
 use crate::storage::TaskMap;
 
@@ -22,6 +22,13 @@ use super::row::TaskPgRow;
 pub(super) fn rows_to_tasks(rows: Vec<Row>) -> Result<Vec<(Uuid, TaskMap)>> {
     rows.into_iter()
         .map(|r| {
+            // Extract UUID first (separate from full row deserialization) so we can
+            // log it even if the `data` column is corrupted (e.g. 0x00 byte). UUID is
+            // a native PG type stored independently of `data`, so this read is safe.
+            let id: Uuid = r
+                .try_get::<_, Uuid>("id")
+                .map_err(Error::PgWire)?;
+            log::debug!("pgwire: deserializing task {id}");
             let raw = TaskPgRow::from_row(&r)?.into();
             raw_to_task(raw)
         })
