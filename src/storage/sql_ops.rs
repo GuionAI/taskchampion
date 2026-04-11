@@ -3,6 +3,8 @@
 //! Both `PowerSyncTxn` and `ExternalStorageTxn` use these functions to
 //! produce SQL statements. The caller decides how to execute them.
 
+#![allow(dead_code)]
+
 use chrono::Utc;
 use uuid::Uuid;
 

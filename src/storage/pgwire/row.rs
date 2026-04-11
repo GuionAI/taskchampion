@@ -1,104 +1,63 @@
 //! Postgres wire-native row types.
 //!
-//! These structs mirror actual Postgres column types with full type-checked
-//! visibility into every column. Each `from_row` method deserializes from
-//! `tokio_postgres::Row` using explicit `try_get::<_, T>` turbofish hints
-//! (required because the compiler cannot infer `T` backwards through the
-//! method chain reliably without them).
-//!
-//! The `From` impls transform native PG types into the shared `RawTaskRow`
-//! string-based intermediate, which feeds into `raw_to_task` — the same
-//! downstream domain conversion used by all storage backends.
+//! sqlx decodes jsonb columns natively into `serde_json::Value` via the
+//! `json` feature — no SQL-layer CAST AS text required. The `From<TaskPgRow>`
+//! impl re-serializes `Value → String` to feed the crate-level `RawTaskRow`
+//! (shared with powersync), keeping that blast radius contained to this module.
 
 use chrono::{DateTime, Utc};
-use tokio_postgres::Row;
+use sqlx_core::from_row::FromRow;
+use sqlx_core::row::Row;
+use sqlx_postgres::PgRow;
 use uuid::Uuid;
 
-use std::result::Result as StdResult;
-
-use crate::errors::Error;
 use crate::storage::columns::RawTaskRow;
 
 // ─── Task ───────────────────────────────────────────────────────────────────
 
 /// Intermediate Pg-side struct for a tc_tasks row.
 ///
-/// Holds native Postgres wire types — `Uuid`, `DateTime<Utc>`, `String`.
-///
-/// Note: `parent_id` is stored as `uuid` in Postgres but can be NULL
-/// even though the domain treats it as a foreign key.
+/// Manual `FromRow` impl (not derive) to avoid pulling `sqlx-macros` into the
+/// dependency graph — macros requires `sqlx-sqlite` which conflicts with the
+/// rusqlite link at the workspace level.
 pub(super) struct TaskPgRow {
-    pub id: Uuid,
-    pub data: String,
-    pub status: Option<String>,
-    pub description: Option<String>,
-    pub priority: Option<String>,
-    pub entry_at: Option<DateTime<Utc>>,
-    pub modified_at: Option<DateTime<Utc>>,
-    pub due_at: Option<DateTime<Utc>>,
-    pub scheduled_at: Option<DateTime<Utc>>,
-    pub start_at: Option<DateTime<Utc>>,
-    pub end_at: Option<DateTime<Utc>>,
-    pub wait_at: Option<DateTime<Utc>>,
-    pub parent_id: Option<Uuid>,
-    pub project_name: Option<String>,
-    pub project_id: Option<Uuid>,
-    pub note_id: Option<Uuid>,
+    pub(super) id: Uuid,
+    pub(super) data: serde_json::Value,
+    pub(super) status: Option<String>,
+    pub(super) description: Option<String>,
+    pub(super) priority: Option<String>,
+    pub(super) entry_at: Option<DateTime<Utc>>,
+    pub(super) modified_at: Option<DateTime<Utc>>,
+    pub(super) due_at: Option<DateTime<Utc>>,
+    pub(super) scheduled_at: Option<DateTime<Utc>>,
+    pub(super) start_at: Option<DateTime<Utc>>,
+    pub(super) end_at: Option<DateTime<Utc>>,
+    pub(super) wait_at: Option<DateTime<Utc>>,
+    pub(super) parent_id: Option<Uuid>,
+    pub(super) project_name: Option<String>,
+    pub(super) project_id: Option<Uuid>,
+    pub(super) note_id: Option<Uuid>,
 }
 
-impl TaskPgRow {
-    /// Deserialize from a `tokio_postgres::Row` into `TaskPgRow`.
-    ///
-    /// Uses explicit `try_get::<_, T>` turbofish on every non-String column.
-    /// The `data` column is cast to text via `jsonb_read` in the SQL, so it
-    /// deserializes as `String` — which `serde_json::from_str` in
-    /// `raw_to_task` accepts directly.
-    pub(super) fn from_row(row: &Row) -> StdResult<Self, Error> {
+impl<'r> FromRow<'r, PgRow> for TaskPgRow {
+    fn from_row(row: &'r PgRow) -> sqlx_core::Result<Self> {
         Ok(Self {
-            id: row.try_get::<_, Uuid>("id").map_err(Error::PgWire)?,
-            data: row.try_get::<_, String>("data").map_err(Error::PgWire)?,
-            status: row
-                .try_get::<_, Option<String>>("status")
-                .map_err(Error::PgWire)?,
-            description: row
-                .try_get::<_, Option<String>>("description")
-                .map_err(Error::PgWire)?,
-            priority: row
-                .try_get::<_, Option<String>>("priority")
-                .map_err(Error::PgWire)?,
-            entry_at: row
-                .try_get::<_, Option<DateTime<Utc>>>("entry_at")
-                .map_err(Error::PgWire)?,
-            modified_at: row
-                .try_get::<_, Option<DateTime<Utc>>>("modified_at")
-                .map_err(Error::PgWire)?,
-            due_at: row
-                .try_get::<_, Option<DateTime<Utc>>>("due_at")
-                .map_err(Error::PgWire)?,
-            scheduled_at: row
-                .try_get::<_, Option<DateTime<Utc>>>("scheduled_at")
-                .map_err(Error::PgWire)?,
-            start_at: row
-                .try_get::<_, Option<DateTime<Utc>>>("start_at")
-                .map_err(Error::PgWire)?,
-            end_at: row
-                .try_get::<_, Option<DateTime<Utc>>>("end_at")
-                .map_err(Error::PgWire)?,
-            wait_at: row
-                .try_get::<_, Option<DateTime<Utc>>>("wait_at")
-                .map_err(Error::PgWire)?,
-            parent_id: row
-                .try_get::<_, Option<Uuid>>("parent_id")
-                .map_err(Error::PgWire)?,
-            project_name: row
-                .try_get::<_, Option<String>>("project_name")
-                .map_err(Error::PgWire)?,
-            project_id: row
-                .try_get::<_, Option<Uuid>>("project_id")
-                .map_err(Error::PgWire)?,
-            note_id: row
-                .try_get::<_, Option<Uuid>>("note_id")
-                .map_err(Error::PgWire)?,
+            id: row.try_get("id")?,
+            data: row.try_get("data")?,
+            status: row.try_get("status")?,
+            description: row.try_get("description")?,
+            priority: row.try_get("priority")?,
+            entry_at: row.try_get("entry_at")?,
+            modified_at: row.try_get("modified_at")?,
+            due_at: row.try_get("due_at")?,
+            scheduled_at: row.try_get("scheduled_at")?,
+            start_at: row.try_get("start_at")?,
+            end_at: row.try_get("end_at")?,
+            wait_at: row.try_get("wait_at")?,
+            parent_id: row.try_get("parent_id")?,
+            project_name: row.try_get("project_name")?,
+            project_id: row.try_get("project_id")?,
+            note_id: row.try_get("note_id")?,
         })
     }
 }
@@ -106,14 +65,13 @@ impl TaskPgRow {
 impl From<TaskPgRow> for RawTaskRow {
     /// Convert native PG types into the shared all-String `RawTaskRow` intermediate.
     ///
-    /// Timestamps use `to_rfc3339()` — this is the exact ISO 8601 format
-    /// that `raw_to_task`'s downstream `iso_to_epoch` parser accepts, avoiding
-    /// the format mismatch that Postgres's native `timestamptz::text` cast
-    /// introduces (space-separated date+time, non-normalized offset).
+    /// `data: Value → String` re-serialization is the deliberate containment seam.
+    /// The crate-level `RawTaskRow` stores `data: String` (shared with powersync).
+    /// This module is the only place that pays the `Value → String` cost.
     fn from(r: TaskPgRow) -> Self {
         Self {
             id: r.id.to_string(),
-            data: r.data,
+            data: serde_json::to_string(&r.data).expect("jsonb Value re-serialize cannot fail"),
             status: r.status,
             description: r.description,
             priority: r.priority,
@@ -135,23 +93,71 @@ impl From<TaskPgRow> for RawTaskRow {
 // ─── Settings ───────────────────────────────────────────────────────────────
 
 /// Pg-side struct for the tc_settings singleton row.
-///
-/// The settings table has a single row identified by `id` TEXT PRIMARY KEY.
-/// Only `tc_config` (JSONB) is queried — `id` is implicit.
 pub(super) struct SettingsPgRow {
-    pub tc_config: Option<String>,
+    pub(super) tc_config: Option<serde_json::Value>,
 }
 
-impl SettingsPgRow {
-    /// Deserialize from a `tokio_postgres::Row` into `SettingsPgRow`.
-    ///
-    /// The `tc_config` column is cast to text via `jsonb_read` in the SQL,
-    /// so it deserializes as `String`.
-    pub(super) fn from_row(row: &Row) -> StdResult<Self, Error> {
+impl<'r> FromRow<'r, PgRow> for SettingsPgRow {
+    fn from_row(row: &'r PgRow) -> sqlx_core::Result<Self> {
         Ok(Self {
-            tc_config: row
-                .try_get::<_, Option<String>>("tc_config")
-                .map_err(Error::PgWire)?,
+            tc_config: row.try_get("tc_config")?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn task_pg_row_to_raw_task_row_jsonb_roundtrip() {
+        let row = TaskPgRow {
+            id: Uuid::nil(),
+            data: json!({"description": "test", "status": "pending"}),
+            status: Some("pending".into()),
+            description: Some("test".into()),
+            priority: None,
+            entry_at: None,
+            modified_at: None,
+            due_at: None,
+            scheduled_at: None,
+            start_at: None,
+            end_at: None,
+            wait_at: None,
+            parent_id: None,
+            project_name: None,
+            project_id: None,
+            note_id: None,
+        };
+        let raw: RawTaskRow = row.into();
+        assert!(raw.data.contains("description"));
+        assert!(raw.data.contains("pending"));
+        let _: serde_json::Value = serde_json::from_str(&raw.data).unwrap();
+    }
+
+    #[test]
+    fn task_pg_row_to_raw_task_row_null_json() {
+        let row = TaskPgRow {
+            id: Uuid::nil(),
+            data: serde_json::Value::Null,
+            status: None,
+            description: None,
+            priority: None,
+            entry_at: None,
+            modified_at: None,
+            due_at: None,
+            scheduled_at: None,
+            start_at: None,
+            end_at: None,
+            wait_at: None,
+            parent_id: None,
+            project_name: None,
+            project_id: None,
+            note_id: None,
+        };
+        let raw: RawTaskRow = row.into();
+        assert_eq!(raw.data, "null");
+        let _: serde_json::Value = serde_json::from_str(&raw.data).unwrap();
     }
 }
