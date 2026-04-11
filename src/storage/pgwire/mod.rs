@@ -186,13 +186,15 @@ impl<'a> StorageTxn for PgWireTxn<'a> {
         Ok(true)
     }
 
-    async fn set_task(&mut self, uuid: Uuid, mut task: TaskMap) -> Result<()> {
+async fn set_task(&mut self, uuid: Uuid, mut task: TaskMap) -> Result<()> {
         let note_id_str = task.remove("note_id");
         let prepared = prepare_task(task)?;
 
+        let t = self.get_txn()?;
+        let t_ref = &mut **t;
+
         let project_id_str = if let Some(name) = &prepared.project_name {
-            let t = self.get_txn()?;
-            Some(Self::resolve_project_id(&mut **t, name).await?)
+            Some(Self::resolve_project_id(&mut *t_ref, name).await?)
         } else {
             prepared.project_id_raw.clone()
         };
@@ -211,8 +213,7 @@ impl<'a> StorageTxn for PgWireTxn<'a> {
         let data_val: serde_json::Value = serde_json::from_str(&prepared.data_json)
             .map_err(|e| Error::Database(format!("set_task parse data: {e}")))?;
 
-        let t = self.get_txn()?;
-        if Self::task_exists(&mut **t, uuid).await? {
+        if Self::task_exists(&mut *t_ref, uuid).await? {
             query(
                 "UPDATE tc_tasks SET data = $1, status = $2, description = $3, \
                  priority = $4, entry_at = $5, modified_at = $6, due_at = $7, \
@@ -234,7 +235,7 @@ impl<'a> StorageTxn for PgWireTxn<'a> {
             .bind(project_id)
             .bind(note_id)
             .bind(uuid)
-            .execute(&mut **t)
+            .execute(&mut *t_ref)
             .await?;
         } else {
             query(
@@ -258,7 +259,7 @@ impl<'a> StorageTxn for PgWireTxn<'a> {
             .bind(parent_id)
             .bind(project_id)
             .bind(note_id)
-            .execute(&mut **t)
+            .execute(&mut *t_ref)
             .await?;
         }
         Ok(())
