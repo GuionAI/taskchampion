@@ -64,4 +64,3 @@ impl From<sqlx_core::Error> for Error {
 }
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
-

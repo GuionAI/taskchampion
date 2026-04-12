@@ -10,8 +10,8 @@ use sqlx_core::executor::Executor;
 use sqlx_core::query::query;
 use sqlx_core::query_as::query_as;
 use sqlx_core::query_scalar::query_scalar;
-use sqlx_core::types::Json;
 use sqlx_core::transaction::Transaction;
+use sqlx_core::types::Json;
 use sqlx_postgres::{PgConnection, Postgres};
 use uuid::Uuid;
 
@@ -105,11 +105,10 @@ impl<'a> PgWireTxn<'a> {
 
     /// Check if a task with the given UUID exists.
     async fn task_exists(exec: impl Executor<'_, Database = Postgres>, uuid: Uuid) -> Result<bool> {
-        let exists: bool =
-            query_scalar("SELECT EXISTS(SELECT 1 FROM tc_tasks WHERE id = $1)")
-                .bind(uuid)
-                .fetch_one(exec)
-                .await?;
+        let exists: bool = query_scalar("SELECT EXISTS(SELECT 1 FROM tc_tasks WHERE id = $1)")
+            .bind(uuid)
+            .fetch_one(exec)
+            .await?;
         Ok(exists)
     }
 
@@ -118,12 +117,11 @@ impl<'a> PgWireTxn<'a> {
         exec: impl Executor<'_, Database = Postgres>,
         name: &str,
     ) -> Result<String> {
-        let row: Option<(Uuid,)> = query_as(
-            "SELECT id FROM projects WHERE name = $1 ORDER BY created_at ASC LIMIT 1",
-        )
-        .bind(name)
-        .fetch_optional(exec)
-        .await?;
+        let row: Option<(Uuid,)> =
+            query_as("SELECT id FROM projects WHERE name = $1 ORDER BY created_at ASC LIMIT 1")
+                .bind(name)
+                .fetch_optional(exec)
+                .await?;
         match row {
             Some((id,)) => Ok(id.to_string()),
             None => Err(Error::ProjectNotFound(name.to_string())),
@@ -168,9 +166,7 @@ impl<'a> StorageTxn for PgWireTxn<'a> {
             "SELECT {} FROM tc_tasks t LEFT JOIN projects p ON t.project_id = p.id WHERE t.status = 'pending'",
             crate::storage::columns::TASK_SELECT_COLS
         );
-        let rows: Vec<TaskPgRow> = query_as::<_, TaskPgRow>(&sql)
-            .fetch_all(&mut **t)
-            .await?;
+        let rows: Vec<TaskPgRow> = query_as::<_, TaskPgRow>(&sql).fetch_all(&mut **t).await?;
         rows_to_tasks(rows)
     }
 
@@ -186,7 +182,7 @@ impl<'a> StorageTxn for PgWireTxn<'a> {
         Ok(true)
     }
 
-async fn set_task(&mut self, uuid: Uuid, mut task: TaskMap) -> Result<()> {
+    async fn set_task(&mut self, uuid: Uuid, mut task: TaskMap) -> Result<()> {
         let note_id_str = task.remove("note_id");
         let prepared = prepare_task(task)?;
 
@@ -284,9 +280,7 @@ async fn set_task(&mut self, uuid: Uuid, mut task: TaskMap) -> Result<()> {
             "SELECT {} FROM tc_tasks t LEFT JOIN projects p ON t.project_id = p.id",
             crate::storage::columns::TASK_SELECT_COLS
         );
-        let rows: Vec<TaskPgRow> = query_as::<_, TaskPgRow>(&sql)
-            .fetch_all(&mut **t)
-            .await?;
+        let rows: Vec<TaskPgRow> = query_as::<_, TaskPgRow>(&sql).fetch_all(&mut **t).await?;
         rows_to_tasks(rows)
     }
 
@@ -344,10 +338,13 @@ async fn set_task(&mut self, uuid: Uuid, mut task: TaskMap) -> Result<()> {
         let row: Option<SettingsPgRow> = query_as("SELECT tc_config FROM settings LIMIT 1")
             .fetch_optional(&mut **t)
             .await?;
-        Ok(row.and_then(|r| r.tc_config).map(|v| {
-            serde_json::to_string(&v)
-                .map_err(|e| Error::Database(format!("get_tc_config serialize: {e}")))
-        }).transpose()?)
+        Ok(row
+            .and_then(|r| r.tc_config)
+            .map(|v| {
+                serde_json::to_string(&v)
+                    .map_err(|e| Error::Database(format!("get_tc_config serialize: {e}")))
+            })
+            .transpose()?)
     }
 
     async fn set_tc_config(&mut self, value: String) -> Result<()> {
