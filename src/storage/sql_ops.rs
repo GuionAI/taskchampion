@@ -3,8 +3,6 @@
 //! Both `PowerSyncTxn` and `ExternalStorageTxn` use these functions to
 //! produce SQL statements. The caller decides how to execute them.
 
-#![allow(dead_code)]
-
 use chrono::Utc;
 use uuid::Uuid;
 
@@ -56,8 +54,6 @@ pub(crate) struct PreparedTask {
     pub(crate) end_at: Option<String>,
     pub(crate) wait_at: Option<String>,
     /// Raw project UUID set via `SetProjectId` (bypasses name resolution).
-    pub(crate) note_id: Option<String>,
-    /// Raw project UUID set via `SetProjectId` (bypasses name resolution).
     pub(crate) project_id_raw: Option<String>,
     /// Project name string from the TaskMap — resolved to a UUID via the projects table.
     pub(crate) project_name: Option<String>,
@@ -80,9 +76,6 @@ pub(crate) fn prepare_task(mut task_data: TaskMap) -> Result<PreparedTask> {
     let start_at = extract_timestamp(&mut task_data, "start")?;
     let end_at = extract_timestamp(&mut task_data, "end")?;
     let wait_at = extract_timestamp(&mut task_data, "wait")?;
-
-    // Extract note_id.
-    let note_id = task_data.remove("note_id");
 
     // Extract raw project_id.
     let project_id_raw = task_data.remove("project_id");
@@ -116,7 +109,6 @@ pub(crate) fn prepare_task(mut task_data: TaskMap) -> Result<PreparedTask> {
         start_at,
         end_at,
         wait_at,
-        note_id,
         project_id_raw,
         project_name,
     })
