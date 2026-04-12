@@ -112,28 +112,6 @@ pub(crate) const TASK_SELECT_COLS: &str = "t.id, t.data, t.status, t.description
     t.start_at, t.end_at, t.wait_at, t.parent_id, \
     p.name as project_name, t.project_id, t.note_id";
 
-#[cfg(feature = "storage-pgwire")]
-/// Build the tc_tasks column projection with a caller-supplied `data` expression.
-///
-/// Used by backends that need a different `data` cast — e.g. Postgres requires
-/// `t.data::text` to coerce JSONB to TEXT, while SQLite uses plain `t.data`.
-///
-/// ```text
-/// // SQLite (powersync)
-/// task_select_cols("t.data")
-/// // Postgres (pgwire)
-/// task_select_cols("t.data::text")
-/// ```
-#[allow(dead_code)]
-pub(crate) fn task_select_cols(data_expr: &str) -> String {
-    format!(
-        "t.id, {data_expr}, t.status, t.description, t.priority, \
-        t.entry_at, t.modified_at, t.due_at, t.scheduled_at, \
-        t.start_at, t.end_at, t.wait_at, t.parent_id, \
-        p.name as project_name, t.project_id, t.note_id"
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

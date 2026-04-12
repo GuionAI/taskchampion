@@ -7,8 +7,8 @@ use thiserror::Error;
 pub enum Error {
     /// A PostgreSQL error via pgwire
     #[cfg(feature = "storage-pgwire")]
-    #[error("Database error: {}", format_pg_err(.0))]
-    PgWire(tokio_postgres::Error),
+    #[error("Database error: {0}")]
+    PgWire(sqlx_core::Error),
     /// A task-database-related error
     #[error("Task Database Error: {0}")]
     Database(String),
@@ -56,18 +56,11 @@ impl<T: Sync + Send + 'static> From<tokio::sync::mpsc::error::SendError<T>> for 
 }
 
 #[cfg(feature = "storage-pgwire")]
-impl From<tokio_postgres::Error> for Error {
+impl From<sqlx_core::Error> for Error {
     #[inline]
-    fn from(e: tokio_postgres::Error) -> Self {
+    fn from(e: sqlx_core::Error) -> Self {
         Self::PgWire(e)
     }
 }
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
-
-#[cfg(feature = "storage-pgwire")]
-pub(crate) fn format_pg_err(e: &tokio_postgres::Error) -> String {
-    e.as_db_error()
-        .map(std::string::ToString::to_string)
-        .unwrap_or_else(|| e.to_string())
-}
