@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Build an XCFramework containing the taskchampion-ffi static library
-# for iOS device + simulator (arm64) targets, plus generate Swift bindings.
+# for iOS device + simulator and macOS (arm64) targets, plus generate Swift bindings.
 #
 # Prerequisites:
 #   - Rust toolchain (stable)
@@ -37,6 +37,7 @@ SWIFT_OUT_DIR="${PROJECT_ROOT}/Sources/TaskChampionFFI"
 TARGETS=(
   aarch64-apple-ios
   aarch64-apple-ios-sim
+  aarch64-apple-darwin
 )
 
 # --- Ensure Rust targets are installed ---
@@ -112,6 +113,13 @@ mkdir -p "${BUILD_DIR}/ios-simulator"
 cp "${PROJECT_ROOT}/target/aarch64-apple-ios-sim/release/libtaskchampion_ffi.a" \
    "${BUILD_DIR}/ios-simulator/libtaskchampion_ffi.a"
 
+# --- Prepare macOS library ---
+
+echo "==> Preparing macOS library..."
+mkdir -p "${BUILD_DIR}/macos"
+cp "${PROJECT_ROOT}/target/aarch64-apple-darwin/release/libtaskchampion_ffi.a" \
+   "${BUILD_DIR}/macos/libtaskchampion_ffi.a"
+
 # --- Create XCFramework ---
 
 echo "==> Creating XCFramework..."
@@ -120,6 +128,8 @@ xcodebuild -create-xcframework \
   -library "${PROJECT_ROOT}/target/aarch64-apple-ios/release/libtaskchampion_ffi.a" \
   -headers "${HEADERS_DIR}" \
   -library "${BUILD_DIR}/ios-simulator/libtaskchampion_ffi.a" \
+  -headers "${HEADERS_DIR}" \
+  -library "${BUILD_DIR}/macos/libtaskchampion_ffi.a" \
   -headers "${HEADERS_DIR}" \
   -output "${XCFRAMEWORK_DIR}"
 
@@ -133,4 +143,4 @@ echo "    XCFramework: ${XCFRAMEWORK_DIR}"
 echo "    Swift sources: ${SWIFT_OUT_DIR}/TaskChampionFFI.swift"
 echo ""
 echo "    Tag a version and push to create a GitHub Release. SPM consumers add:
-    https://github.com/tta-lab/taskchampion.git"
+    https://github.com/GuionAI/taskchampion.git"
