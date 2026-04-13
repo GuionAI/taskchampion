@@ -1063,6 +1063,69 @@ async fn test_set_project_id_invalid_uuid_rejected() {
     );
 }
 
+#[tokio::test]
+async fn test_set_note_id_round_trip() {
+    let session = make_session();
+    let uuid = Uuid::new_v4().to_string();
+    let note_uuid = Uuid::new_v4().to_string();
+
+    session
+        .create_task(uuid.clone(), "SetNoteId test".into())
+        .await
+        .expect("create");
+
+    // Set note_id.
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetNoteId {
+                value: Some(note_uuid.clone()),
+            }],
+        )
+        .await
+        .expect("set note_id");
+
+    let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
+    assert_eq!(
+        task.note_id.as_deref(),
+        Some(note_uuid.as_str()),
+        "note_id should match"
+    );
+
+    // Clear note_id.
+    session
+        .mutate_task(uuid.clone(), vec![TaskMutation::SetNoteId { value: None }])
+        .await
+        .expect("clear note_id");
+
+    let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
+    assert_eq!(task.note_id.as_deref(), None, "note_id should be cleared");
+}
+
+#[tokio::test]
+async fn test_set_note_id_invalid_uuid_rejected() {
+    let session = make_session();
+    let uuid = Uuid::new_v4().to_string();
+
+    session
+        .create_task(uuid.clone(), "Invalid note UUID test".into())
+        .await
+        .expect("create");
+
+    let result = session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetNoteId {
+                value: Some("not-a-uuid".into()),
+            }],
+        )
+        .await;
+    assert!(
+        matches!(result, Err(FfiError::InvalidInput { .. })),
+        "expected InvalidInput for malformed UUID"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Reorder tests
 // ---------------------------------------------------------------------------
