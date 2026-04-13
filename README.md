@@ -32,7 +32,7 @@ The `ffi/` crate provides a UniFFI-based FFI layer for iOS and macOS consumption
 ```
 
 This produces:
-- `TaskChampionFFIFFI.xcframework/` — static library for iOS device + simulator and macOS (arm64)
+- `TaskChampionFFIFFI.xcframework/` — static library for iOS device (arm64), iOS simulator (arm64), and macOS (arm64)
 - `Sources/TaskChampionFFI/TaskChampionFFI.swift` — generated Swift bindings
 
 ### Consuming from an iOS or macOS Project

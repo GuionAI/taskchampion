@@ -1103,6 +1103,36 @@ async fn test_set_note_id_round_trip() {
 }
 
 #[tokio::test]
+async fn test_set_note_id_nonexistent_uuid_accepted() {
+    let session = make_session();
+    let uuid = Uuid::new_v4().to_string();
+    let random_id = Uuid::new_v4().to_string();
+
+    session
+        .create_task(uuid.clone(), "NoteId nonexistent".into())
+        .await
+        .expect("create");
+
+    // SetNoteId with a random UUID should succeed (no existence validation).
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetNoteId {
+                value: Some(random_id.clone()),
+            }],
+        )
+        .await
+        .expect("set nonexistent note_id should succeed");
+
+    let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
+    assert_eq!(
+        task.note_id.as_deref(),
+        Some(random_id.as_str()),
+        "note_id set to random UUID"
+    );
+}
+
+#[tokio::test]
 async fn test_set_note_id_invalid_uuid_rejected() {
     let session = make_session();
     let uuid = Uuid::new_v4().to_string();
