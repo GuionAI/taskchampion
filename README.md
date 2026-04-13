@@ -20,9 +20,9 @@ The Rust API, as defined in [the docs](https://docs.rs/taskchampion/latest/taskc
 
 The Rust API follows semantic versioning.
 
-## iOS (Swift Package Manager)
+## iOS & macOS (Swift Package Manager)
 
-The `ffi/` crate provides a UniFFI-based FFI layer for iOS consumption via SPM.
+The `ffi/` crate provides a UniFFI-based FFI layer for iOS and macOS consumption via SPM.
 
 ### Building
 
@@ -32,14 +32,14 @@ The `ffi/` crate provides a UniFFI-based FFI layer for iOS consumption via SPM.
 ```
 
 This produces:
-- `TaskChampionFFIFFI.xcframework/` — static library for iOS device + simulator
+- `TaskChampionFFIFFI.xcframework/` — static library for iOS device + simulator and macOS (arm64)
 - `Sources/TaskChampionFFI/TaskChampionFFI.swift` — generated Swift bindings
 
-### Consuming from an iOS Project
+### Consuming from an iOS or macOS Project
 
 1. Add this repo as a git submodule:
    ```bash
-   git submodule add https://github.com/tta-lab/taskchampion.git vendor/taskchampion
+   git submodule add https://github.com/GuionAI/taskchampion.git vendor/taskchampion
    ```
 
 2. Run the build script:
