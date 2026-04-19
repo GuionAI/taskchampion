@@ -2572,7 +2572,10 @@ public struct FfiTask: Equatable, Hashable {
     public var uuid: String
     public var status: FfiStatus
     public var description: String
-    public var priority: String
+    /**
+     * Priority string (e.g. `"H"`, `"M"`, `"L"`), or `None` if unset.
+     */
+    public var priority: String?
     /**
      * Unix epoch seconds, or `None` if not set.
      */
@@ -2587,6 +2590,14 @@ public struct FfiTask: Equatable, Hashable {
      * Start time (active tracking) as Unix epoch seconds, or `None`.
      */
     public var start: Int64?
+    /**
+     * End time as Unix epoch seconds, or `None` if not set.
+     *
+     * Normally auto-managed by status transitions (stamped on
+     * Completed/Deleted, cleared on Pending/Recurring), but can also be
+     * set independently via `TaskMutation::SetEnd`.
+     */
+    public var end: Int64?
     /**
      * Parent task UUID as a string, or `None`.
      */
@@ -2664,7 +2675,10 @@ public struct FfiTask: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(uuid: String, status: FfiStatus, description: String, priority: String, 
+    public init(uuid: String, status: FfiStatus, description: String, 
+        /**
+         * Priority string (e.g. `"H"`, `"M"`, `"L"`), or `None` if unset.
+         */priority: String?, 
         /**
          * Unix epoch seconds, or `None` if not set.
          */entry: Int64?, modified: Int64?, due: Int64?, 
@@ -2674,6 +2688,13 @@ public struct FfiTask: Equatable, Hashable {
         /**
          * Start time (active tracking) as Unix epoch seconds, or `None`.
          */start: Int64?, 
+        /**
+         * End time as Unix epoch seconds, or `None` if not set.
+         *
+         * Normally auto-managed by status transitions (stamped on
+         * Completed/Deleted, cleared on Pending/Recurring), but can also be
+         * set independently via `TaskMutation::SetEnd`.
+         */end: Int64?, 
         /**
          * Parent task UUID as a string, or `None`.
          */parent: String?, position: String?, 
@@ -2738,6 +2759,7 @@ public struct FfiTask: Equatable, Hashable {
         self.due = due
         self.scheduled = scheduled
         self.start = start
+        self.end = end
         self.parent = parent
         self.position = position
         self.tags = tags
@@ -2778,12 +2800,13 @@ public struct FfiConverterTypeFfiTask: FfiConverterRustBuffer {
                 uuid: FfiConverterString.read(from: &buf), 
                 status: FfiConverterTypeFfiStatus.read(from: &buf), 
                 description: FfiConverterString.read(from: &buf), 
-                priority: FfiConverterString.read(from: &buf), 
+                priority: FfiConverterOptionString.read(from: &buf), 
                 entry: FfiConverterOptionInt64.read(from: &buf), 
                 modified: FfiConverterOptionInt64.read(from: &buf), 
                 due: FfiConverterOptionInt64.read(from: &buf), 
                 scheduled: FfiConverterOptionInt64.read(from: &buf), 
                 start: FfiConverterOptionInt64.read(from: &buf), 
+                end: FfiConverterOptionInt64.read(from: &buf), 
                 parent: FfiConverterOptionString.read(from: &buf), 
                 position: FfiConverterOptionString.read(from: &buf), 
                 tags: FfiConverterSequenceString.read(from: &buf), 
@@ -2810,12 +2833,13 @@ public struct FfiConverterTypeFfiTask: FfiConverterRustBuffer {
         FfiConverterString.write(value.uuid, into: &buf)
         FfiConverterTypeFfiStatus.write(value.status, into: &buf)
         FfiConverterString.write(value.description, into: &buf)
-        FfiConverterString.write(value.priority, into: &buf)
+        FfiConverterOptionString.write(value.priority, into: &buf)
         FfiConverterOptionInt64.write(value.entry, into: &buf)
         FfiConverterOptionInt64.write(value.modified, into: &buf)
         FfiConverterOptionInt64.write(value.due, into: &buf)
         FfiConverterOptionInt64.write(value.scheduled, into: &buf)
         FfiConverterOptionInt64.write(value.start, into: &buf)
+        FfiConverterOptionInt64.write(value.end, into: &buf)
         FfiConverterOptionString.write(value.parent, into: &buf)
         FfiConverterOptionString.write(value.position, into: &buf)
         FfiConverterSequenceString.write(value.tags, into: &buf)
@@ -4176,7 +4200,10 @@ public enum TaskMutation: Equatable, Hashable {
     )
     case setStatus(status: FfiStatus
     )
-    case setPriority(value: String
+    /**
+     * Set the priority string. `None` clears the field.
+     */
+    case setPriority(value: String?
     )
     /**
      * `None` clears the field.
@@ -4229,6 +4256,31 @@ public enum TaskMutation: Equatable, Hashable {
      * this variant accepts an arbitrary timestamp.
      */
     case setStart(epoch: Int64?
+    )
+    /**
+     * Set the end time to a specific epoch. `None` clears the field.
+     *
+     * The `end` property is normally managed by status transitions
+     * (stamped on Completed/Deleted, cleared on Pending/Recurring). This
+     * variant lets the host override `end_at` independently of status —
+     * e.g. backfilling a historical completion time, or clearing it
+     * without changing status.
+     *
+     * **Interaction with status transitions — read carefully:**
+     * - A later `SetStatus { Completed | Deleted }` (or `Done`, `Delete`)
+     * in the same batch or in a future call will **overwrite** an
+     * end value set here with `"right now"`.
+     * - A later `SetStatus { Pending | Recurring }` will **clear** an
+     * end value set here.
+     * - `SetEnd { None }` on a Completed/Deleted task leaves the task
+     * in an inconsistent state (terminal status with no end stamp).
+     * Only clear `end` together with a pending/recurring status transition.
+     *
+     * To backfill a historical completion time, order the batch as
+     * `SetStatus { Completed }` → `SetEnd { Some(ts) }`, or call
+     * `SetEnd` in a separate batch after the status transition.
+     */
+    case setEnd(epoch: Int64?
     )
     /**
      * Set FlickNote is_full_day flag.
@@ -4319,7 +4371,7 @@ public struct FfiConverterTypeTaskMutation: FfiConverterRustBuffer {
         case 2: return .setStatus(status: try FfiConverterTypeFfiStatus.read(from: &buf)
         )
         
-        case 3: return .setPriority(value: try FfiConverterString.read(from: &buf)
+        case 3: return .setPriority(value: try FfiConverterOptionString.read(from: &buf)
         )
         
         case 4: return .setDue(epoch: try FfiConverterOptionInt64.read(from: &buf)
@@ -4366,31 +4418,34 @@ public struct FfiConverterTypeTaskMutation: FfiConverterRustBuffer {
         case 19: return .setStart(epoch: try FfiConverterOptionInt64.read(from: &buf)
         )
         
-        case 20: return .setIsFullDay(value: try FfiConverterBool.read(from: &buf)
+        case 20: return .setEnd(epoch: try FfiConverterOptionInt64.read(from: &buf)
         )
         
-        case 21: return .setEstimate(boxes: try FfiConverterOptionUInt32.read(from: &buf)
+        case 21: return .setIsFullDay(value: try FfiConverterBool.read(from: &buf)
         )
         
-        case 22: return .setRecur(value: try FfiConverterOptionString.read(from: &buf)
+        case 22: return .setEstimate(boxes: try FfiConverterOptionUInt32.read(from: &buf)
         )
         
-        case 23: return .setMask(value: try FfiConverterOptionString.read(from: &buf)
+        case 23: return .setRecur(value: try FfiConverterOptionString.read(from: &buf)
         )
         
-        case 24: return .setImask(value: try FfiConverterOptionUInt32.read(from: &buf)
+        case 24: return .setMask(value: try FfiConverterOptionString.read(from: &buf)
         )
         
-        case 25: return .setUntil(epoch: try FfiConverterOptionInt64.read(from: &buf)
+        case 25: return .setImask(value: try FfiConverterOptionUInt32.read(from: &buf)
         )
         
-        case 26: return .setProjectId(value: try FfiConverterOptionString.read(from: &buf)
+        case 26: return .setUntil(epoch: try FfiConverterOptionInt64.read(from: &buf)
         )
         
-        case 27: return .setTodayPosition(value: try FfiConverterOptionString.read(from: &buf)
+        case 27: return .setProjectId(value: try FfiConverterOptionString.read(from: &buf)
         )
         
-        case 28: return .setNoteId(value: try FfiConverterOptionString.read(from: &buf)
+        case 28: return .setTodayPosition(value: try FfiConverterOptionString.read(from: &buf)
+        )
+        
+        case 29: return .setNoteId(value: try FfiConverterOptionString.read(from: &buf)
         )
         
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -4413,7 +4468,7 @@ public struct FfiConverterTypeTaskMutation: FfiConverterRustBuffer {
         
         case let .setPriority(value):
             writeInt(&buf, Int32(3))
-            FfiConverterString.write(value, into: &buf)
+            FfiConverterOptionString.write(value, into: &buf)
             
         
         case let .setDue(epoch):
@@ -4493,48 +4548,53 @@ public struct FfiConverterTypeTaskMutation: FfiConverterRustBuffer {
             FfiConverterOptionInt64.write(epoch, into: &buf)
             
         
-        case let .setIsFullDay(value):
+        case let .setEnd(epoch):
             writeInt(&buf, Int32(20))
+            FfiConverterOptionInt64.write(epoch, into: &buf)
+            
+        
+        case let .setIsFullDay(value):
+            writeInt(&buf, Int32(21))
             FfiConverterBool.write(value, into: &buf)
             
         
         case let .setEstimate(boxes):
-            writeInt(&buf, Int32(21))
+            writeInt(&buf, Int32(22))
             FfiConverterOptionUInt32.write(boxes, into: &buf)
             
         
         case let .setRecur(value):
-            writeInt(&buf, Int32(22))
-            FfiConverterOptionString.write(value, into: &buf)
-            
-        
-        case let .setMask(value):
             writeInt(&buf, Int32(23))
             FfiConverterOptionString.write(value, into: &buf)
             
         
-        case let .setImask(value):
+        case let .setMask(value):
             writeInt(&buf, Int32(24))
+            FfiConverterOptionString.write(value, into: &buf)
+            
+        
+        case let .setImask(value):
+            writeInt(&buf, Int32(25))
             FfiConverterOptionUInt32.write(value, into: &buf)
             
         
         case let .setUntil(epoch):
-            writeInt(&buf, Int32(25))
+            writeInt(&buf, Int32(26))
             FfiConverterOptionInt64.write(epoch, into: &buf)
             
         
         case let .setProjectId(value):
-            writeInt(&buf, Int32(26))
-            FfiConverterOptionString.write(value, into: &buf)
-            
-        
-        case let .setTodayPosition(value):
             writeInt(&buf, Int32(27))
             FfiConverterOptionString.write(value, into: &buf)
             
         
-        case let .setNoteId(value):
+        case let .setTodayPosition(value):
             writeInt(&buf, Int32(28))
+            FfiConverterOptionString.write(value, into: &buf)
+            
+        
+        case let .setNoteId(value):
+            writeInt(&buf, Int32(29))
             FfiConverterOptionString.write(value, into: &buf)
             
         }
