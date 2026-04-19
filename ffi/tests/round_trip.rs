@@ -798,6 +798,78 @@ async fn test_start_epoch_round_trip() {
 }
 
 #[tokio::test]
+async fn test_end_epoch_round_trip() {
+    let session = make_session();
+    let uuid = Uuid::new_v4().to_string();
+    let epoch: i64 = 1_700_000_000;
+
+    session
+        .create_task(uuid.clone(), "End test".into())
+        .await
+        .expect("create");
+
+    let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
+    assert_eq!(task.end, None);
+
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetEnd { epoch: Some(epoch) }],
+        )
+        .await
+        .expect("set end");
+
+    let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
+    assert_eq!(task.end, Some(epoch));
+
+    session
+        .mutate_task(uuid.clone(), vec![TaskMutation::SetEnd { epoch: None }])
+        .await
+        .expect("clear end");
+
+    let task = session.get_task(uuid).await.unwrap().unwrap();
+    assert_eq!(task.end, None);
+}
+
+#[tokio::test]
+async fn test_priority_clear_round_trip() {
+    let session = make_session();
+    let uuid = Uuid::new_v4().to_string();
+
+    session
+        .create_task(uuid.clone(), "Priority test".into())
+        .await
+        .expect("create");
+
+    let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
+    assert_eq!(task.priority, None, "unset priority should read as None");
+
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetPriority {
+                value: Some("H".into()),
+            }],
+        )
+        .await
+        .expect("set priority");
+
+    let task = session.get_task(uuid.clone()).await.unwrap().unwrap();
+    assert_eq!(task.priority, Some("H".into()));
+
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetPriority { value: None }],
+        )
+        .await
+        .expect("clear priority");
+
+    let task = session.get_task(uuid).await.unwrap().unwrap();
+    assert_eq!(task.priority, None, "cleared priority should read as None");
+}
+
+#[tokio::test]
 async fn test_is_full_day_round_trip() {
     let session = make_session();
     let uuid = Uuid::new_v4().to_string();

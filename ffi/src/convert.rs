@@ -16,7 +16,9 @@ impl From<&Task> for FfiTask {
             uuid: task.get_uuid().to_string(),
             status: FfiStatus::from(task.get_status()),
             description: task.get_description().to_string(),
-            priority: task.get_priority().to_string(),
+            priority: Some(task.get_priority())
+                .filter(|s| !s.is_empty())
+                .map(str::to_string),
             // Timestamp is pub(crate) in taskchampion, but DateTime<Utc> methods are accessible.
             entry: task.get_entry().map(|ts| ts.timestamp()),
             modified: task.get_modified().map(|ts| ts.timestamp()),
@@ -25,6 +27,7 @@ impl From<&Task> for FfiTask {
                 .get_value("scheduled")
                 .and_then(|s| s.parse::<i64>().ok()),
             start: task.get_timestamp("start").map(|ts| ts.timestamp()),
+            end: task.get_timestamp("end").map(|ts| ts.timestamp()),
             parent: task.get_parent().map(|u| u.to_string()),
             position: task.get_position().map(|s| s.to_string()),
             tags: task
