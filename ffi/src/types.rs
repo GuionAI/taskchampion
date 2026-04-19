@@ -42,6 +42,12 @@ pub struct FfiTask {
     pub scheduled: Option<i64>,
     /// Start time (active tracking) as Unix epoch seconds, or `None`.
     pub start: Option<i64>,
+    /// End time as Unix epoch seconds, or `None` if not set.
+    ///
+    /// Normally auto-managed by status transitions (stamped on
+    /// Completed/Deleted, cleared on Pending/Recurring), but can also be
+    /// set independently via `TaskMutation::SetEnd`.
+    pub end: Option<i64>,
     /// Parent task UUID as a string, or `None`.
     pub parent: Option<String>,
     pub position: Option<String>,
@@ -188,6 +194,20 @@ pub enum TaskMutation {
     /// variant lets the host override `end_at` independently of status —
     /// e.g. backfilling a historical completion time, or clearing it
     /// without changing status.
+    ///
+    /// **Interaction with status transitions — read carefully:**
+    /// - A later `SetStatus { Completed | Deleted }` (or `Done`, `Delete`)
+    ///   in the same batch or in a future call will **overwrite** an
+    ///   end value set here with `"right now"`.
+    /// - A later `SetStatus { Pending | Recurring }` will **clear** an
+    ///   end value set here.
+    /// - `SetEnd { None }` on a Completed/Deleted task leaves the task
+    ///   in an inconsistent state (terminal status with no end stamp).
+    ///   Only clear `end` together with a pending/recurring status transition.
+    ///
+    /// To backfill a historical completion time, order the batch as
+    /// `SetStatus { Completed }` → `SetEnd { Some(ts) }`, or call
+    /// `SetEnd` in a separate batch after the status transition.
     SetEnd {
         epoch: Option<i64>,
     },

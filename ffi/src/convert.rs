@@ -32,6 +32,7 @@ impl From<&Task> for FfiTask {
                 .get_value("scheduled")
                 .and_then(|s| s.parse::<i64>().ok()),
             start: task.get_timestamp("start").map(|ts| ts.timestamp()),
+            end: task.get_timestamp("end").map(|ts| ts.timestamp()),
             parent: task.get_parent().map(|u| u.to_string()),
             position: task.get_position().map(|s| s.to_string()),
             tags: task
