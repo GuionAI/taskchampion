@@ -16,7 +16,14 @@ impl From<&Task> for FfiTask {
             uuid: task.get_uuid().to_string(),
             status: FfiStatus::from(task.get_status()),
             description: task.get_description().to_string(),
-            priority: task.get_priority().to_string(),
+            priority: {
+                let p = task.get_priority();
+                if p.is_empty() {
+                    None
+                } else {
+                    Some(p.to_string())
+                }
+            },
             // Timestamp is pub(crate) in taskchampion, but DateTime<Utc> methods are accessible.
             entry: task.get_entry().map(|ts| ts.timestamp()),
             modified: task.get_modified().map(|ts| ts.timestamp()),

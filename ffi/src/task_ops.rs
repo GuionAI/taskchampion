@@ -117,7 +117,8 @@ fn apply_mutation(
             task.set_status(new_status, ops).map_err(FfiError::from)?;
         }
         TaskMutation::SetPriority { value } => {
-            task.set_priority(value, ops).map_err(FfiError::from)?;
+            task.set_value("priority", value, ops)
+                .map_err(FfiError::from)?;
         }
         TaskMutation::SetDue { epoch } => {
             // FFI receives i64 epoch; set_timestamp expects DateTime<Utc>. Both
@@ -206,6 +207,10 @@ fn apply_mutation(
             let value = epoch.map(|e| e.to_string());
             task.set_value("start", value, ops)
                 .map_err(FfiError::from)?;
+        }
+        TaskMutation::SetEnd { epoch } => {
+            let value = epoch.map(|e| e.to_string());
+            task.set_value("end", value, ops).map_err(FfiError::from)?;
         }
         TaskMutation::SetIsFullDay { value } => {
             let v = if value {

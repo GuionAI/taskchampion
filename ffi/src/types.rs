@@ -32,7 +32,8 @@ pub struct FfiTask {
     pub uuid: String,
     pub status: FfiStatus,
     pub description: String,
-    pub priority: String,
+    /// Priority string (e.g. `"H"`, `"M"`, `"L"`), or `None` if unset.
+    pub priority: Option<String>,
     /// Unix epoch seconds, or `None` if not set.
     pub entry: Option<i64>,
     pub modified: Option<i64>,
@@ -125,8 +126,9 @@ pub enum TaskMutation {
     SetStatus {
         status: FfiStatus,
     },
+    /// Set the priority string. `None` clears the field.
     SetPriority {
-        value: String,
+        value: Option<String>,
     },
     /// `None` clears the field.
     SetDue {
@@ -177,6 +179,16 @@ pub enum TaskMutation {
     /// Unlike `Start` (which sets to now) and `Stop` (which clears),
     /// this variant accepts an arbitrary timestamp.
     SetStart {
+        epoch: Option<i64>,
+    },
+    /// Set the end time to a specific epoch. `None` clears the field.
+    ///
+    /// The `end` property is normally managed by status transitions
+    /// (stamped on Completed/Deleted, cleared on Pending/Recurring). This
+    /// variant lets the host override `end_at` independently of status —
+    /// e.g. backfilling a historical completion time, or clearing it
+    /// without changing status.
+    SetEnd {
         epoch: Option<i64>,
     },
     /// Set FlickNote is_full_day flag.
