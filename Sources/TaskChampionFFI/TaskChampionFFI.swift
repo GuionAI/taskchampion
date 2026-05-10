@@ -755,6 +755,26 @@ public protocol FfiSessionProtocol: AnyObject, Sendable {
      */
     func mutateTask(uuid: String, mutations: [TaskMutation]) async throws  -> FfiTask?
     
+    /**
+     * Complete `parent_uuid` and all pending descendants in one operation group.
+     *
+     * Returns the tasks changed by this call. A single `undo()` call reverses the
+     * whole tree completion. If `dry_run` is `true`, returns the tasks that
+     * would be changed without writing anything. Foreign bindings default
+     * `dry_run` to `false`.
+     */
+    func completeTree(parentUuid: String, dryRun: Bool) async throws  -> [FfiTask]
+    
+    /**
+     * Soft-delete `parent_uuid` and all non-deleted descendants in one operation group.
+     *
+     * Returns the tasks changed by this call. A single `undo()` call reverses the
+     * whole tree deletion. If `dry_run` is `true`, returns the tasks that would
+     * be changed without writing anything. Foreign bindings default `dry_run`
+     * to `false`.
+     */
+    func deleteTree(parentUuid: String, dryRun: Bool) async throws  -> [FfiTask]
+    
 }
 /**
  * Holds the executor for a TaskChampion session.
@@ -1395,6 +1415,56 @@ open func mutateTask(uuid: String, mutations: [TaskMutation])async throws  -> Ff
         )
 }
     
+    /**
+     * Complete `parent_uuid` and all pending descendants in one operation group.
+     *
+     * Returns the tasks changed by this call. A single `undo()` call reverses the
+     * whole tree completion. If `dry_run` is `true`, returns the tasks that
+     * would be changed without writing anything. Foreign bindings default
+     * `dry_run` to `false`.
+     */
+open func completeTree(parentUuid: String, dryRun: Bool = false)async throws  -> [FfiTask]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_taskchampion_ffi_fn_method_ffisession_complete_tree(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(parentUuid),FfiConverterBool.lower(dryRun)
+                )
+            },
+            pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeFfiTask.lift,
+            errorHandler: FfiConverterTypeFfiError_lift
+        )
+}
+    
+    /**
+     * Soft-delete `parent_uuid` and all non-deleted descendants in one operation group.
+     *
+     * Returns the tasks changed by this call. A single `undo()` call reverses the
+     * whole tree deletion. If `dry_run` is `true`, returns the tasks that would
+     * be changed without writing anything. Foreign bindings default `dry_run`
+     * to `false`.
+     */
+open func deleteTree(parentUuid: String, dryRun: Bool = false)async throws  -> [FfiTask]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_taskchampion_ffi_fn_method_ffisession_delete_tree(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(parentUuid),FfiConverterBool.lower(dryRun)
+                )
+            },
+            pollFunc: ffi_taskchampion_ffi_rust_future_poll_rust_buffer,
+            completeFunc: ffi_taskchampion_ffi_rust_future_complete_rust_buffer,
+            freeFunc: ffi_taskchampion_ffi_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeFfiTask.lift,
+            errorHandler: FfiConverterTypeFfiError_lift
+        )
+}
+    
 
     
 }
@@ -1964,75 +2034,6 @@ public func FfiConverterTypeFfiChildStatusChange_lower(_ value: FfiChildStatusCh
 
 
 /**
- * Result of `descendants_to_delete_ffi` — the pending count and all UUIDs.
- */
-public struct FfiDeleteResult: Equatable, Hashable {
-    /**
-     * Number of Pending/Waiting descendants.
-     */
-    public var pendingCount: UInt32
-    /**
-     * UUIDs of all descendants (all statuses).
-     */
-    public var allUuids: [String]
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(
-        /**
-         * Number of Pending/Waiting descendants.
-         */pendingCount: UInt32, 
-        /**
-         * UUIDs of all descendants (all statuses).
-         */allUuids: [String]) {
-        self.pendingCount = pendingCount
-        self.allUuids = allUuids
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension FfiDeleteResult: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeFfiDeleteResult: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiDeleteResult {
-        return
-            try FfiDeleteResult(
-                pendingCount: FfiConverterUInt32.read(from: &buf), 
-                allUuids: FfiConverterSequenceString.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: FfiDeleteResult, into buf: inout [UInt8]) {
-        FfiConverterUInt32.write(value.pendingCount, into: &buf)
-        FfiConverterSequenceString.write(value.allUuids, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFfiDeleteResult_lift(_ buf: RustBuffer) throws -> FfiDeleteResult {
-    return try FfiConverterTypeFfiDeleteResult.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFfiDeleteResult_lower(_ value: FfiDeleteResult) -> RustBuffer {
-    return FfiConverterTypeFfiDeleteResult.lower(value)
-}
-
-
-/**
  * A dependency edge: `from_uuid` depends on `to_uuid`.
  */
 public struct FfiDependencyEdge: Equatable, Hashable {
@@ -2246,88 +2247,6 @@ public func FfiConverterTypeFfiRecurrenceDiffEntry_lift(_ buf: RustBuffer) throw
 #endif
 public func FfiConverterTypeFfiRecurrenceDiffEntry_lower(_ value: FfiRecurrenceDiffEntry) -> RustBuffer {
     return FfiConverterTypeFfiRecurrenceDiffEntry.lower(value)
-}
-
-
-/**
- * Recurrence parent context when completing a recurring child task.
- *
- * Mirrors `praxis::orchestrate::RecurrenceParentInfo`, but uses a raw mask
- * string and `u32` imask for FFI compatibility.
- */
-public struct FfiRecurrenceParentInfo: Equatable, Hashable {
-    /**
-     * UUID of the parent recurring template.
-     */
-    public var templateUuid: String
-    /**
-     * Current raw mask string of the parent template (e.g. `"-+-"`).
-     */
-    public var currentMask: String
-    /**
-     * Index into the parent mask for this child instance.
-     */
-    public var imask: UInt32
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(
-        /**
-         * UUID of the parent recurring template.
-         */templateUuid: String, 
-        /**
-         * Current raw mask string of the parent template (e.g. `"-+-"`).
-         */currentMask: String, 
-        /**
-         * Index into the parent mask for this child instance.
-         */imask: UInt32) {
-        self.templateUuid = templateUuid
-        self.currentMask = currentMask
-        self.imask = imask
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension FfiRecurrenceParentInfo: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeFfiRecurrenceParentInfo: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiRecurrenceParentInfo {
-        return
-            try FfiRecurrenceParentInfo(
-                templateUuid: FfiConverterString.read(from: &buf), 
-                currentMask: FfiConverterString.read(from: &buf), 
-                imask: FfiConverterUInt32.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: FfiRecurrenceParentInfo, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.templateUuid, into: &buf)
-        FfiConverterString.write(value.currentMask, into: &buf)
-        FfiConverterUInt32.write(value.imask, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFfiRecurrenceParentInfo_lift(_ buf: RustBuffer) throws -> FfiRecurrenceParentInfo {
-    return try FfiConverterTypeFfiRecurrenceParentInfo.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFfiRecurrenceParentInfo_lower(_ value: FfiRecurrenceParentInfo) -> RustBuffer {
-    return FfiConverterTypeFfiRecurrenceParentInfo.lower(value)
 }
 
 
@@ -2879,75 +2798,6 @@ public func FfiConverterTypeFfiTask_lower(_ value: FfiTask) -> RustBuffer {
 
 
 /**
- * A task in the tree hierarchy — status info for cascade operations.
- */
-public struct FfiTaskDescendant: Equatable, Hashable {
-    /**
-     * Task UUID as a string.
-     */
-    public var uuid: String
-    /**
-     * Task status.
-     */
-    public var status: FfiStatus
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(
-        /**
-         * Task UUID as a string.
-         */uuid: String, 
-        /**
-         * Task status.
-         */status: FfiStatus) {
-        self.uuid = uuid
-        self.status = status
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension FfiTaskDescendant: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeFfiTaskDescendant: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiTaskDescendant {
-        return
-            try FfiTaskDescendant(
-                uuid: FfiConverterString.read(from: &buf), 
-                status: FfiConverterTypeFfiStatus.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: FfiTaskDescendant, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.uuid, into: &buf)
-        FfiConverterTypeFfiStatus.write(value.status, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFfiTaskDescendant_lift(_ buf: RustBuffer) throws -> FfiTaskDescendant {
-    return try FfiConverterTypeFfiTaskDescendant.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFfiTaskDescendant_lower(_ value: FfiTaskDescendant) -> RustBuffer {
-    return FfiConverterTypeFfiTaskDescendant.lower(value)
-}
-
-
-/**
  * A node in the task tree (parent/child hierarchy).
  */
 public struct FfiTreeNode: Equatable, Hashable {
@@ -3036,91 +2886,6 @@ public func FfiConverterTypeFfiTreeNode_lift(_ buf: RustBuffer) throws -> FfiTre
 public func FfiConverterTypeFfiTreeNode_lower(_ value: FfiTreeNode) -> RustBuffer {
     return FfiConverterTypeFfiTreeNode.lower(value)
 }
-
-// Note that we don't yet support `indirect` for enums.
-// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
-/**
- * Output of `plan_completion_ffi` — actions the caller should execute.
- *
- * Mirrors `praxis::orchestrate::CompletionAction`.
- */
-
-public enum FfiCompletionAction: Equatable, Hashable {
-    
-    /**
-     * Complete the task with this UUID.
-     */
-    case completeTask(uuid: String
-    )
-    /**
-     * Update the recurrence template's mask string.
-     */
-    case updateRecurrenceMask(templateUuid: String, newMask: String
-    )
-
-
-
-
-
-}
-
-#if compiler(>=6)
-extension FfiCompletionAction: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeFfiCompletionAction: FfiConverterRustBuffer {
-    typealias SwiftType = FfiCompletionAction
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiCompletionAction {
-        let variant: Int32 = try readInt(&buf)
-        switch variant {
-        
-        case 1: return .completeTask(uuid: try FfiConverterString.read(from: &buf)
-        )
-        
-        case 2: return .updateRecurrenceMask(templateUuid: try FfiConverterString.read(from: &buf), newMask: try FfiConverterString.read(from: &buf)
-        )
-        
-        default: throw UniffiInternalError.unexpectedEnumCase
-        }
-    }
-
-    public static func write(_ value: FfiCompletionAction, into buf: inout [UInt8]) {
-        switch value {
-        
-        
-        case let .completeTask(uuid):
-            writeInt(&buf, Int32(1))
-            FfiConverterString.write(uuid, into: &buf)
-            
-        
-        case let .updateRecurrenceMask(templateUuid,newMask):
-            writeInt(&buf, Int32(2))
-            FfiConverterString.write(templateUuid, into: &buf)
-            FfiConverterString.write(newMask, into: &buf)
-            
-        }
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFfiCompletionAction_lift(_ buf: RustBuffer) throws -> FfiCompletionAction {
-    return try FfiConverterTypeFfiCompletionAction.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeFfiCompletionAction_lower(_ value: FfiCompletionAction) -> RustBuffer {
-    return FfiConverterTypeFfiCompletionAction.lower(value)
-}
-
 
 
 /**
@@ -4692,30 +4457,6 @@ fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterOptionTypeFfiRecurrenceParentInfo: FfiConverterRustBuffer {
-    typealias SwiftType = FfiRecurrenceParentInfo?
-
-    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
-        guard let value = value else {
-            writeInt(&buf, Int8(0))
-            return
-        }
-        writeInt(&buf, Int8(1))
-        FfiConverterTypeFfiRecurrenceParentInfo.write(value, into: &buf)
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
-        switch try readInt(&buf) as Int8 {
-        case 0: return nil
-        case 1: return try FfiConverterTypeFfiRecurrenceParentInfo.read(from: &buf)
-        default: throw UniffiInternalError.unexpectedOptionalTag
-        }
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
 fileprivate struct FfiConverterOptionTypeFfiSqlRow: FfiConverterRustBuffer {
     typealias SwiftType = FfiSqlRow?
 
@@ -4964,23 +4705,23 @@ fileprivate struct FfiConverterSequenceTypeFfiSqlStatement: FfiConverterRustBuff
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterSequenceTypeFfiTaskDescendant: FfiConverterRustBuffer {
-    typealias SwiftType = [FfiTaskDescendant]
+fileprivate struct FfiConverterSequenceTypeFfiTask: FfiConverterRustBuffer {
+    typealias SwiftType = [FfiTask]
 
-    public static func write(_ value: [FfiTaskDescendant], into buf: inout [UInt8]) {
+    public static func write(_ value: [FfiTask], into buf: inout [UInt8]) {
         let len = Int32(value.count)
         writeInt(&buf, len)
         for item in value {
-            FfiConverterTypeFfiTaskDescendant.write(item, into: &buf)
+            FfiConverterTypeFfiTask.write(item, into: &buf)
         }
     }
 
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiTaskDescendant] {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiTask] {
         let len: Int32 = try readInt(&buf)
-        var seq = [FfiTaskDescendant]()
+        var seq = [FfiTask]()
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
-            seq.append(try FfiConverterTypeFfiTaskDescendant.read(from: &buf))
+            seq.append(try FfiConverterTypeFfiTask.read(from: &buf))
         }
         return seq
     }
@@ -5006,31 +4747,6 @@ fileprivate struct FfiConverterSequenceTypeFfiTreeNode: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeFfiTreeNode.read(from: &buf))
-        }
-        return seq
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-fileprivate struct FfiConverterSequenceTypeFfiCompletionAction: FfiConverterRustBuffer {
-    typealias SwiftType = [FfiCompletionAction]
-
-    public static func write(_ value: [FfiCompletionAction], into buf: inout [UInt8]) {
-        let len = Int32(value.count)
-        writeInt(&buf, len)
-        for item in value {
-            FfiConverterTypeFfiCompletionAction.write(item, into: &buf)
-        }
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FfiCompletionAction] {
-        let len: Int32 = try readInt(&buf)
-        var seq = [FfiCompletionAction]()
-        seq.reserveCapacity(Int(len))
-        for _ in 0 ..< len {
-            seq.append(try FfiConverterTypeFfiCompletionAction.read(from: &buf))
         }
         return seq
     }
@@ -5300,25 +5016,6 @@ public func uniffiForeignFutureHandleCountTaskchampionFfi() -> Int {
     UNIFFI_FOREIGN_FUTURE_HANDLE_MAP.count
 }
 /**
- * Plan all actions needed to complete a task.
- *
- * The target task is always the first action. Subsequent actions are:
- * 1. `CompleteTask` for each pending or waiting descendant (tree behavior)
- * 2. `UpdateRecurrenceMask` for the recurrence parent (if applicable)
- *
- * Returns `InvalidInput` if any UUID is invalid or if `imask` is out of
- * bounds for the parent mask.
- */
-public func planCompletionFfi(targetUuid: String, descendants: [FfiTaskDescendant], recurrenceParent: FfiRecurrenceParentInfo?)throws  -> [FfiCompletionAction]  {
-    return try  FfiConverterSequenceTypeFfiCompletionAction.lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
-    uniffi_taskchampion_ffi_fn_func_plan_completion_ffi(
-        FfiConverterString.lower(targetUuid),
-        FfiConverterSequenceTypeFfiTaskDescendant.lower(descendants),
-        FfiConverterOptionTypeFfiRecurrenceParentInfo.lower(recurrenceParent),$0
-    )
-})
-}
-/**
  * Generate due dates for a recurrence template.
  *
  * - `base_due_epoch`: the initial due date (Unix epoch seconds)
@@ -5422,34 +5119,6 @@ public func updateMaskForChildFfi(currentMask: String, change: FfiChildStatusCha
     )
 })
 }
-/**
- * Return UUIDs of descendants that should be auto-completed when the parent
- * is completed.
- *
- * Only Pending (and Waiting) descendants are returned — Completed, Deleted,
- * Recurring, and Unknown are skipped.
- */
-public func descendantsToCompleteFfi(descendants: [FfiTaskDescendant])throws  -> [String]  {
-    return try  FfiConverterSequenceString.lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
-    uniffi_taskchampion_ffi_fn_func_descendants_to_complete_ffi(
-        FfiConverterSequenceTypeFfiTaskDescendant.lower(descendants),$0
-    )
-})
-}
-/**
- * Return the pending count and all UUIDs when the parent task is deleted.
- *
- * `pending_count` is the number of Pending/Waiting descendants — used to
- * decide whether to prompt the user. `all_uuids` contains every descendant
- * UUID regardless of status.
- */
-public func descendantsToDeleteFfi(descendants: [FfiTaskDescendant])throws  -> FfiDeleteResult  {
-    return try  FfiConverterTypeFfiDeleteResult_lift(try rustCallWithError(FfiConverterTypeFfiError_lift) {
-    uniffi_taskchampion_ffi_fn_func_descendants_to_delete_ffi(
-        FfiConverterSequenceTypeFfiTaskDescendant.lower(descendants),$0
-    )
-})
-}
 
 private enum InitializationResult {
     case ok
@@ -5465,9 +5134,6 @@ private let initializationResult: InitializationResult = {
     let scaffolding_contract_version = ffi_taskchampion_ffi_uniffi_contract_version()
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
-    }
-    if (uniffi_taskchampion_ffi_checksum_func_plan_completion_ffi() != 61772) {
-        return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_func_generate_due_dates() != 26948) {
         return InitializationResult.apiChecksumMismatch
@@ -5488,12 +5154,6 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_func_update_mask_for_child_ffi() != 45173) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_taskchampion_ffi_checksum_func_descendants_to_complete_ffi() != 38919) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_taskchampion_ffi_checksum_func_descendants_to_delete_ffi() != 20591) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_clear_xstatus() != 15503) {
@@ -5566,6 +5226,12 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_mutate_task() != 59757) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_complete_tree() != 50730) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_delete_tree() != 9069) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_method_ffisqlexecutor_query_one() != 27433) {
