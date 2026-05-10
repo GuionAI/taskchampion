@@ -488,7 +488,7 @@ async fn test_complete_tree_completes_pending_descendants_in_one_undo_group() {
         .expect("add dependency");
 
     let completed = session
-        .complete_tree(parent_uuid.clone())
+        .complete_tree(parent_uuid.clone(), None)
         .await
         .expect("complete tree");
     let completed_uuids: Vec<_> = completed.iter().map(|t| t.uuid.as_str()).collect();
@@ -555,11 +555,55 @@ async fn test_complete_tree_rejects_non_pending_parent() {
         .await
         .expect("complete parent");
 
-    let result = session.complete_tree(parent_uuid.clone()).await;
+    let result = session.complete_tree(parent_uuid.clone(), None).await;
     assert!(
         matches!(result, Err(FfiError::InvalidInput { .. })),
         "expected InvalidInput for non-pending parent"
     );
+}
+
+#[tokio::test]
+async fn test_complete_tree_dry_run_does_not_mutate() {
+    let session = make_session();
+    let parent_uuid = Uuid::new_v4().to_string();
+    let child_uuid = Uuid::new_v4().to_string();
+
+    session
+        .create_task(parent_uuid.clone(), "Parent".into())
+        .await
+        .expect("create parent");
+    session
+        .create_task(child_uuid.clone(), "Child".into())
+        .await
+        .expect("create child");
+    session
+        .mutate_task(
+            child_uuid.clone(),
+            vec![TaskMutation::SetParent {
+                uuid: Some(parent_uuid.clone()),
+            }],
+        )
+        .await
+        .expect("set child parent");
+
+    let preview = session
+        .complete_tree(parent_uuid.clone(), Some(true))
+        .await
+        .expect("complete tree dry run");
+    let preview_uuids: Vec<_> = preview.iter().map(|t| t.uuid.as_str()).collect();
+    assert_eq!(preview_uuids.len(), 2);
+    assert!(preview_uuids.contains(&parent_uuid.as_str()));
+    assert!(preview_uuids.contains(&child_uuid.as_str()));
+
+    for uuid in [&parent_uuid, &child_uuid] {
+        let task = session
+            .get_task(uuid.clone())
+            .await
+            .expect("get task after dry run")
+            .expect("task exists after dry run");
+        assert!(matches!(task.status, FfiStatus::Pending));
+        assert_eq!(task.end, None);
+    }
 }
 
 #[tokio::test]
@@ -619,7 +663,7 @@ async fn test_delete_tree_deletes_descendants_in_one_undo_group() {
         .expect("delete child upfront");
 
     let deleted = session
-        .delete_tree(parent_uuid.clone())
+        .delete_tree(parent_uuid.clone(), None)
         .await
         .expect("delete tree");
     let deleted_uuids: Vec<_> = deleted.iter().map(|t| t.uuid.as_str()).collect();
@@ -662,6 +706,50 @@ async fn test_delete_tree_deletes_descendants_in_one_undo_group() {
         .expect("get deleted child after undo")
         .expect("deleted child exists after undo");
     assert!(matches!(deleted_child.status, FfiStatus::Deleted));
+}
+
+#[tokio::test]
+async fn test_delete_tree_dry_run_does_not_mutate() {
+    let session = make_session();
+    let parent_uuid = Uuid::new_v4().to_string();
+    let child_uuid = Uuid::new_v4().to_string();
+
+    session
+        .create_task(parent_uuid.clone(), "Parent".into())
+        .await
+        .expect("create parent");
+    session
+        .create_task(child_uuid.clone(), "Child".into())
+        .await
+        .expect("create child");
+    session
+        .mutate_task(
+            child_uuid.clone(),
+            vec![TaskMutation::SetParent {
+                uuid: Some(parent_uuid.clone()),
+            }],
+        )
+        .await
+        .expect("set child parent");
+
+    let preview = session
+        .delete_tree(parent_uuid.clone(), Some(true))
+        .await
+        .expect("delete tree dry run");
+    let preview_uuids: Vec<_> = preview.iter().map(|t| t.uuid.as_str()).collect();
+    assert_eq!(preview_uuids.len(), 2);
+    assert!(preview_uuids.contains(&parent_uuid.as_str()));
+    assert!(preview_uuids.contains(&child_uuid.as_str()));
+
+    for uuid in [&parent_uuid, &child_uuid] {
+        let task = session
+            .get_task(uuid.clone())
+            .await
+            .expect("get task after dry run")
+            .expect("task exists after dry run");
+        assert!(matches!(task.status, FfiStatus::Pending));
+        assert_eq!(task.end, None);
+    }
 }
 
 #[tokio::test]
