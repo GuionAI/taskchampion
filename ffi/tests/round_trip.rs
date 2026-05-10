@@ -418,6 +418,341 @@ async fn test_tree_map_parent_child() {
 }
 
 #[tokio::test]
+async fn test_complete_tree_completes_pending_descendants_in_one_undo_group() {
+    let session = make_session();
+    let parent_uuid = Uuid::new_v4().to_string();
+    let child_uuid = Uuid::new_v4().to_string();
+    let grandchild_uuid = Uuid::new_v4().to_string();
+    let already_done_uuid = Uuid::new_v4().to_string();
+    let dependent_uuid = Uuid::new_v4().to_string();
+
+    session
+        .create_task(parent_uuid.clone(), "Parent".into())
+        .await
+        .expect("create parent");
+    session
+        .create_task(child_uuid.clone(), "Child".into())
+        .await
+        .expect("create child");
+    session
+        .create_task(grandchild_uuid.clone(), "Grandchild".into())
+        .await
+        .expect("create grandchild");
+    session
+        .create_task(already_done_uuid.clone(), "Already done".into())
+        .await
+        .expect("create done child");
+    session
+        .create_task(dependent_uuid.clone(), "Depends on parent".into())
+        .await
+        .expect("create dependent");
+
+    session
+        .mutate_task(
+            child_uuid.clone(),
+            vec![TaskMutation::SetParent {
+                uuid: Some(parent_uuid.clone()),
+            }],
+        )
+        .await
+        .expect("set child parent");
+    session
+        .mutate_task(
+            grandchild_uuid.clone(),
+            vec![TaskMutation::SetParent {
+                uuid: Some(child_uuid.clone()),
+            }],
+        )
+        .await
+        .expect("set grandchild parent");
+    session
+        .mutate_task(
+            already_done_uuid.clone(),
+            vec![
+                TaskMutation::SetParent {
+                    uuid: Some(parent_uuid.clone()),
+                },
+                TaskMutation::Done,
+            ],
+        )
+        .await
+        .expect("complete child upfront");
+    session
+        .mutate_task(
+            dependent_uuid.clone(),
+            vec![TaskMutation::AddDependency {
+                uuid: parent_uuid.clone(),
+            }],
+        )
+        .await
+        .expect("add dependency");
+
+    let completed = session
+        .complete_tree(parent_uuid.clone(), false)
+        .await
+        .expect("complete tree");
+    let completed_uuids: Vec<_> = completed.iter().map(|t| t.uuid.as_str()).collect();
+    assert_eq!(completed_uuids.len(), 3);
+    assert!(completed_uuids.contains(&parent_uuid.as_str()));
+    assert!(completed_uuids.contains(&child_uuid.as_str()));
+    assert!(completed_uuids.contains(&grandchild_uuid.as_str()));
+    assert!(!completed_uuids.contains(&already_done_uuid.as_str()));
+    let completed_parent = completed
+        .iter()
+        .find(|t| t.uuid == parent_uuid)
+        .expect("parent returned");
+    assert!(
+        !completed_parent.is_blocking,
+        "completed parent should not be returned with stale dependency state"
+    );
+
+    for uuid in [
+        &parent_uuid,
+        &child_uuid,
+        &grandchild_uuid,
+        &already_done_uuid,
+    ] {
+        let task = session
+            .get_task(uuid.clone())
+            .await
+            .expect("get task")
+            .expect("task exists");
+        assert!(matches!(task.status, FfiStatus::Completed));
+    }
+
+    let undone = session.undo().await.expect("undo complete_tree");
+    assert!(undone);
+
+    for uuid in [&parent_uuid, &child_uuid, &grandchild_uuid] {
+        let task = session
+            .get_task(uuid.clone())
+            .await
+            .expect("get task after undo")
+            .expect("task exists after undo");
+        assert!(matches!(task.status, FfiStatus::Pending));
+        assert_eq!(task.end, None);
+    }
+
+    let done_child = session
+        .get_task(already_done_uuid.clone())
+        .await
+        .expect("get done child after undo")
+        .expect("done child exists after undo");
+    assert!(matches!(done_child.status, FfiStatus::Completed));
+}
+
+#[tokio::test]
+async fn test_complete_tree_rejects_non_pending_parent() {
+    let session = make_session();
+    let parent_uuid = Uuid::new_v4().to_string();
+
+    session
+        .create_task(parent_uuid.clone(), "Parent".into())
+        .await
+        .expect("create parent");
+    session
+        .mutate_task(parent_uuid.clone(), vec![TaskMutation::Done])
+        .await
+        .expect("complete parent");
+
+    let result = session.complete_tree(parent_uuid.clone(), false).await;
+    assert!(
+        matches!(result, Err(FfiError::InvalidInput { .. })),
+        "expected InvalidInput for non-pending parent"
+    );
+}
+
+#[tokio::test]
+async fn test_complete_tree_dry_run_does_not_mutate() {
+    let session = make_session();
+    let parent_uuid = Uuid::new_v4().to_string();
+    let child_uuid = Uuid::new_v4().to_string();
+
+    session
+        .create_task(parent_uuid.clone(), "Parent".into())
+        .await
+        .expect("create parent");
+    session
+        .create_task(child_uuid.clone(), "Child".into())
+        .await
+        .expect("create child");
+    session
+        .mutate_task(
+            child_uuid.clone(),
+            vec![TaskMutation::SetParent {
+                uuid: Some(parent_uuid.clone()),
+            }],
+        )
+        .await
+        .expect("set child parent");
+
+    let preview = session
+        .complete_tree(parent_uuid.clone(), true)
+        .await
+        .expect("complete tree dry run");
+    let preview_uuids: Vec<_> = preview.iter().map(|t| t.uuid.as_str()).collect();
+    assert_eq!(preview_uuids.len(), 2);
+    assert!(preview_uuids.contains(&parent_uuid.as_str()));
+    assert!(preview_uuids.contains(&child_uuid.as_str()));
+
+    for uuid in [&parent_uuid, &child_uuid] {
+        let task = session
+            .get_task(uuid.clone())
+            .await
+            .expect("get task after dry run")
+            .expect("task exists after dry run");
+        assert!(matches!(task.status, FfiStatus::Pending));
+        assert_eq!(task.end, None);
+    }
+}
+
+#[tokio::test]
+async fn test_delete_tree_deletes_descendants_in_one_undo_group() {
+    let session = make_session();
+    let parent_uuid = Uuid::new_v4().to_string();
+    let child_uuid = Uuid::new_v4().to_string();
+    let grandchild_uuid = Uuid::new_v4().to_string();
+    let already_deleted_uuid = Uuid::new_v4().to_string();
+
+    session
+        .create_task(parent_uuid.clone(), "Parent".into())
+        .await
+        .expect("create parent");
+    session
+        .create_task(child_uuid.clone(), "Child".into())
+        .await
+        .expect("create child");
+    session
+        .create_task(grandchild_uuid.clone(), "Grandchild".into())
+        .await
+        .expect("create grandchild");
+    session
+        .create_task(already_deleted_uuid.clone(), "Already deleted".into())
+        .await
+        .expect("create deleted child");
+
+    session
+        .mutate_task(
+            child_uuid.clone(),
+            vec![TaskMutation::SetParent {
+                uuid: Some(parent_uuid.clone()),
+            }],
+        )
+        .await
+        .expect("set child parent");
+    session
+        .mutate_task(
+            grandchild_uuid.clone(),
+            vec![TaskMutation::SetParent {
+                uuid: Some(child_uuid.clone()),
+            }],
+        )
+        .await
+        .expect("set grandchild parent");
+    session
+        .mutate_task(
+            already_deleted_uuid.clone(),
+            vec![
+                TaskMutation::SetParent {
+                    uuid: Some(parent_uuid.clone()),
+                },
+                TaskMutation::Delete,
+            ],
+        )
+        .await
+        .expect("delete child upfront");
+
+    let deleted = session
+        .delete_tree(parent_uuid.clone(), false)
+        .await
+        .expect("delete tree");
+    let deleted_uuids: Vec<_> = deleted.iter().map(|t| t.uuid.as_str()).collect();
+    assert_eq!(deleted_uuids.len(), 3);
+    assert!(deleted_uuids.contains(&parent_uuid.as_str()));
+    assert!(deleted_uuids.contains(&child_uuid.as_str()));
+    assert!(deleted_uuids.contains(&grandchild_uuid.as_str()));
+    assert!(!deleted_uuids.contains(&already_deleted_uuid.as_str()));
+
+    for uuid in [
+        &parent_uuid,
+        &child_uuid,
+        &grandchild_uuid,
+        &already_deleted_uuid,
+    ] {
+        let task = session
+            .get_task(uuid.clone())
+            .await
+            .expect("get task")
+            .expect("task exists");
+        assert!(matches!(task.status, FfiStatus::Deleted));
+    }
+
+    let undone = session.undo().await.expect("undo delete_tree");
+    assert!(undone);
+
+    for uuid in [&parent_uuid, &child_uuid, &grandchild_uuid] {
+        let task = session
+            .get_task(uuid.clone())
+            .await
+            .expect("get task after undo")
+            .expect("task exists after undo");
+        assert!(matches!(task.status, FfiStatus::Pending));
+        assert_eq!(task.end, None);
+    }
+
+    let deleted_child = session
+        .get_task(already_deleted_uuid.clone())
+        .await
+        .expect("get deleted child after undo")
+        .expect("deleted child exists after undo");
+    assert!(matches!(deleted_child.status, FfiStatus::Deleted));
+}
+
+#[tokio::test]
+async fn test_delete_tree_dry_run_does_not_mutate() {
+    let session = make_session();
+    let parent_uuid = Uuid::new_v4().to_string();
+    let child_uuid = Uuid::new_v4().to_string();
+
+    session
+        .create_task(parent_uuid.clone(), "Parent".into())
+        .await
+        .expect("create parent");
+    session
+        .create_task(child_uuid.clone(), "Child".into())
+        .await
+        .expect("create child");
+    session
+        .mutate_task(
+            child_uuid.clone(),
+            vec![TaskMutation::SetParent {
+                uuid: Some(parent_uuid.clone()),
+            }],
+        )
+        .await
+        .expect("set child parent");
+
+    let preview = session
+        .delete_tree(parent_uuid.clone(), true)
+        .await
+        .expect("delete tree dry run");
+    let preview_uuids: Vec<_> = preview.iter().map(|t| t.uuid.as_str()).collect();
+    assert_eq!(preview_uuids.len(), 2);
+    assert!(preview_uuids.contains(&parent_uuid.as_str()));
+    assert!(preview_uuids.contains(&child_uuid.as_str()));
+
+    for uuid in [&parent_uuid, &child_uuid] {
+        let task = session
+            .get_task(uuid.clone())
+            .await
+            .expect("get task after dry run")
+            .expect("task exists after dry run");
+        assert!(matches!(task.status, FfiStatus::Pending));
+        assert_eq!(task.end, None);
+    }
+}
+
+#[tokio::test]
 async fn test_dependency_map_edge() {
     let session = make_session();
     let task_a = Uuid::new_v4().to_string();
