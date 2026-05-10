@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to coding agents when working with code in this repository.
 
 ## What is TaskChampion
 
@@ -51,3 +51,4 @@ Contains only `VersionId`/`NIL_VERSION_ID` types (used by `StorageTxn`) and `Syn
 - **Async throughout**: All storage traits use `async_trait`. Tests use `#[tokio::test]`.
 - **Feature flags**: Default features are `storage-powersync` and `bundled`.
 - **Strict lints**: `clippy::all`, `unreachable_pub`, `unnameable_types`, `clippy::dbg_macro` are all denied in `lib.rs`.
+- **Generated FFI bindings**: Do not hand-generate or commit changes to `Sources/TaskChampionFFI/TaskChampionFFI.swift` or `Sources/TaskChampionFFI/TaskChampionFFIFFI.h`. CI generates these bindings.
