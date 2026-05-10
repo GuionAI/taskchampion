@@ -488,7 +488,7 @@ async fn test_complete_tree_completes_pending_descendants_in_one_undo_group() {
         .expect("add dependency");
 
     let completed = session
-        .complete_tree(parent_uuid.clone(), None)
+        .complete_tree(parent_uuid.clone(), false)
         .await
         .expect("complete tree");
     let completed_uuids: Vec<_> = completed.iter().map(|t| t.uuid.as_str()).collect();
@@ -555,7 +555,7 @@ async fn test_complete_tree_rejects_non_pending_parent() {
         .await
         .expect("complete parent");
 
-    let result = session.complete_tree(parent_uuid.clone(), None).await;
+    let result = session.complete_tree(parent_uuid.clone(), false).await;
     assert!(
         matches!(result, Err(FfiError::InvalidInput { .. })),
         "expected InvalidInput for non-pending parent"
@@ -587,7 +587,7 @@ async fn test_complete_tree_dry_run_does_not_mutate() {
         .expect("set child parent");
 
     let preview = session
-        .complete_tree(parent_uuid.clone(), Some(true))
+        .complete_tree(parent_uuid.clone(), true)
         .await
         .expect("complete tree dry run");
     let preview_uuids: Vec<_> = preview.iter().map(|t| t.uuid.as_str()).collect();
@@ -663,7 +663,7 @@ async fn test_delete_tree_deletes_descendants_in_one_undo_group() {
         .expect("delete child upfront");
 
     let deleted = session
-        .delete_tree(parent_uuid.clone(), None)
+        .delete_tree(parent_uuid.clone(), false)
         .await
         .expect("delete tree");
     let deleted_uuids: Vec<_> = deleted.iter().map(|t| t.uuid.as_str()).collect();
@@ -733,7 +733,7 @@ async fn test_delete_tree_dry_run_does_not_mutate() {
         .expect("set child parent");
 
     let preview = session
-        .delete_tree(parent_uuid.clone(), Some(true))
+        .delete_tree(parent_uuid.clone(), true)
         .await
         .expect("delete tree dry run");
     let preview_uuids: Vec<_> = preview.iter().map(|t| t.uuid.as_str()).collect();

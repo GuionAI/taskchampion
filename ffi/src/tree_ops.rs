@@ -139,18 +139,20 @@ impl FfiSession {
     ///
     /// Returns the tasks changed by this call. A single `undo()` call reverses the
     /// whole tree completion. If `dry_run` is `true`, returns the tasks that
-    /// would be changed without writing anything; `None` defaults to `false`.
+    /// would be changed without writing anything. Foreign bindings default
+    /// `dry_run` to `false`.
+    #[uniffi::method(default(dry_run = false))]
     pub async fn complete_tree(
         &self,
         parent_uuid: String,
-        dry_run: Option<bool>,
+        dry_run: bool,
     ) -> Result<Vec<FfiTask>, FfiError> {
         self.with_replica(|mut replica| async move {
             mutate_tree_status(
                 &mut replica,
                 &parent_uuid,
                 TreeStatusMutation::Complete,
-                dry_run.unwrap_or(false),
+                dry_run,
             )
             .await
         })
@@ -161,18 +163,20 @@ impl FfiSession {
     ///
     /// Returns the tasks changed by this call. A single `undo()` call reverses the
     /// whole tree deletion. If `dry_run` is `true`, returns the tasks that would
-    /// be changed without writing anything; `None` defaults to `false`.
+    /// be changed without writing anything. Foreign bindings default `dry_run`
+    /// to `false`.
+    #[uniffi::method(default(dry_run = false))]
     pub async fn delete_tree(
         &self,
         parent_uuid: String,
-        dry_run: Option<bool>,
+        dry_run: bool,
     ) -> Result<Vec<FfiTask>, FfiError> {
         self.with_replica(|mut replica| async move {
             mutate_tree_status(
                 &mut replica,
                 &parent_uuid,
                 TreeStatusMutation::Delete,
-                dry_run.unwrap_or(false),
+                dry_run,
             )
             .await
         })
