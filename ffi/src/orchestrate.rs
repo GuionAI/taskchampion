@@ -1,10 +1,11 @@
 //! FFI types and exported functions for praxis completion orchestration.
 
 use crate::replica_ops::parse_uuid_ctx;
-use crate::tree::{ffi_to_task_descendant, FfiTaskDescendant};
-use crate::types::FfiError;
+use crate::types::{FfiError, FfiStatus};
 use praxis::orchestrate::{plan_completion, CompletionAction, RecurrenceParentInfo};
 use praxis::recurrence::mask::parse_mask;
+use praxis::tree::behavior::TaskDescendant;
+use taskchampion::Status;
 
 // ---------------------------------------------------------------------------
 // FFI types
@@ -36,6 +37,24 @@ pub enum FfiCompletionAction {
         template_uuid: String,
         new_mask: String,
     },
+}
+
+/// A task in the tree hierarchy, with status info for completion planning.
+#[derive(uniffi::Record)]
+pub struct FfiTaskDescendant {
+    /// Task UUID as a string.
+    pub uuid: String,
+    /// Task status.
+    pub status: FfiStatus,
+}
+
+fn ffi_to_task_descendant(d: FfiTaskDescendant) -> Result<TaskDescendant, FfiError> {
+    let uuid = parse_uuid_ctx(&d.uuid, "descendant UUID")?;
+    Ok(TaskDescendant {
+        uuid,
+        status: Status::from(d.status),
+        has_wait: false,
+    })
 }
 
 // ---------------------------------------------------------------------------

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use taskchampion::{
     position::{append_position, between_position, prepend_position},
     storage::tc_config::TcConfig,
-    ExternalStorage, Operation, Operations, Replica, Status, Tag, TreeMap,
+    ExternalStorage, Operation, Operations, Replica, Status, Tag,
 };
 use uuid::Uuid;
 
@@ -160,75 +160,6 @@ impl FfiSession {
             let task_uuid = parse_uuid(&uuid)?;
             let task = replica.get_task(task_uuid).await.map_err(FfiError::from)?;
             Ok(task.as_ref().map(FfiTask::from))
-        })
-        .await
-    }
-
-    /// Complete `parent_uuid` and all pending descendants in one operation group.
-    ///
-    /// Returns the tasks changed by this call. A single `undo()` call reverses the
-    /// whole tree completion.
-    pub async fn complete_tree(&self, parent_uuid: String) -> Result<Vec<FfiTask>, FfiError> {
-        self.with_replica(|mut replica| async move {
-            let parent = parse_uuid(&parent_uuid)?;
-            let mut all_tasks = replica.all_tasks().await.map_err(FfiError::from)?;
-            let tree = TreeMap::from_tasks(&all_tasks);
-
-            let parent_task = all_tasks
-                .get(&parent)
-                .ok_or_else(|| FfiError::TaskNotFound {
-                    uuid: parent_uuid.clone(),
-                })?;
-            if parent_task.get_status() != Status::Pending {
-                return Err(FfiError::InvalidInput {
-                    message: format!("Task {parent_uuid} is not pending"),
-                });
-            }
-
-            let mut ops = Operations::new();
-            ops.push(Operation::UndoPoint);
-
-            let mut to_complete = Vec::new();
-            to_complete.push(parent);
-            to_complete.extend(tree.descendants(parent).into_iter().filter(|uuid| {
-                all_tasks
-                    .get(uuid)
-                    .is_some_and(|task| task.get_status() == Status::Pending)
-            }));
-
-            for uuid in &to_complete {
-                let task = all_tasks
-                    .get_mut(uuid)
-                    .ok_or_else(|| FfiError::TaskNotFound {
-                        uuid: uuid.to_string(),
-                    })?;
-                if task.get_value("xstatus").is_some() {
-                    task.set_value("xstatus", None::<String>, &mut ops)
-                        .map_err(FfiError::from)?;
-                }
-                task.done(&mut ops).map_err(FfiError::from)?;
-            }
-
-            replica
-                .commit_operations(ops)
-                .await
-                .map_err(FfiError::from)?;
-
-            replica.dependency_map(true).await.map_err(FfiError::from)?;
-
-            let mut completed = Vec::with_capacity(to_complete.len());
-            for uuid in to_complete {
-                let task = replica
-                    .get_task(uuid)
-                    .await
-                    .map_err(FfiError::from)?
-                    .ok_or_else(|| FfiError::Internal {
-                        message: format!("Task {uuid} missing after complete_tree"),
-                    })?;
-                completed.push(FfiTask::from(&task));
-            }
-
-            Ok(completed)
         })
         .await
     }

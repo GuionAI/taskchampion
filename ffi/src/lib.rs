@@ -5,5 +5,5 @@ pub mod orchestrate;
 pub mod recurrence;
 pub mod replica_ops;
 pub mod task_ops;
-pub mod tree;
+pub mod tree_ops;
 pub mod types;
