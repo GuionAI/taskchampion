@@ -196,10 +196,9 @@ impl FfiSession {
                     .is_some_and(|task| task.get_status() == Status::Pending)
             }));
 
-            let mut completed = Vec::with_capacity(to_complete.len());
-            for uuid in to_complete {
+            for uuid in &to_complete {
                 let task = all_tasks
-                    .get_mut(&uuid)
+                    .get_mut(uuid)
                     .ok_or_else(|| FfiError::TaskNotFound {
                         uuid: uuid.to_string(),
                     })?;
@@ -208,13 +207,26 @@ impl FfiSession {
                         .map_err(FfiError::from)?;
                 }
                 task.done(&mut ops).map_err(FfiError::from)?;
-                completed.push(FfiTask::from(&*task));
             }
 
             replica
                 .commit_operations(ops)
                 .await
                 .map_err(FfiError::from)?;
+
+            replica.dependency_map(true).await.map_err(FfiError::from)?;
+
+            let mut completed = Vec::with_capacity(to_complete.len());
+            for uuid in to_complete {
+                let task = replica
+                    .get_task(uuid)
+                    .await
+                    .map_err(FfiError::from)?
+                    .ok_or_else(|| FfiError::Internal {
+                        message: format!("Task {uuid} missing after complete_tree"),
+                    })?;
+                completed.push(FfiTask::from(&task));
+            }
 
             Ok(completed)
         })

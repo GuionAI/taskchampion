@@ -424,6 +424,7 @@ async fn test_complete_tree_completes_pending_descendants_in_one_undo_group() {
     let child_uuid = Uuid::new_v4().to_string();
     let grandchild_uuid = Uuid::new_v4().to_string();
     let already_done_uuid = Uuid::new_v4().to_string();
+    let dependent_uuid = Uuid::new_v4().to_string();
 
     session
         .create_task(parent_uuid.clone(), "Parent".into())
@@ -441,6 +442,10 @@ async fn test_complete_tree_completes_pending_descendants_in_one_undo_group() {
         .create_task(already_done_uuid.clone(), "Already done".into())
         .await
         .expect("create done child");
+    session
+        .create_task(dependent_uuid.clone(), "Depends on parent".into())
+        .await
+        .expect("create dependent");
 
     session
         .mutate_task(
@@ -472,6 +477,15 @@ async fn test_complete_tree_completes_pending_descendants_in_one_undo_group() {
         )
         .await
         .expect("complete child upfront");
+    session
+        .mutate_task(
+            dependent_uuid.clone(),
+            vec![TaskMutation::AddDependency {
+                uuid: parent_uuid.clone(),
+            }],
+        )
+        .await
+        .expect("add dependency");
 
     let completed = session
         .complete_tree(parent_uuid.clone())
@@ -483,6 +497,14 @@ async fn test_complete_tree_completes_pending_descendants_in_one_undo_group() {
     assert!(completed_uuids.contains(&child_uuid.as_str()));
     assert!(completed_uuids.contains(&grandchild_uuid.as_str()));
     assert!(!completed_uuids.contains(&already_done_uuid.as_str()));
+    let completed_parent = completed
+        .iter()
+        .find(|t| t.uuid == parent_uuid)
+        .expect("parent returned");
+    assert!(
+        !completed_parent.is_blocking,
+        "completed parent should not be returned with stale dependency state"
+    );
 
     for uuid in [
         &parent_uuid,
