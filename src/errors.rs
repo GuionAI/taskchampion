@@ -8,7 +8,7 @@ pub enum Error {
     /// A PostgreSQL error via pgwire
     #[cfg(feature = "storage-pgwire")]
     #[error("Database error: {}", format_pgwire_err(.0))]
-    PgWire(sqlx_core::Error),
+    PgWire(sqlx::Error),
     /// PostgreSQL unique constraint violation via pgwire.
     #[cfg(feature = "storage-pgwire")]
     #[error("Database error: unique violation: {0}")]
@@ -22,7 +22,7 @@ pub enum Error {
     #[error("Database error: {context}: {}", format_pgwire_err(.source))]
     PgWireQuery {
         context: String,
-        source: sqlx_core::Error,
+        source: sqlx::Error,
     },
     /// A task-database-related error
     #[error("Task Database Error: {0}")]
@@ -71,15 +71,15 @@ impl<T: Sync + Send + 'static> From<tokio::sync::mpsc::error::SendError<T>> for 
 }
 
 #[cfg(feature = "storage-pgwire")]
-impl From<sqlx_core::Error> for Error {
+impl From<sqlx::Error> for Error {
     #[inline]
-    fn from(e: sqlx_core::Error) -> Self {
+    fn from(e: sqlx::Error) -> Self {
         classify_pg(e)
     }
 }
 
 #[cfg(feature = "storage-pgwire")]
-pub(crate) fn pgwire_context(context: impl Into<String>, source: sqlx_core::Error) -> Error {
+pub(crate) fn pgwire_context(context: impl Into<String>, source: sqlx::Error) -> Error {
     let context = context.into();
     if let Some(classified) = classify_pg_message(
         &source,
@@ -92,12 +92,12 @@ pub(crate) fn pgwire_context(context: impl Into<String>, source: sqlx_core::Erro
 }
 
 #[cfg(feature = "storage-pgwire")]
-pub(crate) fn classify_pg(e: sqlx_core::Error) -> Error {
+pub(crate) fn classify_pg(e: sqlx::Error) -> Error {
     classify_pg_message(&e, format_pgwire_err(&e)).unwrap_or(Error::PgWire(e))
 }
 
 #[cfg(feature = "storage-pgwire")]
-fn classify_pg_message(e: &sqlx_core::Error, message: String) -> Option<Error> {
+fn classify_pg_message(e: &sqlx::Error, message: String) -> Option<Error> {
     match pg_sqlstate_kind(e)? {
         PgSqlStateKind::UniqueViolation => Some(Error::UniqueViolation(message)),
         PgSqlStateKind::ForeignKeyViolation => Some(Error::ForeignKeyViolation(message)),
@@ -105,7 +105,7 @@ fn classify_pg_message(e: &sqlx_core::Error, message: String) -> Option<Error> {
 }
 
 #[cfg(feature = "storage-pgwire")]
-fn pg_sqlstate_kind(e: &sqlx_core::Error) -> Option<PgSqlStateKind> {
+fn pg_sqlstate_kind(e: &sqlx::Error) -> Option<PgSqlStateKind> {
     let db = e.as_database_error()?;
     let code = db.code()?;
     match &*code {
@@ -122,7 +122,7 @@ enum PgSqlStateKind {
 }
 
 #[cfg(feature = "storage-pgwire")]
-pub(crate) fn format_pgwire_err(e: &sqlx_core::Error) -> String {
+pub(crate) fn format_pgwire_err(e: &sqlx::Error) -> String {
     let Some(db) = e.as_database_error() else {
         return e.to_string();
     };
@@ -135,7 +135,7 @@ pub(crate) fn format_pgwire_err(e: &sqlx_core::Error) -> String {
     }
     out.push_str(db.message());
 
-    if let Some(pg) = db.try_downcast_ref::<sqlx_postgres::PgDatabaseError>() {
+    if let Some(pg) = db.try_downcast_ref::<sqlx::postgres::PgDatabaseError>() {
         append_pg_field(&mut out, "schema", pg.schema());
         append_pg_field(&mut out, "table", pg.table());
         append_pg_field(&mut out, "column", pg.column());
@@ -164,7 +164,7 @@ fn append_pg_field(out: &mut String, name: &str, value: Option<&str>) {
 #[cfg(all(test, feature = "storage-pgwire"))]
 mod tests {
     use super::*;
-    use sqlx_core::error::{DatabaseError, ErrorKind};
+    use sqlx::error::{DatabaseError, ErrorKind};
     use std::borrow::Cow;
     use std::error::Error as StdError;
     use std::fmt;
@@ -209,8 +209,8 @@ mod tests {
         }
     }
 
-    fn db_error(code: Option<&'static str>) -> sqlx_core::Error {
-        sqlx_core::Error::Database(Box::new(FakeDatabaseError {
+    fn db_error(code: Option<&'static str>) -> sqlx::Error {
+        sqlx::Error::Database(Box::new(FakeDatabaseError {
             code,
             message: "synthetic database error",
         }))
@@ -248,7 +248,7 @@ mod tests {
 
     #[test]
     fn classify_pg_non_database_error_falls_through() {
-        match classify_pg(sqlx_core::Error::RowNotFound) {
+        match classify_pg(sqlx::Error::RowNotFound) {
             Error::PgWire(_) => {}
             other => panic!("expected pgwire fallback, got {other:?}"),
         }

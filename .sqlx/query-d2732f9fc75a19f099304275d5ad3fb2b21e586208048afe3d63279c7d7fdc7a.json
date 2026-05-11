@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE tc_tasks SET\n                    data = $1,\n                    status = $2,\n                    description = $3,\n                    priority = $4,\n                    entry_at = $5,\n                    modified_at = $6,\n                    due_at = $7,\n                    scheduled_at = $8,\n                    start_at = $9,\n                    end_at = $10,\n                    wait_at = $11,\n                    parent_id = $12,\n                    project_id = $13,\n                    note_id = $14\n                WHERE id = $15\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Jsonb",
+        "Text",
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d2732f9fc75a19f099304275d5ad3fb2b21e586208048afe3d63279c7d7fdc7a"
+}

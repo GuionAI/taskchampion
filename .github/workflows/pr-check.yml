@@ -31,5 +31,8 @@ jobs:
           rustup component add clippy
           cargo clippy --no-default-features --features storage-powersync --no-deps -- -D warnings
 
+      - name: pgwire sqlx offline check
+        run: SQLX_OFFLINE=true cargo check --no-default-features --features storage-pgwire
+
       - name: test
         run: cargo test --no-default-features --features storage-powersync

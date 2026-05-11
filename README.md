@@ -20,6 +20,21 @@ The Rust API, as defined in [the docs](https://docs.rs/taskchampion/latest/taskc
 
 The Rust API follows semantic versioning.
 
+## SQLx query metadata
+
+The pgwire storage backend uses SQLx compile-time query checks. CI verifies those
+queries in offline mode using the committed `.sqlx/` metadata.
+
+After changing a `sqlx::query!`, `sqlx::query_as!`, or `sqlx::query_scalar!` call,
+run this against a local backend schema and commit the updated `.sqlx/` files:
+
+```bash
+./scripts/sqlx-prepare.sh
+```
+
+Set `SQLX_POSTGRES_DATABASE_URL` if your local database is not available at the
+script default URL.
+
 ## iOS & macOS (Swift Package Manager)
 
 The `ffi/` crate provides a UniFFI-based FFI layer for iOS and macOS consumption via SPM.

@@ -1,18 +1,13 @@
 //! Postgres storage backend via pgwire.
 //!
 //! Connects to `pgwire-supabase-proxy` using a Supabase JWT for authentication.
-//! Uses `sqlx_core::Transaction` for real Postgres transactions.
+//! Uses `sqlx::Transaction` for real Postgres transactions.
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use sqlx_core::connection::Connection;
-use sqlx_core::executor::Executor;
-use sqlx_core::query::query;
-use sqlx_core::query_as::query_as;
-use sqlx_core::query_scalar::query_scalar;
-use sqlx_core::transaction::Transaction;
-use sqlx_core::types::Json;
-use sqlx_postgres::{PgConnection, Postgres};
+use sqlx::postgres::PgConnection;
+use sqlx::types::Json;
+use sqlx::{Connection, Executor, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::errors::{pgwire_context, Error, Result};
@@ -111,11 +106,13 @@ impl<'a> PgWireTxn<'a> {
 
     /// Check if a task with the given UUID exists.
     async fn task_exists(exec: impl Executor<'_, Database = Postgres>, uuid: Uuid) -> Result<bool> {
-        let exists: bool = query_scalar("SELECT EXISTS(SELECT 1 FROM tc_tasks WHERE id = $1)")
-            .bind(uuid)
-            .fetch_one(exec)
-            .await
-            .map_err(|e| pgwire_context(format!("task_exists query uuid={uuid}"), e))?;
+        let exists: bool = sqlx::query_scalar!(
+            "SELECT EXISTS(SELECT 1 FROM tc_tasks WHERE id = $1) as \"exists!\"",
+            uuid
+        )
+        .fetch_one(exec)
+        .await
+        .map_err(|e| pgwire_context(format!("task_exists query uuid={uuid}"), e))?;
         Ok(exists)
     }
 
@@ -124,16 +121,15 @@ impl<'a> PgWireTxn<'a> {
         exec: impl Executor<'_, Database = Postgres>,
         name: &str,
     ) -> Result<String> {
-        let row: Option<(Uuid,)> =
-            query_as("SELECT id FROM projects WHERE name = $1 ORDER BY created_at ASC LIMIT 1")
-                .bind(name)
-                .fetch_optional(exec)
-                .await
-                .map_err(|e| {
-                    pgwire_context(format!("resolve_project_id query name={name:?}"), e)
-                })?;
-        match row {
-            Some((id,)) => Ok(id.to_string()),
+        let id = sqlx::query_scalar!(
+            r#"SELECT id as "id!" FROM projects WHERE name = $1 ORDER BY created_at ASC LIMIT 1"#,
+            name
+        )
+        .fetch_optional(exec)
+        .await
+        .map_err(|e| pgwire_context(format!("resolve_project_id query name={name:?}"), e))?;
+        match id {
+            Some(id) => Ok(id.to_string()),
             None => Err(Error::ProjectNotFound(name.to_string())),
         }
     }
@@ -151,15 +147,36 @@ impl Drop for PgWireTxn<'_> {
 impl<'a> StorageTxn for PgWireTxn<'a> {
     async fn get_task(&mut self, uuid: Uuid) -> Result<Option<TaskMap>> {
         let t = self.get_txn()?;
-        let sql = format!(
-            "SELECT {} FROM tc_tasks t LEFT JOIN projects p ON t.project_id = p.id WHERE t.id = $1 LIMIT 1",
-            crate::storage::columns::TASK_SELECT_COLS
-        );
-        let rows: Vec<TaskPgRow> = query_as::<_, TaskPgRow>(&sql)
-            .bind(uuid)
-            .fetch_all(&mut **t)
-            .await
-            .map_err(|e| pgwire_context(format!("get_task query uuid={uuid}"), e))?;
+        let rows: Vec<TaskPgRow> = sqlx::query_as!(
+            TaskPgRow,
+            r#"
+            SELECT
+                t.id,
+                t.data as "data: serde_json::Value",
+                t.status,
+                t.description,
+                t.priority,
+                t.entry_at,
+                t.modified_at,
+                t.due_at,
+                t.scheduled_at,
+                t.start_at,
+                t.end_at,
+                t.wait_at,
+                t.parent_id,
+                p.name as "project_name?",
+                t.project_id,
+                t.note_id
+            FROM tc_tasks t
+            LEFT JOIN projects p ON t.project_id = p.id
+            WHERE t.id = $1
+            LIMIT 1
+            "#,
+            uuid
+        )
+        .fetch_all(&mut **t)
+        .await
+        .map_err(|e| pgwire_context(format!("get_task query uuid={uuid}"), e))?;
         match rows.into_iter().next() {
             None => Ok(None),
             Some(row) => {
@@ -173,14 +190,34 @@ impl<'a> StorageTxn for PgWireTxn<'a> {
 
     async fn get_pending_tasks(&mut self) -> Result<Vec<(Uuid, TaskMap)>> {
         let t = self.get_txn()?;
-        let sql = format!(
-            "SELECT {} FROM tc_tasks t LEFT JOIN projects p ON t.project_id = p.id WHERE t.status = 'pending'",
-            crate::storage::columns::TASK_SELECT_COLS
-        );
-        let rows: Vec<TaskPgRow> = query_as::<_, TaskPgRow>(&sql)
-            .fetch_all(&mut **t)
-            .await
-            .map_err(|e| pgwire_context("get_pending_tasks query", e))?;
+        let rows: Vec<TaskPgRow> = sqlx::query_as!(
+            TaskPgRow,
+            r#"
+            SELECT
+                t.id,
+                t.data as "data: serde_json::Value",
+                t.status,
+                t.description,
+                t.priority,
+                t.entry_at,
+                t.modified_at,
+                t.due_at,
+                t.scheduled_at,
+                t.start_at,
+                t.end_at,
+                t.wait_at,
+                t.parent_id,
+                p.name as "project_name?",
+                t.project_id,
+                t.note_id
+            FROM tc_tasks t
+            LEFT JOIN projects p ON t.project_id = p.id
+            WHERE t.status = 'pending'
+            "#
+        )
+        .fetch_all(&mut **t)
+        .await
+        .map_err(|e| pgwire_context("get_pending_tasks query", e))?;
         rows_to_tasks(rows)
     }
 
@@ -189,8 +226,7 @@ impl<'a> StorageTxn for PgWireTxn<'a> {
             return Ok(false);
         }
         let t = self.get_txn()?;
-        query("INSERT INTO tc_tasks (id, data) VALUES ($1, '{}')")
-            .bind(uuid)
+        sqlx::query!("INSERT INTO tc_tasks (id, data) VALUES ($1, '{}')", uuid)
             .execute(&mut **t)
             .await
             .map_err(|e| pgwire_context(format!("create_task insert uuid={uuid}"), e))?;
@@ -225,52 +261,70 @@ impl<'a> StorageTxn for PgWireTxn<'a> {
             .map_err(|e| Error::Database(format!("set_task parse data: {e}")))?;
 
         if Self::task_exists(&mut *t_ref, uuid).await? {
-            query(
-                "UPDATE tc_tasks SET data = $1, status = $2, description = $3, \
-                 priority = $4, entry_at = $5, modified_at = $6, due_at = $7, \
-                 scheduled_at = $8, start_at = $9, end_at = $10, wait_at = $11, \
-                 parent_id = $12, project_id = $13, note_id = $14 WHERE id = $15",
+            sqlx::query!(
+                r#"
+                UPDATE tc_tasks SET
+                    data = $1,
+                    status = $2,
+                    description = $3,
+                    priority = $4,
+                    entry_at = $5,
+                    modified_at = $6,
+                    due_at = $7,
+                    scheduled_at = $8,
+                    start_at = $9,
+                    end_at = $10,
+                    wait_at = $11,
+                    parent_id = $12,
+                    project_id = $13,
+                    note_id = $14
+                WHERE id = $15
+                "#,
+                Json(&data_val) as _,
+                prepared.status,
+                prepared.description,
+                prepared.priority,
+                entry_at,
+                modified_at,
+                due_at,
+                scheduled_at,
+                start_at,
+                end_at,
+                wait_at,
+                parent_id,
+                project_id,
+                note_id,
+                uuid
             )
-            .bind(&data_val)
-            .bind(&prepared.status)
-            .bind(&prepared.description)
-            .bind(&prepared.priority)
-            .bind(entry_at)
-            .bind(modified_at)
-            .bind(due_at)
-            .bind(scheduled_at)
-            .bind(start_at)
-            .bind(end_at)
-            .bind(wait_at)
-            .bind(parent_id)
-            .bind(project_id)
-            .bind(note_id)
-            .bind(uuid)
             .execute(&mut *t_ref)
             .await
             .map_err(|e| pgwire_context(format!("set_task update uuid={uuid}"), e))?;
         } else {
-            query(
-                "INSERT INTO tc_tasks (id, data, status, description, priority, \
-                 entry_at, modified_at, due_at, scheduled_at, start_at, end_at, \
-                 wait_at, parent_id, project_id, note_id) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
+            sqlx::query!(
+                r#"
+                INSERT INTO tc_tasks (
+                    id, data, status, description, priority,
+                    entry_at, modified_at, due_at, scheduled_at, start_at,
+                    end_at, wait_at, parent_id, project_id, note_id
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                "#,
+                uuid,
+                Json(&data_val) as _,
+                prepared.status,
+                prepared.description,
+                prepared.priority,
+                entry_at,
+                modified_at,
+                due_at,
+                scheduled_at,
+                start_at,
+                end_at,
+                wait_at,
+                parent_id,
+                project_id,
+                note_id
             )
-            .bind(uuid)
-            .bind(&data_val)
-            .bind(&prepared.status)
-            .bind(&prepared.description)
-            .bind(&prepared.priority)
-            .bind(entry_at)
-            .bind(modified_at)
-            .bind(due_at)
-            .bind(scheduled_at)
-            .bind(start_at)
-            .bind(end_at)
-            .bind(wait_at)
-            .bind(parent_id)
-            .bind(project_id)
-            .bind(note_id)
             .execute(&mut *t_ref)
             .await
             .map_err(|e| pgwire_context(format!("set_task insert uuid={uuid}"), e))?;
@@ -283,8 +337,7 @@ impl<'a> StorageTxn for PgWireTxn<'a> {
         if !Self::task_exists(&mut **t, uuid).await? {
             return Ok(false);
         }
-        let n = query::<Postgres>("DELETE FROM tc_tasks WHERE id = $1")
-            .bind(uuid)
+        let n = sqlx::query!("DELETE FROM tc_tasks WHERE id = $1", uuid)
             .execute(&mut **t)
             .await
             .map_err(|e| pgwire_context(format!("delete_task delete uuid={uuid}"), e))?
@@ -294,20 +347,39 @@ impl<'a> StorageTxn for PgWireTxn<'a> {
 
     async fn all_tasks(&mut self) -> Result<Vec<(Uuid, TaskMap)>> {
         let t = self.get_txn()?;
-        let sql = format!(
-            "SELECT {} FROM tc_tasks t LEFT JOIN projects p ON t.project_id = p.id",
-            crate::storage::columns::TASK_SELECT_COLS
-        );
-        let rows: Vec<TaskPgRow> = query_as::<_, TaskPgRow>(&sql)
-            .fetch_all(&mut **t)
-            .await
-            .map_err(|e| pgwire_context("all_tasks query", e))?;
+        let rows: Vec<TaskPgRow> = sqlx::query_as!(
+            TaskPgRow,
+            r#"
+            SELECT
+                t.id,
+                t.data as "data: serde_json::Value",
+                t.status,
+                t.description,
+                t.priority,
+                t.entry_at,
+                t.modified_at,
+                t.due_at,
+                t.scheduled_at,
+                t.start_at,
+                t.end_at,
+                t.wait_at,
+                t.parent_id,
+                p.name as "project_name?",
+                t.project_id,
+                t.note_id
+            FROM tc_tasks t
+            LEFT JOIN projects p ON t.project_id = p.id
+            "#
+        )
+        .fetch_all(&mut **t)
+        .await
+        .map_err(|e| pgwire_context("all_tasks query", e))?;
         rows_to_tasks(rows)
     }
 
     async fn all_task_uuids(&mut self) -> Result<Vec<Uuid>> {
         let t = self.get_txn()?;
-        let ids: Vec<Uuid> = query_scalar("SELECT id FROM tc_tasks")
+        let ids: Vec<Uuid> = sqlx::query_scalar!("SELECT id FROM tc_tasks")
             .fetch_all(&mut **t)
             .await
             .map_err(|e| pgwire_context("all_task_uuids query", e))?;
@@ -342,26 +414,31 @@ impl<'a> StorageTxn for PgWireTxn<'a> {
 
     async fn get_all_tags(&mut self) -> Result<Vec<String>> {
         let t = self.get_txn()?;
-        let rows: Vec<(String,)> = query_as(
-            "SELECT DISTINCT kv.key AS name \
-             FROM tc_tasks, jsonb_each_text(data) AS kv \
-             WHERE kv.key LIKE 'tag_%' \
-             ORDER BY name",
+        let rows: Vec<String> = sqlx::query_scalar!(
+            r#"
+            SELECT DISTINCT kv.key AS "name!"
+            FROM tc_tasks, jsonb_each_text(data) AS kv
+            WHERE kv.key LIKE 'tag_%'
+            ORDER BY kv.key
+            "#
         )
         .fetch_all(&mut **t)
         .await
         .map_err(|e| pgwire_context("get_all_tags query", e))?;
         rows.into_iter()
-            .map(|(key,)| Ok(key.strip_prefix("tag_").unwrap_or(&key).to_string()))
+            .map(|key| Ok(key.strip_prefix("tag_").unwrap_or(&key).to_string()))
             .collect()
     }
 
     async fn get_tc_config(&mut self) -> Result<Option<String>> {
         let t = self.get_txn()?;
-        let row: Option<SettingsPgRow> = query_as("SELECT tc_config FROM settings LIMIT 1")
-            .fetch_optional(&mut **t)
-            .await
-            .map_err(|e| pgwire_context("get_tc_config query", e))?;
+        let row: Option<SettingsPgRow> = sqlx::query_as!(
+            SettingsPgRow,
+            r#"SELECT tc_config as "tc_config?: serde_json::Value" FROM settings LIMIT 1"#
+        )
+        .fetch_optional(&mut **t)
+        .await
+        .map_err(|e| pgwire_context("get_tc_config query", e))?;
         Ok(row
             .and_then(|r| r.tc_config)
             .map(|v| {
@@ -375,8 +452,7 @@ impl<'a> StorageTxn for PgWireTxn<'a> {
         let json_val: serde_json::Value = serde_json::from_str(&value)
             .map_err(|e| Error::Database(format!("set_tc_config parse: {e}")))?;
         let t = self.get_txn()?;
-        let n = query::<Postgres>("UPDATE settings SET tc_config = $1")
-            .bind(Json(json_val))
+        let n = sqlx::query!("UPDATE settings SET tc_config = $1", Json(json_val) as _)
             .execute(&mut **t)
             .await
             .map_err(|e| pgwire_context("set_tc_config update", e))?
