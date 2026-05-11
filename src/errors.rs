@@ -7,8 +7,15 @@ use thiserror::Error;
 pub enum Error {
     /// A PostgreSQL error via pgwire
     #[cfg(feature = "storage-pgwire")]
-    #[error("Database error: {0}")]
+    #[error("Database error: {}", format_pgwire_err(.0))]
     PgWire(sqlx_core::Error),
+    /// A PostgreSQL error via pgwire, with the operation that failed.
+    #[cfg(feature = "storage-pgwire")]
+    #[error("Database error: {context}: {}", format_pgwire_err(.source))]
+    PgWireQuery {
+        context: String,
+        source: sqlx_core::Error,
+    },
     /// A task-database-related error
     #[error("Task Database Error: {0}")]
     Database(String),
@@ -60,6 +67,54 @@ impl From<sqlx_core::Error> for Error {
     #[inline]
     fn from(e: sqlx_core::Error) -> Self {
         Self::PgWire(e)
+    }
+}
+
+#[cfg(feature = "storage-pgwire")]
+pub(crate) fn pgwire_context(context: impl Into<String>, source: sqlx_core::Error) -> Error {
+    Error::PgWireQuery {
+        context: context.into(),
+        source,
+    }
+}
+
+#[cfg(feature = "storage-pgwire")]
+pub(crate) fn format_pgwire_err(e: &sqlx_core::Error) -> String {
+    let Some(db) = e.as_database_error() else {
+        return e.to_string();
+    };
+
+    let mut out = String::new();
+    if let Some(code) = db.code() {
+        out.push_str("SQLSTATE ");
+        out.push_str(&code);
+        out.push_str(": ");
+    }
+    out.push_str(db.message());
+
+    if let Some(pg) = db.try_downcast_ref::<sqlx_postgres::PgDatabaseError>() {
+        append_pg_field(&mut out, "schema", pg.schema());
+        append_pg_field(&mut out, "table", pg.table());
+        append_pg_field(&mut out, "column", pg.column());
+        append_pg_field(&mut out, "constraint", pg.constraint());
+        append_pg_field(&mut out, "detail", pg.detail());
+        append_pg_field(&mut out, "hint", pg.hint());
+    } else {
+        append_pg_field(&mut out, "table", db.table());
+        append_pg_field(&mut out, "constraint", db.constraint());
+    }
+
+    out
+}
+
+#[cfg(feature = "storage-pgwire")]
+fn append_pg_field(out: &mut String, name: &str, value: Option<&str>) {
+    if let Some(value) = value.filter(|v| !v.is_empty()) {
+        out.push_str(" (");
+        out.push_str(name);
+        out.push_str(": ");
+        out.push_str(value);
+        out.push(')');
     }
 }
 

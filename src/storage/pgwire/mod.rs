@@ -15,7 +15,7 @@ use sqlx_core::types::Json;
 use sqlx_postgres::{PgConnection, Postgres};
 use uuid::Uuid;
 
-use crate::errors::{Error, Result};
+use crate::errors::{pgwire_context, Error, Result};
 use crate::operation::Operation;
 use crate::storage::columns::raw_to_task;
 use crate::storage::sql_ops::prepare_task;
@@ -77,7 +77,9 @@ impl PgWireStorage {
     /// - `token`: Supabase JWT. Kept for backwards compatibility — this parameter is no longer
     ///   used internally. The caller may use this token for user_id extraction (JWT sub claim).
     pub async fn new(database_url: &str, _token: &str) -> Result<Self> {
-        let conn = PgConnection::connect(database_url).await?;
+        let conn = PgConnection::connect(database_url)
+            .await
+            .map_err(|e| pgwire_context("connect", e))?;
         Ok(Self { conn })
     }
 }
@@ -85,7 +87,11 @@ impl PgWireStorage {
 #[async_trait]
 impl Storage for PgWireStorage {
     async fn txn<'a>(&'a mut self) -> Result<Box<dyn StorageTxn + Send + 'a>> {
-        let txn = self.conn.begin().await?;
+        let txn = self
+            .conn
+            .begin()
+            .await
+            .map_err(|e| pgwire_context("begin transaction", e))?;
         Ok(Box::new(PgWireTxn { txn: Some(txn) }))
     }
 }
@@ -108,7 +114,8 @@ impl<'a> PgWireTxn<'a> {
         let exists: bool = query_scalar("SELECT EXISTS(SELECT 1 FROM tc_tasks WHERE id = $1)")
             .bind(uuid)
             .fetch_one(exec)
-            .await?;
+            .await
+            .map_err(|e| pgwire_context(format!("task_exists query uuid={uuid}"), e))?;
         Ok(exists)
     }
 
@@ -121,7 +128,10 @@ impl<'a> PgWireTxn<'a> {
             query_as("SELECT id FROM projects WHERE name = $1 ORDER BY created_at ASC LIMIT 1")
                 .bind(name)
                 .fetch_optional(exec)
-                .await?;
+                .await
+                .map_err(|e| {
+                    pgwire_context(format!("resolve_project_id query name={name:?}"), e)
+                })?;
         match row {
             Some((id,)) => Ok(id.to_string()),
             None => Err(Error::ProjectNotFound(name.to_string())),
@@ -148,7 +158,8 @@ impl<'a> StorageTxn for PgWireTxn<'a> {
         let rows: Vec<TaskPgRow> = query_as::<_, TaskPgRow>(&sql)
             .bind(uuid)
             .fetch_all(&mut **t)
-            .await?;
+            .await
+            .map_err(|e| pgwire_context(format!("get_task query uuid={uuid}"), e))?;
         match rows.into_iter().next() {
             None => Ok(None),
             Some(row) => {
@@ -166,7 +177,10 @@ impl<'a> StorageTxn for PgWireTxn<'a> {
             "SELECT {} FROM tc_tasks t LEFT JOIN projects p ON t.project_id = p.id WHERE t.status = 'pending'",
             crate::storage::columns::TASK_SELECT_COLS
         );
-        let rows: Vec<TaskPgRow> = query_as::<_, TaskPgRow>(&sql).fetch_all(&mut **t).await?;
+        let rows: Vec<TaskPgRow> = query_as::<_, TaskPgRow>(&sql)
+            .fetch_all(&mut **t)
+            .await
+            .map_err(|e| pgwire_context("get_pending_tasks query", e))?;
         rows_to_tasks(rows)
     }
 
@@ -178,7 +192,8 @@ impl<'a> StorageTxn for PgWireTxn<'a> {
         query("INSERT INTO tc_tasks (id, data) VALUES ($1, '{}')")
             .bind(uuid)
             .execute(&mut **t)
-            .await?;
+            .await
+            .map_err(|e| pgwire_context(format!("create_task insert uuid={uuid}"), e))?;
         Ok(true)
     }
 
@@ -232,7 +247,8 @@ impl<'a> StorageTxn for PgWireTxn<'a> {
             .bind(note_id)
             .bind(uuid)
             .execute(&mut *t_ref)
-            .await?;
+            .await
+            .map_err(|e| pgwire_context(format!("set_task update uuid={uuid}"), e))?;
         } else {
             query(
                 "INSERT INTO tc_tasks (id, data, status, description, priority, \
@@ -256,7 +272,8 @@ impl<'a> StorageTxn for PgWireTxn<'a> {
             .bind(project_id)
             .bind(note_id)
             .execute(&mut *t_ref)
-            .await?;
+            .await
+            .map_err(|e| pgwire_context(format!("set_task insert uuid={uuid}"), e))?;
         }
         Ok(())
     }
@@ -269,7 +286,8 @@ impl<'a> StorageTxn for PgWireTxn<'a> {
         let n = query::<Postgres>("DELETE FROM tc_tasks WHERE id = $1")
             .bind(uuid)
             .execute(&mut **t)
-            .await?
+            .await
+            .map_err(|e| pgwire_context(format!("delete_task delete uuid={uuid}"), e))?
             .rows_affected();
         Ok(n > 0)
     }
@@ -280,7 +298,10 @@ impl<'a> StorageTxn for PgWireTxn<'a> {
             "SELECT {} FROM tc_tasks t LEFT JOIN projects p ON t.project_id = p.id",
             crate::storage::columns::TASK_SELECT_COLS
         );
-        let rows: Vec<TaskPgRow> = query_as::<_, TaskPgRow>(&sql).fetch_all(&mut **t).await?;
+        let rows: Vec<TaskPgRow> = query_as::<_, TaskPgRow>(&sql)
+            .fetch_all(&mut **t)
+            .await
+            .map_err(|e| pgwire_context("all_tasks query", e))?;
         rows_to_tasks(rows)
     }
 
@@ -288,7 +309,8 @@ impl<'a> StorageTxn for PgWireTxn<'a> {
         let t = self.get_txn()?;
         let ids: Vec<Uuid> = query_scalar("SELECT id FROM tc_tasks")
             .fetch_all(&mut **t)
-            .await?;
+            .await
+            .map_err(|e| pgwire_context("all_task_uuids query", e))?;
         Ok(ids)
     }
 
@@ -327,7 +349,8 @@ impl<'a> StorageTxn for PgWireTxn<'a> {
              ORDER BY name",
         )
         .fetch_all(&mut **t)
-        .await?;
+        .await
+        .map_err(|e| pgwire_context("get_all_tags query", e))?;
         rows.into_iter()
             .map(|(key,)| Ok(key.strip_prefix("tag_").unwrap_or(&key).to_string()))
             .collect()
@@ -337,7 +360,8 @@ impl<'a> StorageTxn for PgWireTxn<'a> {
         let t = self.get_txn()?;
         let row: Option<SettingsPgRow> = query_as("SELECT tc_config FROM settings LIMIT 1")
             .fetch_optional(&mut **t)
-            .await?;
+            .await
+            .map_err(|e| pgwire_context("get_tc_config query", e))?;
         Ok(row
             .and_then(|r| r.tc_config)
             .map(|v| {
@@ -354,7 +378,8 @@ impl<'a> StorageTxn for PgWireTxn<'a> {
         let n = query::<Postgres>("UPDATE settings SET tc_config = $1")
             .bind(Json(json_val))
             .execute(&mut **t)
-            .await?
+            .await
+            .map_err(|e| pgwire_context("set_tc_config update", e))?
             .rows_affected();
         if n == 0 {
             return Err(Error::Database(
@@ -371,7 +396,9 @@ impl<'a> StorageTxn for PgWireTxn<'a> {
             .txn
             .take()
             .ok_or_else(|| Error::Database("Transaction already committed".into()))?;
-        t.commit().await?;
+        t.commit()
+            .await
+            .map_err(|e| pgwire_context("commit transaction", e))?;
         Ok(())
     }
 }
