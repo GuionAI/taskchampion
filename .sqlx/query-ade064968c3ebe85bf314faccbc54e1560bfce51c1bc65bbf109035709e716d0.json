@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE settings SET tc_config = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ade064968c3ebe85bf314faccbc54e1560bfce51c1bc65bbf109035709e716d0"
+}

@@ -1,14 +1,11 @@
 //! Postgres wire-native row types.
 //!
 //! sqlx decodes jsonb columns natively into `serde_json::Value` via the
-//! `json` feature — no SQL-layer CAST AS text required. The `From<TaskPgRow>`
-//! impl re-serializes `Value → String` to feed the crate-level `RawTaskRow`
-//! (shared with powersync), keeping that blast radius contained to this module.
+//! `json` feature. `query_as!` constructs these structs at compile time, and
+//! the `From<TaskPgRow>` impl re-serializes `Value` to feed the crate-level
+//! `RawTaskRow` shared with powersync.
 
 use chrono::{DateTime, Utc};
-use sqlx_core::from_row::FromRow;
-use sqlx_core::row::Row;
-use sqlx_postgres::PgRow;
 use uuid::Uuid;
 
 use crate::storage::columns::RawTaskRow;
@@ -16,10 +13,6 @@ use crate::storage::columns::RawTaskRow;
 // ─── Task ───────────────────────────────────────────────────────────────────
 
 /// Intermediate Pg-side struct for a tc_tasks row.
-///
-/// Manual `FromRow` impl (not derive) to avoid pulling `sqlx-macros` into the
-/// dependency graph — macros requires `sqlx-sqlite` which conflicts with the
-/// rusqlite link at the workspace level.
 pub(super) struct TaskPgRow {
     pub(super) id: Uuid,
     pub(super) data: serde_json::Value,
@@ -37,29 +30,6 @@ pub(super) struct TaskPgRow {
     pub(super) project_name: Option<String>,
     pub(super) project_id: Option<Uuid>,
     pub(super) note_id: Option<Uuid>,
-}
-
-impl<'r> FromRow<'r, PgRow> for TaskPgRow {
-    fn from_row(row: &'r PgRow) -> sqlx_core::Result<Self> {
-        Ok(Self {
-            id: row.try_get("id")?,
-            data: row.try_get("data")?,
-            status: row.try_get("status")?,
-            description: row.try_get("description")?,
-            priority: row.try_get("priority")?,
-            entry_at: row.try_get("entry_at")?,
-            modified_at: row.try_get("modified_at")?,
-            due_at: row.try_get("due_at")?,
-            scheduled_at: row.try_get("scheduled_at")?,
-            start_at: row.try_get("start_at")?,
-            end_at: row.try_get("end_at")?,
-            wait_at: row.try_get("wait_at")?,
-            parent_id: row.try_get("parent_id")?,
-            project_name: row.try_get("project_name")?,
-            project_id: row.try_get("project_id")?,
-            note_id: row.try_get("note_id")?,
-        })
-    }
 }
 
 impl From<TaskPgRow> for RawTaskRow {
@@ -95,14 +65,6 @@ impl From<TaskPgRow> for RawTaskRow {
 /// Pg-side struct for the tc_settings singleton row.
 pub(super) struct SettingsPgRow {
     pub(super) tc_config: Option<serde_json::Value>,
-}
-
-impl<'r> FromRow<'r, PgRow> for SettingsPgRow {
-    fn from_row(row: &'r PgRow) -> sqlx_core::Result<Self> {
-        Ok(Self {
-            tc_config: row.try_get("tc_config")?,
-        })
-    }
 }
 
 #[cfg(test)]

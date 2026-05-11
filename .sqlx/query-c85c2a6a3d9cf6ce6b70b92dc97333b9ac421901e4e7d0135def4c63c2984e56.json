@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT DISTINCT kv.key AS \"name!\"\n            FROM tc_tasks, jsonb_each_text(data) AS kv\n            WHERE kv.key LIKE 'tag_%'\n            ORDER BY kv.key\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "c85c2a6a3d9cf6ce6b70b92dc97333b9ac421901e4e7d0135def4c63c2984e56"
+}

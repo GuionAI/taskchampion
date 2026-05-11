@@ -107,6 +107,7 @@ pub(crate) fn raw_to_task(raw: RawTaskRow) -> Result<(Uuid, TaskMap)> {
 }
 
 /// Shared column projection for all tc_tasks queries (requires `t` and `p` aliases).
+#[cfg(any(feature = "storage-external", feature = "storage-powersync"))]
 pub(crate) const TASK_SELECT_COLS: &str = "t.id, t.data, t.status, t.description, t.priority, \
     t.entry_at, t.modified_at, t.due_at, t.scheduled_at, \
     t.start_at, t.end_at, t.wait_at, t.parent_id, \

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO tc_tasks (id, data) VALUES ($1, '{}')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "95cf34e9ab6881bf02abde35e1746fed712fecd0ab0ac111d28fedd415535b0b"
+}

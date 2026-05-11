@@ -3,16 +3,20 @@
 //! Both `PowerSyncTxn` and `ExternalStorageTxn` use these functions to
 //! produce SQL statements. The caller decides how to execute them.
 
+#[cfg(any(feature = "storage-external", feature = "storage-powersync"))]
 use chrono::Utc;
+#[cfg(any(feature = "storage-external", feature = "storage-powersync"))]
 use uuid::Uuid;
 
 use crate::errors::{Error, Result};
+#[cfg(any(feature = "storage-external", feature = "storage-powersync"))]
 use crate::operation::Operation;
 use crate::storage::columns::extract_timestamp;
 use crate::storage::TaskMap;
 
 /// A single SQL statement with bound parameters.
 #[derive(Debug, Clone)]
+#[cfg(any(feature = "storage-external", feature = "storage-powersync"))]
 #[cfg_attr(not(feature = "storage-external"), allow(unreachable_pub))]
 pub struct SqlStatement {
     pub sql: String,
@@ -21,6 +25,7 @@ pub struct SqlStatement {
 
 /// Parameter types for SQL statements.
 #[derive(Debug, Clone)]
+#[cfg(any(feature = "storage-external", feature = "storage-powersync"))]
 #[cfg_attr(not(feature = "storage-external"), allow(unreachable_pub))]
 pub enum SqlParam {
     Text(String),
@@ -115,6 +120,7 @@ pub(crate) fn prepare_task(mut task_data: TaskMap) -> Result<PreparedTask> {
 }
 
 /// Helper: convert an Option<String> to SqlParam.
+#[cfg(any(feature = "storage-external", feature = "storage-powersync"))]
 fn opt(v: &Option<String>) -> SqlParam {
     match v {
         Some(s) => SqlParam::Text(s.clone()),
@@ -123,6 +129,7 @@ fn opt(v: &Option<String>) -> SqlParam {
 }
 
 /// Generate SQL statements for set_task (INSERT or UPDATE).
+#[cfg(any(feature = "storage-external", feature = "storage-powersync"))]
 pub(crate) fn set_task_stmts(
     uuid: &Uuid,
     prepared: &PreparedTask,
@@ -191,6 +198,7 @@ pub(crate) fn set_task_stmts(
 }
 
 /// Generate SQL statement for create_task (empty task).
+#[cfg(any(feature = "storage-external", feature = "storage-powersync"))]
 pub(crate) fn create_task_stmt(uuid: &Uuid) -> SqlStatement {
     SqlStatement {
         sql: "INSERT INTO tc_tasks (id, data) VALUES (?, '{}')".into(),
@@ -199,6 +207,7 @@ pub(crate) fn create_task_stmt(uuid: &Uuid) -> SqlStatement {
 }
 
 /// Generate SQL statements for delete_task (task row only; tags/annotations are in the data blob).
+#[cfg(any(feature = "storage-external", feature = "storage-powersync"))]
 pub(crate) fn delete_task_stmts(uuid: &Uuid) -> Vec<SqlStatement> {
     let uuid_str = uuid.to_string();
     vec![SqlStatement {
@@ -208,6 +217,7 @@ pub(crate) fn delete_task_stmts(uuid: &Uuid) -> Vec<SqlStatement> {
 }
 
 /// Generate SQL statement for add_operation.
+#[cfg(any(feature = "storage-external", feature = "storage-powersync"))]
 pub(crate) fn add_operation_stmt(op: &Operation) -> Result<SqlStatement> {
     let created_at = match op {
         Operation::Update { timestamp, .. } => {
@@ -228,6 +238,7 @@ pub(crate) fn add_operation_stmt(op: &Operation) -> Result<SqlStatement> {
 }
 
 /// Generate SQL statement for remove_operation (by row ID).
+#[cfg(any(feature = "storage-external", feature = "storage-powersync"))]
 pub(crate) fn remove_operation_stmt(id: &str) -> SqlStatement {
     SqlStatement {
         sql: "DELETE FROM tc_operations WHERE id = ?".into(),
@@ -236,6 +247,7 @@ pub(crate) fn remove_operation_stmt(id: &str) -> SqlStatement {
 }
 
 /// Generate SQL statement for setting tc_config.
+#[cfg(any(feature = "storage-external", feature = "storage-powersync"))]
 pub(crate) fn set_tc_config_stmt(value: &str) -> SqlStatement {
     SqlStatement {
         // Single-user DB: PowerSync/Supabase ensures exactly one settings row
@@ -247,18 +259,24 @@ pub(crate) fn set_tc_config_stmt(value: &str) -> SqlStatement {
 
 // ── Read SQL constants ─────────────────────────────────────────────────────
 
+#[cfg(any(feature = "storage-external", feature = "storage-powersync"))]
 pub(crate) const TC_CONFIG_READ_SQL: &str = "SELECT tc_config FROM settings LIMIT 1";
 
+#[cfg(any(feature = "storage-external", feature = "storage-powersync"))]
 pub(crate) const TASK_EXISTS_SQL: &str =
     "SELECT EXISTS(SELECT 1 FROM tc_tasks WHERE id = ?) AS exists_flag";
 
+#[cfg(any(feature = "storage-external", feature = "storage-powersync"))]
 pub(crate) const ALL_OPERATIONS_SQL: &str = "SELECT data FROM tc_operations ORDER BY id ASC";
 #[cfg(feature = "storage-external")]
 pub(crate) const ALL_OPS_WITH_ID_DESC_SQL: &str =
     "SELECT id, data FROM tc_operations ORDER BY id DESC";
+#[cfg(any(feature = "storage-external", feature = "storage-powersync"))]
 pub(crate) const LAST_OPERATION_SQL: &str =
     "SELECT id, data FROM tc_operations ORDER BY id DESC LIMIT 1";
+#[cfg(any(feature = "storage-external", feature = "storage-powersync"))]
 pub(crate) const ALL_TASK_UUIDS_SQL: &str = "SELECT id FROM tc_tasks";
+#[cfg(any(feature = "storage-external", feature = "storage-powersync"))]
 pub(crate) const ALL_TAGS_SQL: &str = "SELECT DISTINCT substr(j.key, 5) as name \
      FROM tc_tasks, json_each(tc_tasks.data) as j \
      WHERE j.key LIKE 'tag_%' \
