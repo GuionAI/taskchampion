@@ -9,6 +9,14 @@ pub enum Error {
     #[cfg(feature = "storage-pgwire")]
     #[error("Database error: {}", format_pgwire_err(.0))]
     PgWire(sqlx_core::Error),
+    /// PostgreSQL unique constraint violation via pgwire.
+    #[cfg(feature = "storage-pgwire")]
+    #[error("Database error: unique violation: {0}")]
+    UniqueViolation(String),
+    /// PostgreSQL foreign key constraint violation via pgwire.
+    #[cfg(feature = "storage-pgwire")]
+    #[error("Database error: foreign key violation: {0}")]
+    ForeignKeyViolation(String),
     /// A PostgreSQL error via pgwire, with the operation that failed.
     #[cfg(feature = "storage-pgwire")]
     #[error("Database error: {context}: {}", format_pgwire_err(.source))]
@@ -66,16 +74,51 @@ impl<T: Sync + Send + 'static> From<tokio::sync::mpsc::error::SendError<T>> for 
 impl From<sqlx_core::Error> for Error {
     #[inline]
     fn from(e: sqlx_core::Error) -> Self {
-        Self::PgWire(e)
+        classify_pg(e)
     }
 }
 
 #[cfg(feature = "storage-pgwire")]
 pub(crate) fn pgwire_context(context: impl Into<String>, source: sqlx_core::Error) -> Error {
-    Error::PgWireQuery {
-        context: context.into(),
-        source,
+    let context = context.into();
+    if let Some(classified) = classify_pg_message(
+        &source,
+        format!("{context}: {}", format_pgwire_err(&source)),
+    ) {
+        return classified;
     }
+
+    Error::PgWireQuery { context, source }
+}
+
+#[cfg(feature = "storage-pgwire")]
+pub(crate) fn classify_pg(e: sqlx_core::Error) -> Error {
+    classify_pg_message(&e, format_pgwire_err(&e)).unwrap_or(Error::PgWire(e))
+}
+
+#[cfg(feature = "storage-pgwire")]
+fn classify_pg_message(e: &sqlx_core::Error, message: String) -> Option<Error> {
+    match pg_sqlstate_kind(e)? {
+        PgSqlStateKind::UniqueViolation => Some(Error::UniqueViolation(message)),
+        PgSqlStateKind::ForeignKeyViolation => Some(Error::ForeignKeyViolation(message)),
+    }
+}
+
+#[cfg(feature = "storage-pgwire")]
+fn pg_sqlstate_kind(e: &sqlx_core::Error) -> Option<PgSqlStateKind> {
+    let db = e.as_database_error()?;
+    let code = db.code()?;
+    match &*code {
+        "23505" => Some(PgSqlStateKind::UniqueViolation),
+        "23503" => Some(PgSqlStateKind::ForeignKeyViolation),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "storage-pgwire")]
+enum PgSqlStateKind {
+    UniqueViolation,
+    ForeignKeyViolation,
 }
 
 #[cfg(feature = "storage-pgwire")]
@@ -115,6 +158,111 @@ fn append_pg_field(out: &mut String, name: &str, value: Option<&str>) {
         out.push_str(": ");
         out.push_str(value);
         out.push(')');
+    }
+}
+
+#[cfg(all(test, feature = "storage-pgwire"))]
+mod tests {
+    use super::*;
+    use sqlx_core::error::{DatabaseError, ErrorKind};
+    use std::borrow::Cow;
+    use std::error::Error as StdError;
+    use std::fmt;
+
+    #[derive(Debug)]
+    struct FakeDatabaseError {
+        code: Option<&'static str>,
+        message: &'static str,
+    }
+
+    impl fmt::Display for FakeDatabaseError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str(self.message)
+        }
+    }
+
+    impl StdError for FakeDatabaseError {}
+
+    impl DatabaseError for FakeDatabaseError {
+        fn message(&self) -> &str {
+            self.message
+        }
+
+        fn code(&self) -> Option<Cow<'_, str>> {
+            self.code.map(Cow::Borrowed)
+        }
+
+        fn as_error(&self) -> &(dyn StdError + Send + Sync + 'static) {
+            self
+        }
+
+        fn as_error_mut(&mut self) -> &mut (dyn StdError + Send + Sync + 'static) {
+            self
+        }
+
+        fn into_error(self: Box<Self>) -> Box<dyn StdError + Send + Sync + 'static> {
+            self
+        }
+
+        fn kind(&self) -> ErrorKind {
+            ErrorKind::Other
+        }
+    }
+
+    fn db_error(code: Option<&'static str>) -> sqlx_core::Error {
+        sqlx_core::Error::Database(Box::new(FakeDatabaseError {
+            code,
+            message: "synthetic database error",
+        }))
+    }
+
+    #[test]
+    fn classify_pg_unique_violation() {
+        match classify_pg(db_error(Some("23505"))) {
+            Error::UniqueViolation(message) => {
+                assert!(message.contains("SQLSTATE 23505"));
+                assert!(message.contains("synthetic database error"));
+            }
+            other => panic!("expected unique violation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_pg_foreign_key_violation() {
+        match classify_pg(db_error(Some("23503"))) {
+            Error::ForeignKeyViolation(message) => {
+                assert!(message.contains("SQLSTATE 23503"));
+                assert!(message.contains("synthetic database error"));
+            }
+            other => panic!("expected foreign key violation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_pg_other_database_error_falls_through() {
+        match classify_pg(db_error(Some("99999"))) {
+            Error::PgWire(_) => {}
+            other => panic!("expected pgwire fallback, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_pg_non_database_error_falls_through() {
+        match classify_pg(sqlx_core::Error::RowNotFound) {
+            Error::PgWire(_) => {}
+            other => panic!("expected pgwire fallback, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pgwire_context_classifies_and_keeps_context() {
+        match pgwire_context("task_exists query uuid=1234abcd", db_error(Some("23505"))) {
+            Error::UniqueViolation(message) => {
+                assert!(message.contains("task_exists query uuid=1234abcd"));
+                assert!(message.contains("SQLSTATE 23505"));
+            }
+            other => panic!("expected unique violation with context, got {other:?}"),
+        }
     }
 }
 
