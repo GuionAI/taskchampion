@@ -213,8 +213,8 @@ impl crate::storage::StorageTxn for PowerSyncTxn<'_> {
     async fn get_task(&mut self, uuid: Uuid) -> Result<Option<TaskMap>> {
         let t = self.get_txn()?;
         let row: Option<RawTaskRow> = sqlx::query_as(
-            "SELECT t.id, t.data, t.status, t.description, t.priority, 
-                    t.entry_at, t.modified_at, t.due_at, t.scheduled_at, 
+            "SELECT t.id, t.data, t.status, t.description, t.priority,
+                    t.entry_at, t.modified_at, t.due_at, t.scheduled_at,
                     t.start_at, t.end_at, t.wait_at, t.parent_id,
                     p.name as project_name, t.project_id, t.note_id
              FROM tc_tasks t
@@ -238,8 +238,8 @@ impl crate::storage::StorageTxn for PowerSyncTxn<'_> {
     async fn get_pending_tasks(&mut self) -> Result<Vec<(Uuid, TaskMap)>> {
         let t = self.get_txn()?;
         let rows: Vec<RawTaskRow> = sqlx::query_as(
-            "SELECT t.id, t.data, t.status, t.description, t.priority, 
-                    t.entry_at, t.modified_at, t.due_at, t.scheduled_at, 
+            "SELECT t.id, t.data, t.status, t.description, t.priority,
+                    t.entry_at, t.modified_at, t.due_at, t.scheduled_at,
                     t.start_at, t.end_at, t.wait_at, t.parent_id,
                     p.name as project_name, t.project_id, t.note_id
              FROM tc_tasks t
@@ -321,8 +321,8 @@ impl crate::storage::StorageTxn for PowerSyncTxn<'_> {
     async fn all_tasks(&mut self) -> Result<Vec<(Uuid, TaskMap)>> {
         let t = self.get_txn()?;
         let rows: Vec<RawTaskRow> = sqlx::query_as(
-            "SELECT t.id, t.data, t.status, t.description, t.priority, 
-                    t.entry_at, t.modified_at, t.due_at, t.scheduled_at, 
+            "SELECT t.id, t.data, t.status, t.description, t.priority,
+                    t.entry_at, t.modified_at, t.due_at, t.scheduled_at,
                     t.start_at, t.end_at, t.wait_at, t.parent_id,
                     p.name as project_name, t.project_id, t.note_id
              FROM tc_tasks t
