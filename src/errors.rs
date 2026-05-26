@@ -61,9 +61,6 @@ other_error!(io::Error);
 other_error!(serde_json::Error);
 other_error!(tokio::sync::oneshot::error::RecvError);
 
-#[cfg(feature = "storage-powersync")]
-other_error!(rusqlite::Error);
-
 impl<T: Sync + Send + 'static> From<tokio::sync::mpsc::error::SendError<T>> for Error {
     fn from(err: tokio::sync::mpsc::error::SendError<T>) -> Self {
         Self::Other(err.into())

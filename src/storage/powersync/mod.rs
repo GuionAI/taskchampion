@@ -1,20 +1,17 @@
+pub(super) mod extension;
+pub(super) mod inner;
+
 use crate::errors::Result;
-use crate::storage::send_wrapper::Wrapper;
-use crate::storage::{Storage, StorageTxn};
-use async_trait::async_trait;
+use crate::storage::Storage;
+use inner::PowerSyncStorageInner;
 use std::path::Path;
 
-mod extension;
-mod inner;
-mod row_reader;
-use inner::PowerSyncStorageInner;
-
-/// PowerSyncStorage stores task data in a PowerSync-managed SQLite database.
+/// PowerSync-backed task storage using sqlx.
 ///
-/// PowerSync handles sync to a Postgres/Supabase backend transparently. This
-/// storage layer reads and writes to the local SQLite file that PowerSync
-/// maintains, using the same `send_wrapper` actor pattern as `SqliteStorage`.
-pub struct PowerSyncStorage(Wrapper);
+/// The `tc_tasks` and `tc_operations` views must already exist (created by
+/// PowerSync from its schema definition). Local-only tables (`tc_sync_meta`)
+/// are created automatically.
+pub struct PowerSyncStorage(PowerSyncStorageInner);
 
 impl PowerSyncStorage {
     /// Open a PowerSync-managed database at `db_path`.
@@ -23,35 +20,27 @@ impl PowerSyncStorage {
     /// PowerSync from its schema definition). Local-only tables (`tc_sync_meta`)
     /// are created automatically.
     pub async fn new(db_path: &Path) -> Result<Self> {
-        let path = db_path.to_path_buf();
-        Ok(Self(
-            Wrapper::new(async move || PowerSyncStorageInner::new(&path)).await?,
-        ))
+        Ok(Self(PowerSyncStorageInner::new(db_path).await?))
     }
 
     /// Create an in-memory PowerSyncStorage with all required tables for testing.
     #[cfg(any(test, feature = "test-utils"))]
     pub async fn new_for_test() -> Result<Self> {
-        Ok(Self(
-            Wrapper::new(async || PowerSyncStorageInner::new_for_test()).await?,
-        ))
+        Ok(Self(PowerSyncStorageInner::new_for_test().await?))
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl Storage for PowerSyncStorage {
-    async fn txn<'a>(&'a mut self) -> Result<Box<dyn StorageTxn + Send + 'a>> {
-        Ok(self.0.txn().await?)
+    async fn txn<'a>(&'a mut self) -> Result<Box<dyn crate::storage::StorageTxn + Send + 'a>> {
+        self.0.txn().await
     }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::errors::Result;
-    use crate::storage::send_wrapper::{WrappedStorage, WrappedStorageTxn};
     use crate::storage::TaskMap;
-    use inner::PowerSyncStorageInner;
     use uuid::Uuid;
 
     async fn storage() -> Result<PowerSyncStorage> {
@@ -61,29 +50,27 @@ mod test {
     crate::storage::test::storage_tests_no_sync!(storage().await?);
 
     /// Seed a settings row the way the PG trigger would in production.
-    fn seed_settings_row(storage: &mut PowerSyncStorageInner) {
-        storage
-            .conn
-            .execute(
-                "INSERT INTO settings (id, tc_config) VALUES (?, NULL)",
-                [Uuid::new_v4().to_string()],
-            )
+    async fn seed_settings_row(storage: &mut PowerSyncStorageInner) {
+        sqlx::query("INSERT INTO settings (id, tc_config) VALUES (?, NULL)")
+            .bind(Uuid::new_v4().to_string())
+            .execute(&storage.pool)
+            .await
             .expect("seed settings row");
     }
 
     #[tokio::test]
     async fn tc_config_round_trip() -> crate::errors::Result<()> {
-        let mut inner = PowerSyncStorageInner::new_for_test()?;
-        seed_settings_row(&mut inner);
-        let storage = PowerSyncStorage(Wrapper::new(async move || Ok(inner)).await?);
+        let mut inner = PowerSyncStorageInner::new_for_test().await?;
+        seed_settings_row(&mut inner).await;
+        let storage = PowerSyncStorage(inner);
         crate::storage::test::tc_config_round_trip(storage).await
     }
 
     #[tokio::test]
     async fn tc_config_overwrite() -> crate::errors::Result<()> {
-        let mut inner = PowerSyncStorageInner::new_for_test()?;
-        seed_settings_row(&mut inner);
-        let storage = PowerSyncStorage(Wrapper::new(async move || Ok(inner)).await?);
+        let mut inner = PowerSyncStorageInner::new_for_test().await?;
+        seed_settings_row(&mut inner).await;
+        let storage = PowerSyncStorage(inner);
         crate::storage::test::tc_config_overwrite(storage).await
     }
 
@@ -135,13 +122,7 @@ mod test {
         let epoch = "1724612771";
         let mut task: TaskMap = TaskMap::new();
         for key in [
-            "entry",
-            "modified",
-            "due",
-            "scheduled",
-            "start",
-            "end",
-            "wait",
+            "entry", "modified", "due", "scheduled", "start", "end", "wait",
         ] {
             task.insert(key.into(), epoch.into());
         }
@@ -153,13 +134,7 @@ mod test {
         let mut txn = storage.txn().await?;
         let got = txn.get_task(uuid).await?.expect("task should exist");
         for key in [
-            "entry",
-            "modified",
-            "due",
-            "scheduled",
-            "start",
-            "end",
-            "wait",
+            "entry", "modified", "due", "scheduled", "start", "end", "wait",
         ] {
             assert_eq!(
                 got.get(key).map(String::as_str),
@@ -174,7 +149,7 @@ mod test {
     /// Verify that tag_* keys round-trip through set_task/get_task via the data blob.
     #[tokio::test]
     async fn test_tags_round_trip() -> Result<()> {
-        let mut storage = PowerSyncStorageInner::new_for_test()?;
+        let mut storage = PowerSyncStorageInner::new_for_test().await?;
         let uuid = Uuid::new_v4();
 
         let mut txn = storage.txn().await?;
@@ -221,7 +196,7 @@ mod test {
     /// Verify that annotation_* keys round-trip through set_task/get_task via the data blob.
     #[tokio::test]
     async fn test_annotations_round_trip() -> Result<()> {
-        let mut storage = PowerSyncStorageInner::new_for_test()?;
+        let mut storage = PowerSyncStorageInner::new_for_test().await?;
         let uuid = Uuid::new_v4();
 
         let mut txn = storage.txn().await?;
@@ -252,7 +227,7 @@ mod test {
     /// Verify that tag_* and annotation_* keys are present in the raw `data` blob in tc_tasks.
     #[tokio::test]
     async fn test_data_blob_includes_tags_and_annotations() -> Result<()> {
-        let mut storage = PowerSyncStorageInner::new_for_test()?;
+        let mut storage = PowerSyncStorageInner::new_for_test().await?;
         let uuid = Uuid::new_v4();
 
         {
@@ -270,11 +245,10 @@ mod test {
         }
 
         // Query raw data column directly — confirms keys are persisted in the blob.
-        let data_str: String = storage.conn.query_row(
-            "SELECT data FROM tc_tasks WHERE id = ?",
-            [&uuid.to_string()],
-            |r| r.get(0),
-        )?;
+        let data_str: String = sqlx::query_scalar("SELECT data FROM tc_tasks WHERE id = ?")
+            .bind(uuid.to_string())
+            .fetch_one(&storage.pool)
+            .await?;
         let data_map: serde_json::Value = serde_json::from_str(&data_str)
             .map_err(|e| crate::errors::Error::Database(e.to_string()))?;
         let obj = data_map.as_object().unwrap();
@@ -307,14 +281,15 @@ mod test {
     /// Also verifies the "project" key is NOT in the blob (extracted before serialization).
     #[tokio::test]
     async fn test_project_round_trip() -> Result<()> {
-        let mut storage = PowerSyncStorageInner::new_for_test()?;
+        let mut storage = PowerSyncStorageInner::new_for_test().await?;
 
         // Pre-seed the "home" project and capture its UUID.
         let home_uuid = Uuid::new_v4().to_string();
-        storage.conn.execute(
-            "INSERT INTO projects (id, name) VALUES (?, ?)",
-            rusqlite::params![home_uuid, "home"],
-        )?;
+        sqlx::query("INSERT INTO projects (id, name) VALUES (?, ?)")
+            .bind(&home_uuid)
+            .bind("home")
+            .execute(&storage.pool)
+            .await?;
 
         let mut txn = storage.txn().await?;
 
@@ -327,11 +302,10 @@ mod test {
         drop(txn);
 
         // Verify the blob does NOT contain the "project" key (extracted before serialization).
-        let data_str: String = storage.conn.query_row(
-            "SELECT data FROM tc_tasks WHERE id = ?",
-            [&uuid.to_string()],
-            |r| r.get(0),
-        )?;
+        let data_str: String = sqlx::query_scalar("SELECT data FROM tc_tasks WHERE id = ?")
+            .bind(uuid.to_string())
+            .fetch_one(&storage.pool)
+            .await?;
         let data_map: serde_json::Value = serde_json::from_str(&data_str)
             .map_err(|e| crate::errors::Error::Database(e.to_string()))?;
         let obj = data_map.as_object().unwrap();
@@ -341,11 +315,11 @@ mod test {
         );
 
         // Verify the project_id column holds the resolved UUID.
-        let stored_project_id: String = storage.conn.query_row(
-            "SELECT project_id FROM tc_tasks WHERE id = ?",
-            [&uuid.to_string()],
-            |r| r.get(0),
-        )?;
+        let stored_project_id: String =
+            sqlx::query_scalar("SELECT project_id FROM tc_tasks WHERE id = ?")
+                .bind(uuid.to_string())
+                .fetch_one(&storage.pool)
+                .await?;
         assert_eq!(stored_project_id, home_uuid);
 
         // Verify the round-trip name comes from the JOIN, not the blob.
@@ -371,7 +345,7 @@ mod test {
     /// Verify that an unknown project name returns ProjectNotFound.
     #[tokio::test]
     async fn test_project_not_found() -> Result<()> {
-        let mut storage = PowerSyncStorageInner::new_for_test()?;
+        let mut storage = PowerSyncStorageInner::new_for_test().await?;
         let mut txn = storage.txn().await?;
 
         let uuid = Uuid::new_v4();
@@ -391,7 +365,7 @@ mod test {
     /// Verify that a raw project_id (no name) still works via fallback.
     #[tokio::test]
     async fn test_raw_project_id_fallback() -> Result<()> {
-        let mut storage = PowerSyncStorageInner::new_for_test()?;
+        let mut storage = PowerSyncStorageInner::new_for_test().await?;
         let raw_uuid = Uuid::new_v4().to_string();
 
         let mut txn = storage.txn().await?;
@@ -404,11 +378,11 @@ mod test {
         drop(txn);
 
         // Verify the project_id column holds the raw UUID directly.
-        let stored_project_id: String = storage.conn.query_row(
-            "SELECT project_id FROM tc_tasks WHERE id = ?",
-            [&uuid.to_string()],
-            |r| r.get(0),
-        )?;
+        let stored_project_id: String =
+            sqlx::query_scalar("SELECT project_id FROM tc_tasks WHERE id = ?")
+                .bind(uuid.to_string())
+                .fetch_one(&storage.pool)
+                .await?;
         assert_eq!(stored_project_id, raw_uuid);
 
         // project column should be absent since there's no matching projects row
@@ -428,7 +402,7 @@ mod test {
     /// Covers the bulk-read merge path independently of get_task.
     #[tokio::test]
     async fn test_all_tasks_includes_tags_and_annotations() -> Result<()> {
-        let mut storage = PowerSyncStorageInner::new_for_test()?;
+        let mut storage = PowerSyncStorageInner::new_for_test().await?;
         let uuid = Uuid::new_v4();
 
         {
@@ -495,7 +469,7 @@ mod test {
     /// rather than silently leaving it in the data blob.
     #[tokio::test]
     async fn test_set_task_rejects_invalid_annotation_epoch() -> Result<()> {
-        let mut storage = PowerSyncStorageInner::new_for_test()?;
+        let mut storage = PowerSyncStorageInner::new_for_test().await?;
         let uuid = Uuid::new_v4();
 
         let mut txn = storage.txn().await?;

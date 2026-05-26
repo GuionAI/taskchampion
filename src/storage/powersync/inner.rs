@@ -1,52 +1,66 @@
 use crate::errors::{Error, Result};
 use crate::operation::Operation;
-use crate::storage::send_wrapper::{WrappedStorage, WrappedStorageTxn};
 use crate::storage::TaskMap;
 use anyhow::Context;
 use async_trait::async_trait;
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use sqlx::{Pool, Sqlite, Transaction};
 use std::path::Path;
 use uuid::Uuid;
 
 use super::extension::init_powersync_extension;
-use super::row_reader::{query_task_rows, read_raw_task_row};
-use crate::storage::columns::{raw_to_task, TASK_SELECT_COLS};
+use crate::storage::columns::raw_to_task;
+use crate::storage::columns::RawTaskRow;
 use crate::storage::sql_ops::{
     add_operation_stmt, create_task_stmt, delete_task_stmts, prepare_task, remove_operation_stmt,
     set_task_stmts, set_tc_config_stmt, SqlStatement, ALL_OPERATIONS_SQL, ALL_TAGS_SQL,
     ALL_TASK_UUIDS_SQL, LAST_OPERATION_SQL, TASK_EXISTS_SQL, TC_CONFIG_READ_SQL,
 };
 
-/// Execute a SqlStatement against a rusqlite Transaction.
-fn execute_sql_stmt(t: &rusqlite::Transaction, stmt: &SqlStatement) -> Result<()> {
-    t.execute(&stmt.sql, rusqlite::params_from_iter(stmt.params.iter()))
+/// Execute a SqlStatement against a sqlx Sqlite transaction.
+async fn execute_sql_stmt(t: &mut Transaction<'_, Sqlite>, stmt: &SqlStatement) -> Result<()> {
+    let mut query = sqlx::query(&stmt.sql);
+    for param in &stmt.params {
+        match param {
+            crate::storage::sql_ops::SqlParam::Text(s) => query = query.bind(s),
+            crate::storage::sql_ops::SqlParam::Null => query = query.bind(Option::<String>::None),
+        }
+    }
+    query
+        .execute(&mut **t)
+        .await
         .context("Executing SQL statement")?;
     Ok(())
 }
 
 pub(super) struct PowerSyncStorageInner {
-    pub(super) conn: Connection,
+    pub(super) pool: Pool<Sqlite>,
 }
 
 impl PowerSyncStorageInner {
     /// Open an existing PowerSync-managed database file and create local-only tables.
-    pub(super) fn new(db_path: &Path) -> Result<Self> {
+    pub(super) async fn new(db_path: &Path) -> Result<Self> {
         // Register the PowerSync extension as a SQLite auto-extension (once per process).
         init_powersync_extension()?;
 
-        // Open the connection. The auto-extension fires on open, registering all
-        // PowerSync functions (powersync_strip_subtype, etc.).
-        let conn = Connection::open(db_path)
-            .context("Opening PowerSync database (auto-extension init fires here)")?;
+        let db_path = db_path.to_path_buf();
+        let options = SqliteConnectOptions::new()
+            .filename(&db_path)
+            .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+            .pragma("busy_timeout", "30000");
+
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .context("Opening PowerSync database")?;
 
         // Verify the DB has been initialized by flicknote-sync (tc_tasks view must exist).
-        let has_tc_tasks: bool = conn
-            .query_row(
-                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='view' AND name='tc_tasks'",
-                [],
-                |r| r.get(0),
-            )
-            .context("Checking for tc_tasks view")?;
+        let has_tc_tasks: bool =
+            sqlx::query_scalar("SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='view' AND name='tc_tasks'")
+                .fetch_one(&pool)
+                .await
+                .context("Checking for tc_tasks view")?;
         if !has_tc_tasks {
             return Err(Error::Database(
                 "tc_tasks view not found — the database must be initialized by flicknote-sync \
@@ -55,36 +69,30 @@ impl PowerSyncStorageInner {
             ));
         }
 
-        // Belt-and-suspenders: ensure WAL mode and busy_timeout for multi-process safety.
-        // flicknote-sync already sets WAL (persists in DB header), but set it explicitly
-        // in case it was somehow reset. busy_timeout is per-connection — must always be set.
-        conn.pragma_update(None, "journal_mode", "WAL")
-            .context("Setting WAL mode")?;
-        conn.pragma_update(None, "busy_timeout", 30_000)
-            .context("Setting busy timeout")?;
-
         // Initialize PowerSync internal tables (ps_migration, ps_oplog, etc.).
         // This does NOT create user-facing views — those already exist from flicknote-sync.
         // We intentionally do NOT call powersync_replace_schema here because it performs
         // a FULL REPLACE — it would drop views for notes, projects, note_extractions
         // that flicknote-sync registered. We only need the extension functions loaded
         // (which happened at Connection::open via auto-extension).
-        conn.prepare("SELECT powersync_init()")?
-            .query_row([], |_| Ok(()))
+        sqlx::query("SELECT powersync_init()")
+            .execute(&pool)
+            .await
             .context("PowerSync init")?;
 
-        // No local-only tables needed: tc_tasks and tc_operations are PowerSync-managed
-        // views; sync state (working-set, base_version, operations_sync) is unused since
-        // PowerSync handles replication externally via flicknote-sync.
-
-        Ok(Self { conn })
+        Ok(Self { pool })
     }
 
     /// Create an in-memory database with all required tables for testing.
     #[cfg(any(test, feature = "test-utils"))]
-    pub(super) fn new_for_test() -> Result<Self> {
-        let conn = Connection::open_in_memory()?;
-        conn.execute_batch(
+    pub(super) async fn new_for_test() -> Result<Self> {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .context("Creating in-memory database")?;
+
+        sqlx::query(
             "
             CREATE TABLE IF NOT EXISTS tc_tasks (
                 id TEXT PRIMARY KEY,
@@ -126,46 +134,50 @@ impl PowerSyncStorageInner {
             INSERT INTO settings (id) VALUES ('default') ON CONFLICT(id) DO NOTHING;
         ",
         )
+        .execute(&pool)
+        .await
         .context("Creating PowerSync test tables")?;
-        Ok(Self { conn })
+
+        Ok(Self { pool })
     }
 }
 
-#[async_trait(?Send)]
-impl WrappedStorage for PowerSyncStorageInner {
-    async fn txn<'a>(&'a mut self) -> Result<Box<dyn WrappedStorageTxn + 'a>> {
+#[async_trait]
+impl crate::storage::Storage for PowerSyncStorageInner {
+    async fn txn<'a>(&'a mut self) -> Result<Box<dyn crate::storage::StorageTxn + Send + 'a>> {
         let txn = self
-            .conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            .pool
+            .begin()
+            .await
+            .context("Starting transaction")?;
         Ok(Box::new(PowerSyncTxn { txn: Some(txn) }))
     }
 }
 
-pub(super) struct PowerSyncTxn<'t> {
-    txn: Option<rusqlite::Transaction<'t>>,
+pub(super) struct PowerSyncTxn<'a> {
+    txn: Option<Transaction<'a, Sqlite>>,
 }
 
-impl<'t> PowerSyncTxn<'t> {
-    fn get_txn(&self) -> Result<&rusqlite::Transaction<'t>> {
+impl<'a> PowerSyncTxn<'a> {
+    fn get_txn(&mut self) -> Result<&mut Transaction<'a, Sqlite>> {
         self.txn
-            .as_ref()
+            .as_mut()
             .ok_or_else(|| Error::Database("Transaction already committed".into()))
     }
 
     /// Resolve a project name to its UUID via the projects table.
-    fn resolve_project_id(&self, name: &str) -> Result<String> {
+    async fn resolve_project_id(&mut self, name: &str) -> Result<String> {
         let t = self.get_txn()?;
-        if let Some(id) = t
-            .query_row(
-                "SELECT id FROM projects WHERE name = ? ORDER BY created_at LIMIT 1",
-                [name],
-                |r| r.get::<_, String>(0),
-            )
-            .optional()?
-        {
-            return Ok(id);
+        let row: Option<(String,)> =
+            sqlx::query_as("SELECT id FROM projects WHERE name = ? ORDER BY created_at LIMIT 1")
+                .bind(name)
+                .fetch_optional(&mut **t)
+                .await
+                .context("Resolving project id")?;
+        match row {
+            Some((id,)) => Ok(id),
+            None => Err(Error::ProjectNotFound(name.to_string())),
         }
-        Err(Error::ProjectNotFound(name.to_string()))
     }
 }
 
@@ -196,20 +208,25 @@ fn parse_operation(data_str: &str) -> Result<Operation> {
     }
 }
 
-#[async_trait(?Send)]
-impl WrappedStorageTxn for PowerSyncTxn<'_> {
+#[async_trait]
+impl crate::storage::StorageTxn for PowerSyncTxn<'_> {
     async fn get_task(&mut self, uuid: Uuid) -> Result<Option<TaskMap>> {
         let t = self.get_txn()?;
-        let sql = format!(
-            "SELECT {TASK_SELECT_COLS}
+        let row: Option<RawTaskRow> = sqlx::query_as(
+            "SELECT t.id, t.data, t.status, t.description, t.priority, 
+                    t.entry_at, t.modified_at, t.due_at, t.scheduled_at, 
+                    t.start_at, t.end_at, t.wait_at, t.parent_id,
+                    p.name as project_name, t.project_id, t.note_id
              FROM tc_tasks t
              LEFT JOIN projects p ON t.project_id = p.id
-             WHERE t.id = ? LIMIT 1"
-        );
-        let raw_opt = t
-            .query_row(&sql, [&uuid.to_string()], read_raw_task_row)
-            .optional()?;
-        match raw_opt {
+             WHERE t.id = ? LIMIT 1",
+        )
+        .bind(uuid.to_string())
+        .fetch_optional(&mut **t)
+        .await
+        .context("get_task query")?;
+
+        match row {
             None => Ok(None),
             Some(raw) => {
                 let (_, task_map) = raw_to_task(raw)?;
@@ -220,27 +237,33 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
 
     async fn get_pending_tasks(&mut self) -> Result<Vec<(Uuid, TaskMap)>> {
         let t = self.get_txn()?;
-        let sql = format!(
-            "SELECT {TASK_SELECT_COLS}
+        let rows: Vec<RawTaskRow> = sqlx::query_as(
+            "SELECT t.id, t.data, t.status, t.description, t.priority, 
+                    t.entry_at, t.modified_at, t.due_at, t.scheduled_at, 
+                    t.start_at, t.end_at, t.wait_at, t.parent_id,
+                    p.name as project_name, t.project_id, t.note_id
              FROM tc_tasks t
              LEFT JOIN projects p ON t.project_id = p.id
-             WHERE t.status = 'pending'"
-        );
-        let tasks = query_task_rows(t, &sql, [])?;
-        Ok(tasks)
+             WHERE t.status = 'pending'",
+        )
+        .fetch_all(&mut **t)
+        .await
+        .context("get_pending_tasks query")?;
+
+        rows.into_iter().map(raw_to_task).collect()
     }
 
     async fn create_task(&mut self, uuid: Uuid) -> Result<bool> {
         let t = self.get_txn()?;
-        let count: usize = t.query_row(
-            "SELECT count(id) FROM tc_tasks WHERE id = ?",
-            [&uuid.to_string()],
-            |x| x.get(0),
-        )?;
-        if count > 0 {
+        let count: (i64,) = sqlx::query_as("SELECT count(id) FROM tc_tasks WHERE id = ?")
+            .bind(uuid.to_string())
+            .fetch_one(&mut **t)
+            .await
+            .context("create_task count")?;
+        if count.0 > 0 {
             return Ok(false);
         }
-        execute_sql_stmt(t, &create_task_stmt(&uuid))?;
+        execute_sql_stmt(t, &create_task_stmt(&uuid)).await?;
         Ok(true)
     }
 
@@ -251,7 +274,7 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
         // the error propagates immediately — there is no fallback to raw UUID.
         // If no name is provided, fall back to the raw UUID if present.
         let project_id = if let Some(name) = &prepared.project_name {
-            match self.resolve_project_id(name) {
+            match self.resolve_project_id(name).await {
                 Ok(id) => Some(id),
                 Err(e) => return Err(e),
             }
@@ -263,14 +286,16 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
         // INSTEAD OF triggers also report 0 rows changed regardless of success,
         // so we check existence with SELECT, then INSERT or UPDATE accordingly.
         let t = self.get_txn()?;
-        let exists: bool = t
-            .query_row(TASK_EXISTS_SQL, [&uuid.to_string()], |row| row.get(0))
+        let exists: (bool,) = sqlx::query_as(TASK_EXISTS_SQL)
+            .bind(uuid.to_string())
+            .fetch_one(&mut **t)
+            .await
             .context("Set task existence check")?;
 
         // Generate and execute statements.
-        let stmts = set_task_stmts(&uuid, &prepared, exists, project_id.as_deref())?;
+        let stmts = set_task_stmts(&uuid, &prepared, exists.0, project_id.as_deref())?;
         for stmt in &stmts {
-            execute_sql_stmt(t, stmt)?;
+            execute_sql_stmt(t, stmt).await?;
         }
         Ok(())
     }
@@ -280,35 +305,45 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
         let uuid_str = uuid.to_string();
         // INSTEAD OF triggers on PowerSync views report 0 rows changed,
         // so check existence before DELETE to return the correct boolean.
-        let exists: bool = t
-            .query_row(TASK_EXISTS_SQL, [&uuid_str], |row| row.get(0))
+        let exists: (bool,) = sqlx::query_as(TASK_EXISTS_SQL)
+            .bind(&uuid_str)
+            .fetch_one(&mut **t)
+            .await
             .context("Delete task existence check")?;
-        if exists {
+        if exists.0 {
             for stmt in &delete_task_stmts(&uuid) {
-                execute_sql_stmt(t, stmt)?;
+                execute_sql_stmt(t, stmt).await?;
             }
         }
-        Ok(exists)
+        Ok(exists.0)
     }
 
     async fn all_tasks(&mut self) -> Result<Vec<(Uuid, TaskMap)>> {
         let t = self.get_txn()?;
-        let sql = format!(
-            "SELECT {TASK_SELECT_COLS}
+        let rows: Vec<RawTaskRow> = sqlx::query_as(
+            "SELECT t.id, t.data, t.status, t.description, t.priority, 
+                    t.entry_at, t.modified_at, t.due_at, t.scheduled_at, 
+                    t.start_at, t.end_at, t.wait_at, t.parent_id,
+                    p.name as project_name, t.project_id, t.note_id
              FROM tc_tasks t
-             LEFT JOIN projects p ON t.project_id = p.id"
-        );
-        let tasks = query_task_rows(t, &sql, [])?;
-        Ok(tasks)
+             LEFT JOIN projects p ON t.project_id = p.id",
+        )
+        .fetch_all(&mut **t)
+        .await
+        .context("all_tasks query")?;
+
+        rows.into_iter().map(raw_to_task).collect()
     }
 
     async fn all_task_uuids(&mut self) -> Result<Vec<Uuid>> {
         let t = self.get_txn()?;
-        let mut q = t.prepare(ALL_TASK_UUIDS_SQL)?;
-        let rows = q.query_map([], |r| r.get::<_, String>(0))?;
-        rows.collect::<std::result::Result<Vec<_>, _>>()?
-            .into_iter()
-            .map(|s| Uuid::parse_str(&s).map_err(|e| Error::Database(format!("Invalid UUID: {e}"))))
+        let rows: Vec<(String,)> = sqlx::query_as(ALL_TASK_UUIDS_SQL)
+            .fetch_all(&mut **t)
+            .await
+            .context("all_task_uuids query")?;
+
+        rows.into_iter()
+            .map(|(s,)| Uuid::parse_str(&s).map_err(|e| Error::Database(format!("Invalid UUID: {e}"))))
             .collect()
     }
 
@@ -316,40 +351,45 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
         // tc_operations has no UUID column (schema is PowerSync-managed).
         // Filter in memory after deserializing; acceptable for the expected operation count.
         let t = self.get_txn()?;
-        let mut q = t.prepare(ALL_OPERATIONS_SQL)?;
-        let rows = q.query_map([], |r| r.get::<_, String>("data"))?;
-        let raw: Vec<String> = rows.collect::<std::result::Result<_, _>>()?;
-        raw.into_iter()
-            .map(|data_str| parse_operation(&data_str))
-            .filter_map(|res| match res {
-                Ok(op) if op.get_uuid() == Some(uuid) => Some(Ok(op)),
-                Ok(_) => None,
-                Err(e) => Some(Err(e)),
-            })
-            .collect()
+        let rows: Vec<(String,)> = sqlx::query_as(ALL_OPERATIONS_SQL)
+            .fetch_all(&mut **t)
+            .await
+            .context("get_task_operations query")?;
+
+        let mut ops = Vec::new();
+        for (data_str,) in rows {
+            let op = parse_operation(&data_str)?;
+            if op.get_uuid() == Some(uuid) {
+                ops.push(op);
+            }
+        }
+        Ok(ops)
     }
 
     async fn all_operations(&mut self) -> Result<Vec<Operation>> {
         let t = self.get_txn()?;
-        let mut q = t.prepare(ALL_OPERATIONS_SQL)?;
-        let rows = q.query_map([], |r| r.get::<_, String>("data"))?;
-        rows.collect::<std::result::Result<Vec<_>, _>>()?
-            .into_iter()
-            .map(|data_str| parse_operation(&data_str))
+        let rows: Vec<(String,)> = sqlx::query_as(ALL_OPERATIONS_SQL)
+            .fetch_all(&mut **t)
+            .await
+            .context("all_operations query")?;
+
+        rows.into_iter()
+            .map(|(data_str,)| parse_operation(&data_str))
             .collect()
     }
 
     async fn add_operation(&mut self, op: Operation) -> Result<()> {
         let t = self.get_txn()?;
-        execute_sql_stmt(t, &add_operation_stmt(&op)?)?;
+        execute_sql_stmt(t, &add_operation_stmt(&op)?).await?;
         Ok(())
     }
 
     async fn remove_operation(&mut self, op: Operation) -> Result<()> {
         let t = self.get_txn()?;
-        let last: Option<(String, String)> = t
-            .query_row(LAST_OPERATION_SQL, [], |x| Ok((x.get(0)?, x.get(1)?)))
-            .optional()?;
+        let last: Option<(String, String)> = sqlx::query_as(LAST_OPERATION_SQL)
+            .fetch_optional(&mut **t)
+            .await
+            .context("remove_operation: fetch last")?;
 
         let Some((last_id, last_data)) = last else {
             return Err(Error::Database("No operations to remove".into()));
@@ -364,33 +404,33 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
             )));
         }
 
-        execute_sql_stmt(t, &remove_operation_stmt(&last_id))?;
+        execute_sql_stmt(t, &remove_operation_stmt(&last_id)).await?;
         Ok(())
     }
 
     async fn get_all_tags(&mut self) -> Result<Vec<String>> {
         let t = self.get_txn()?;
-        let mut q = t.prepare(ALL_TAGS_SQL).context("get_all_tags: prepare")?;
-        let rows = q
-            .query_map([], |row| row.get::<_, String>(0))
-            .context("get_all_tags: query")?;
-        rows.collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(|e| Error::Database(format!("get_all_tags: {e}")))
+        let rows: Vec<(String,)> = sqlx::query_as(ALL_TAGS_SQL)
+            .fetch_all(&mut **t)
+            .await
+            .context("get_all_tags query")?;
+
+        Ok(rows.into_iter().map(|(name,)| name).collect())
     }
 
     async fn get_tc_config(&mut self) -> Result<Option<String>> {
         let t = self.get_txn()?;
-        t.query_row(TC_CONFIG_READ_SQL, [], |row| {
-            row.get::<_, Option<String>>(0)
-        })
-        .optional()
-        .map(|o| o.flatten())
-        .map_err(|e| Error::Database(format!("get_tc_config: {e}")))
+        let row: Option<(Option<String>,)> = sqlx::query_as(TC_CONFIG_READ_SQL)
+            .fetch_optional(&mut **t)
+            .await
+            .context("get_tc_config query")?;
+
+        Ok(row.flatten().flatten())
     }
 
     async fn set_tc_config(&mut self, value: String) -> Result<()> {
         let t = self.get_txn()?;
-        execute_sql_stmt(t, &set_tc_config_stmt(&value))
+        execute_sql_stmt(t, &set_tc_config_stmt(&value)).await
     }
 
     async fn commit(&mut self) -> Result<()> {
@@ -398,7 +438,7 @@ impl WrappedStorageTxn for PowerSyncTxn<'_> {
             .txn
             .take()
             .ok_or_else(|| Error::Database("Transaction already committed".into()))?;
-        t.commit().context("Committing transaction")?;
+        t.commit().await.context("Committing transaction")?;
         Ok(())
     }
 }
@@ -409,7 +449,7 @@ mod parse_tests {
 
     #[test]
     fn normal_undo_point() {
-        // Normal: locally-written UndoPoint → "UndoPoint"
+        // Normal: locally-written UndoPoint -> "UndoPoint"
         let data = r#""UndoPoint""#;
         let op = parse_operation(data).unwrap();
         assert!(op.is_undo_point());
@@ -427,7 +467,7 @@ mod parse_tests {
     #[test]
     fn double_encoded_invalid_variant() {
         // Double-encoded but inner value is not a valid Operation variant.
-        // Unwrap succeeds, but second parse fails → should return Err, not panic.
+        // Unwrap succeeds, but second parse fails -> should return Err, not panic.
         let data = r#""\"NotARealVariant\"""#;
         let result = parse_operation(data);
         assert!(result.is_err());
