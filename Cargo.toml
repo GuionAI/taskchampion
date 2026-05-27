@@ -23,9 +23,6 @@ crate-type = ["rlib"]
 [features]
 default = ["storage-powersync", "bundled"]
 
-[features]
-default = ["storage-powersync", "bundled"]
-
 # Support for PowerSync task storage (via sqlx-sqlite)
 storage-powersync = ["dep:sqlx", "dep:powersync_core", "sqlx/sqlite"]
 # Expose *_for_test() constructors for use in external crate tests
