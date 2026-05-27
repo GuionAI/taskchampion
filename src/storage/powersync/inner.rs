@@ -11,6 +11,7 @@ use uuid::Uuid;
 use super::extension::init_powersync_extension;
 use crate::storage::columns::raw_to_task;
 use crate::storage::columns::RawTaskRow;
+use crate::storage::columns::TASK_SELECT_COLS;
 use crate::storage::sql_ops::{
     add_operation_stmt, create_task_stmt, delete_task_stmts, prepare_task, remove_operation_stmt,
     set_task_stmts, set_tc_config_stmt, SqlStatement, ALL_OPERATIONS_SQL, ALL_TAGS_SQL,
@@ -209,15 +210,13 @@ fn parse_operation(data_str: &str) -> Result<Operation> {
 impl crate::storage::StorageTxn for PowerSyncTxn<'_> {
     async fn get_task(&mut self, uuid: Uuid) -> Result<Option<TaskMap>> {
         let t = self.get_txn()?;
-        let row: Option<RawTaskRow> = sqlx::query_as(
-            "SELECT t.id, t.data, t.status, t.description, t.priority,
-                    t.entry_at, t.modified_at, t.due_at, t.scheduled_at,
-                    t.start_at, t.end_at, t.wait_at, t.parent_id,
-                    p.name as project_name, t.project_id, t.note_id
+        let sql = format!(
+            "SELECT {TASK_SELECT_COLS}
              FROM tc_tasks t
              LEFT JOIN projects p ON t.project_id = p.id
-             WHERE t.id = ? LIMIT 1",
-        )
+             WHERE t.id = ? LIMIT 1"
+        );
+        let row: Option<RawTaskRow> = sqlx::query_as(&sql)
         .bind(uuid.to_string())
         .fetch_optional(&mut **t)
         .await
@@ -234,15 +233,13 @@ impl crate::storage::StorageTxn for PowerSyncTxn<'_> {
 
     async fn get_pending_tasks(&mut self) -> Result<Vec<(Uuid, TaskMap)>> {
         let t = self.get_txn()?;
-        let rows: Vec<RawTaskRow> = sqlx::query_as(
-            "SELECT t.id, t.data, t.status, t.description, t.priority,
-                    t.entry_at, t.modified_at, t.due_at, t.scheduled_at,
-                    t.start_at, t.end_at, t.wait_at, t.parent_id,
-                    p.name as project_name, t.project_id, t.note_id
+        let sql = format!(
+            "SELECT {TASK_SELECT_COLS}
              FROM tc_tasks t
              LEFT JOIN projects p ON t.project_id = p.id
-             WHERE t.status = 'pending'",
-        )
+             WHERE t.status = 'pending'"
+        );
+        let rows: Vec<RawTaskRow> = sqlx::query_as(&sql)
         .fetch_all(&mut **t)
         .await
         .context("get_pending_tasks query")?;
@@ -317,14 +314,12 @@ impl crate::storage::StorageTxn for PowerSyncTxn<'_> {
 
     async fn all_tasks(&mut self) -> Result<Vec<(Uuid, TaskMap)>> {
         let t = self.get_txn()?;
-        let rows: Vec<RawTaskRow> = sqlx::query_as(
-            "SELECT t.id, t.data, t.status, t.description, t.priority,
-                    t.entry_at, t.modified_at, t.due_at, t.scheduled_at,
-                    t.start_at, t.end_at, t.wait_at, t.parent_id,
-                    p.name as project_name, t.project_id, t.note_id
+        let sql = format!(
+            "SELECT {TASK_SELECT_COLS}
              FROM tc_tasks t
-             LEFT JOIN projects p ON t.project_id = p.id",
-        )
+             LEFT JOIN projects p ON t.project_id = p.id"
+        );
+        let rows: Vec<RawTaskRow> = sqlx::query_as(&sql)
         .fetch_all(&mut **t)
         .await
         .context("all_tasks query")?;
