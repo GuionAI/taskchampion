@@ -56,11 +56,12 @@ impl PowerSyncStorageInner {
             .context("Opening PowerSync database")?;
 
         // Verify the DB has been initialized by flicknote-sync (tc_tasks view must exist).
-        let has_tc_tasks: bool =
-            sqlx::query_scalar("SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='view' AND name='tc_tasks'")
-                .fetch_one(&pool)
-                .await
-                .context("Checking for tc_tasks view")?;
+        let has_tc_tasks: bool = sqlx::query_scalar(
+            "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='view' AND name='tc_tasks'",
+        )
+        .fetch_one(&pool)
+        .await
+        .context("Checking for tc_tasks view")?;
         if !has_tc_tasks {
             return Err(Error::Database(
                 "tc_tasks view not found — the database must be initialized by flicknote-sync \
@@ -145,11 +146,7 @@ impl PowerSyncStorageInner {
 #[async_trait]
 impl crate::storage::Storage for PowerSyncStorageInner {
     async fn txn<'a>(&'a mut self) -> Result<Box<dyn crate::storage::StorageTxn + Send + 'a>> {
-        let txn = self
-            .pool
-            .begin()
-            .await
-            .context("Starting transaction")?;
+        let txn = self.pool.begin().await.context("Starting transaction")?;
         Ok(Box::new(PowerSyncTxn { txn: Some(txn) }))
     }
 }
@@ -343,7 +340,9 @@ impl crate::storage::StorageTxn for PowerSyncTxn<'_> {
             .context("all_task_uuids query")?;
 
         rows.into_iter()
-            .map(|(s,)| Uuid::parse_str(&s).map_err(|e| Error::Database(format!("Invalid UUID: {e}"))))
+            .map(|(s,)| {
+                Uuid::parse_str(&s).map_err(|e| Error::Database(format!("Invalid UUID: {e}")))
+            })
             .collect()
     }
 
