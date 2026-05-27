@@ -21,9 +21,10 @@ resolver = "2"
 crate-type = ["rlib"]
 
 [features]
-default = ["storage-powersync", "bundled"]
+default = ["storage-powersync"]
 
 # Support for PowerSync task storage (via sqlx-sqlite)
+# sqlx-sqlite bundles SQLite C source by default (use sqlite-unbundled to disable)
 storage-powersync = ["dep:sqlx", "dep:powersync_core", "sqlx/sqlite"]
 # Expose *_for_test() constructors for use in external crate tests
 test-utils = ["storage-powersync"]
@@ -31,8 +32,6 @@ test-utils = ["storage-powersync"]
 storage-external = []
 # Postgres-backed storage via pgwire (for temenos sandbox pods)
 storage-pgwire = ["dep:sqlx", "sqlx/postgres"]
-# Bundle SQLite C source into the binary (static linking)
-bundled = ["sqlx/bundled"]
 
 [dependencies]
 anyhow = "1.0"
