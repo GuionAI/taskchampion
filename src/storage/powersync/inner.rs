@@ -424,7 +424,7 @@ impl crate::storage::StorageTxn for PowerSyncTxn<'_> {
             .await
             .context("get_tc_config query")?;
 
-        Ok(row.flatten().flatten())
+        Ok(row.and_then(|(v,)| v))
     }
 
     async fn set_tc_config(&mut self, value: String) -> Result<()> {
