@@ -3,6 +3,7 @@ pub(super) mod inner;
 
 use crate::errors::Result;
 use crate::storage::Storage;
+use async_trait::async_trait;
 use inner::PowerSyncStorageInner;
 use std::path::Path;
 
@@ -30,7 +31,7 @@ impl PowerSyncStorage {
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl Storage for PowerSyncStorage {
     async fn txn<'a>(&'a mut self) -> Result<Box<dyn crate::storage::StorageTxn + Send + 'a>> {
         self.0.txn().await
