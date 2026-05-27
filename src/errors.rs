@@ -61,20 +61,24 @@ other_error!(io::Error);
 other_error!(serde_json::Error);
 other_error!(tokio::sync::oneshot::error::RecvError);
 
-#[cfg(feature = "storage-powersync")]
-other_error!(rusqlite::Error);
-
 impl<T: Sync + Send + 'static> From<tokio::sync::mpsc::error::SendError<T>> for Error {
     fn from(err: tokio::sync::mpsc::error::SendError<T>) -> Self {
         Self::Other(err.into())
     }
 }
 
-#[cfg(feature = "storage-pgwire")]
+#[cfg(any(feature = "storage-pgwire", feature = "storage-powersync"))]
 impl From<sqlx::Error> for Error {
     #[inline]
     fn from(e: sqlx::Error) -> Self {
-        classify_pg(e)
+        #[cfg(feature = "storage-pgwire")]
+        {
+            classify_pg(e)
+        }
+        #[cfg(not(feature = "storage-pgwire"))]
+        {
+            Self::Database(format!("SQLx error: {e}"))
+        }
     }
 }
 

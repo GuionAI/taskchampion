@@ -34,9 +34,6 @@ mod test;
 
 pub use config::AccessMode;
 
-#[cfg(feature = "storage-powersync")]
-mod send_wrapper;
-
 #[doc(hidden)]
 /// For compatibility with 0.6 and earlier, [`Operation`] is re-exported here.
 pub use crate::Operation as ReplicaOp;

@@ -32,17 +32,6 @@ pub enum SqlParam {
     Null,
 }
 
-/// Allow `SqlParam` values to be used directly with rusqlite execute/query calls.
-#[cfg(feature = "storage-powersync")]
-impl rusqlite::types::ToSql for SqlParam {
-    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
-        match self {
-            SqlParam::Text(s) => s.to_sql(),
-            SqlParam::Null => rusqlite::types::Null.to_sql(),
-        }
-    }
-}
-
 /// Task data parsed into promoted columns and residual blob.
 /// Tags and annotations remain in the data blob as `tag_*` / `annotation_*` keys.
 pub(crate) struct PreparedTask {

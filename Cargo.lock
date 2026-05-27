@@ -2134,7 +2134,6 @@ dependencies = [
  "powersync_core",
  "pretty_assertions",
  "rstest",
- "rusqlite",
  "serde",
  "serde_json",
  "sqlx",

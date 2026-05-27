@@ -32,6 +32,10 @@ pub(crate) fn extract_timestamp(task_data: &mut TaskMap, key: &str) -> Result<Op
 }
 
 /// Raw row fetched from tc_tasks JOIN projects.
+#[cfg_attr(
+    any(feature = "storage-powersync", feature = "storage-pgwire"),
+    derive(sqlx::FromRow)
+)]
 pub(crate) struct RawTaskRow {
     pub(crate) id: String,
     pub(crate) data: String,

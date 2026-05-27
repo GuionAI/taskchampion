@@ -21,18 +21,17 @@ resolver = "2"
 crate-type = ["rlib"]
 
 [features]
-default = ["storage-powersync", "bundled"]
+default = ["storage-powersync"]
 
-# Support for PowerSync task storage
-storage-powersync = ["dep:rusqlite", "dep:powersync_core", "rusqlite/bundled"]
+# Support for PowerSync task storage (via sqlx-sqlite)
+# sqlx-sqlite bundles SQLite C source by default (use sqlite-unbundled to disable)
+storage-powersync = ["dep:sqlx", "dep:powersync_core", "sqlx/sqlite"]
 # Expose *_for_test() constructors for use in external crate tests
 test-utils = ["storage-powersync"]
 # Callback-based storage where the host executes SQL (for fn-ios, HTTP proxies)
 storage-external = []
 # Postgres-backed storage via pgwire (for temenos sandbox pods)
-storage-pgwire = ["dep:sqlx"]
-# static bundling of dependencies
-bundled = ["rusqlite/bundled"]
+storage-pgwire = ["dep:sqlx", "sqlx/postgres"]
 
 [dependencies]
 anyhow = "1.0"
@@ -41,14 +40,13 @@ fractional_index = "2.0.2"
 chrono = { version = "^0.4.44", features = ["serde"] }
 log = "^0.4.17"
 powersync_core = { version = "=0.4.12", features = ["static"], optional = true }
-rusqlite = { version = "0.32", optional = true }
 serde_json = "^1.0"
 serde = { version = "^1.0.147", features = ["derive"] }
 strum = "0.28"
 strum_macros = "0.28"
 tokio = { version = "1", features = ["macros", "sync", "rt"] }
 thiserror = "2.0"
-sqlx = { version = "=0.8.6", default-features = false, features = ["runtime-tokio", "postgres", "uuid", "chrono", "json", "macros"], optional = true }
+sqlx = { version = "=0.8.6", default-features = false, features = ["runtime-tokio", "uuid", "chrono", "json", "macros"], optional = true }
 uuid = { version = "^1.22.0", features = ["serde", "v4", "v7"] }
 
 [dev-dependencies]
