@@ -67,11 +67,18 @@ impl<T: Sync + Send + 'static> From<tokio::sync::mpsc::error::SendError<T>> for 
     }
 }
 
-#[cfg(feature = "storage-pgwire")]
+#[cfg(any(feature = "storage-pgwire", feature = "storage-powersync"))]
 impl From<sqlx::Error> for Error {
     #[inline]
     fn from(e: sqlx::Error) -> Self {
-        classify_pg(e)
+        #[cfg(feature = "storage-pgwire")]
+        {
+            classify_pg(e)
+        }
+        #[cfg(not(feature = "storage-pgwire"))]
+        {
+            Self::Database(format!("SQLx error: {e}"))
+        }
     }
 }
 
