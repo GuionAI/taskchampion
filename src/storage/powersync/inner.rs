@@ -217,10 +217,10 @@ impl crate::storage::StorageTxn for PowerSyncTxn<'_> {
              WHERE t.id = ? LIMIT 1"
         );
         let row: Option<RawTaskRow> = sqlx::query_as(&sql)
-        .bind(uuid.to_string())
-        .fetch_optional(&mut **t)
-        .await
-        .context("get_task query")?;
+            .bind(uuid.to_string())
+            .fetch_optional(&mut **t)
+            .await
+            .context("get_task query")?;
 
         match row {
             None => Ok(None),
@@ -240,9 +240,9 @@ impl crate::storage::StorageTxn for PowerSyncTxn<'_> {
              WHERE t.status = 'pending'"
         );
         let rows: Vec<RawTaskRow> = sqlx::query_as(&sql)
-        .fetch_all(&mut **t)
-        .await
-        .context("get_pending_tasks query")?;
+            .fetch_all(&mut **t)
+            .await
+            .context("get_pending_tasks query")?;
 
         rows.into_iter().map(raw_to_task).collect()
     }
@@ -320,9 +320,9 @@ impl crate::storage::StorageTxn for PowerSyncTxn<'_> {
              LEFT JOIN projects p ON t.project_id = p.id"
         );
         let rows: Vec<RawTaskRow> = sqlx::query_as(&sql)
-        .fetch_all(&mut **t)
-        .await
-        .context("all_tasks query")?;
+            .fetch_all(&mut **t)
+            .await
+            .context("all_tasks query")?;
 
         rows.into_iter().map(raw_to_task).collect()
     }
