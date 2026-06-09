@@ -32,6 +32,8 @@ BUILD_DIR="${PROJECT_ROOT}/build"
 XCFRAMEWORK_NAME="TaskChampionFFIFFI"
 XCFRAMEWORK_DIR="${PROJECT_ROOT}/${XCFRAMEWORK_NAME}.xcframework"
 SWIFT_OUT_DIR="${PROJECT_ROOT}/Sources/TaskChampionFFI"
+IOS_DEPLOYMENT_TARGET="18.0"
+MACOS_DEPLOYMENT_TARGET="14.0"
 
 # iOS targets
 TARGETS=(
@@ -59,10 +61,22 @@ for target in "${TARGETS[@]}"; do
   # Set iOS deployment target so the static library links against the
   # correct SDK version. Without this, cargo and the cc crate use the
   # Xcode SDK default (e.g. 18.5), which may be newer than the app's
-  # deployment target. Per-command env avoids leaking into other targets.
+  # deployment target. CFLAGS_* is explicit so bundled C dependencies
+  # such as libsqlite3-sys cannot inherit the SDK default.
   case "$target" in
-    aarch64-apple-ios | aarch64-apple-ios-sim)
-      env IPHONEOS_DEPLOYMENT_TARGET=18.0 \
+    aarch64-apple-ios)
+      env IPHONEOS_DEPLOYMENT_TARGET="${IOS_DEPLOYMENT_TARGET}" \
+        CFLAGS_aarch64_apple_ios="-miphoneos-version-min=${IOS_DEPLOYMENT_TARGET}" \
+        cargo build \
+          -p taskchampion-ffi \
+          --lib \
+          --release \
+          --target "${target}" \
+          --manifest-path "${PROJECT_ROOT}/Cargo.toml" &
+      ;;
+    aarch64-apple-ios-sim)
+      env IPHONEOS_DEPLOYMENT_TARGET="${IOS_DEPLOYMENT_TARGET}" \
+        CFLAGS_aarch64_apple_ios_sim="-mios-simulator-version-min=${IOS_DEPLOYMENT_TARGET}" \
         cargo build \
           -p taskchampion-ffi \
           --lib \
@@ -72,7 +86,8 @@ for target in "${TARGETS[@]}"; do
       ;;
     *)
       # macOS — keep in sync with Package.swift .macOS(.v14)
-      env MACOSX_DEPLOYMENT_TARGET=14.0 \
+      env MACOSX_DEPLOYMENT_TARGET="${MACOS_DEPLOYMENT_TARGET}" \
+        CFLAGS_aarch64_apple_darwin="-mmacosx-version-min=${MACOS_DEPLOYMENT_TARGET}" \
         cargo build \
           -p taskchampion-ffi \
           --lib \
