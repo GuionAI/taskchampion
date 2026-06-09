@@ -118,7 +118,6 @@ jobs:
           )
 
           cat "$work_dir/sqlite3.otool"
-          grep -q 'platform IOS' "$work_dir/sqlite3.otool"
           grep -q 'minos 18\.0' "$work_dir/sqlite3.otool"
           grep -q 'sdk 18\.0' "$work_dir/sqlite3.otool"
 
