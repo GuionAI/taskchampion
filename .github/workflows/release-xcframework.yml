@@ -118,7 +118,8 @@ jobs:
           )
 
           cat "$work_dir/sqlite3.otool"
-          grep -q 'platform IOS' "$work_dir/sqlite3.otool"
+          # Mach-O PLATFORM_IOS is encoded as 2 in otool output for object files.
+          grep -q 'platform 2' "$work_dir/sqlite3.otool"
           grep -q 'minos 18\.0' "$work_dir/sqlite3.otool"
           grep -q 'sdk 18\.0' "$work_dir/sqlite3.otool"
 
