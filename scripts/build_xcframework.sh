@@ -56,12 +56,31 @@ echo "==> Building static libraries (parallel)..."
 pids=()
 for target in "${TARGETS[@]}"; do
   echo "    Spawning build for ${target}..."
-  cargo build \
-    -p taskchampion-ffi \
-    --lib \
-    --release \
-    --target "${target}" \
-    --manifest-path "${PROJECT_ROOT}/Cargo.toml" &
+  # Set iOS deployment target so the static library links against the
+  # correct SDK version. Without this, cargo and the cc crate use the
+  # Xcode SDK default (e.g. 18.5), which may be newer than the app's
+  # deployment target. Per-command env avoids leaking into other targets.
+  case "$target" in
+    aarch64-apple-ios | aarch64-apple-ios-sim)
+      env IPHONEOS_DEPLOYMENT_TARGET=18.0 \
+        cargo build \
+          -p taskchampion-ffi \
+          --lib \
+          --release \
+          --target "${target}" \
+          --manifest-path "${PROJECT_ROOT}/Cargo.toml" &
+      ;;
+    *)
+      # macOS — keep in sync with Package.swift .macOS(.v14)
+      env MACOSX_DEPLOYMENT_TARGET=14.0 \
+        cargo build \
+          -p taskchampion-ffi \
+          --lib \
+          --release \
+          --target "${target}" \
+          --manifest-path "${PROJECT_ROOT}/Cargo.toml" &
+      ;;
+  esac
   pids+=($!)
 done
 for pid in "${pids[@]}"; do

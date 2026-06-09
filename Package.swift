@@ -5,7 +5,7 @@ import PackageDescription
 let package = Package(
     name: "TaskChampionFFI",
     platforms: [
-        .iOS(.v13),
+        .iOS(.v18),
         .macOS(.v14),
     ],
     products: [
