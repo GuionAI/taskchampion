@@ -62,7 +62,7 @@ for target in "${TARGETS[@]}"; do
   # deployment target. Per-command env avoids leaking into other targets.
   case "$target" in
     aarch64-apple-ios | aarch64-apple-ios-sim)
-      env IPHONEOS_DEPLOYMENT_TARGET=18.0 \
+      env IPHONEOS_DEPLOYMENT_TARGET=14.0 \
         cargo build \
           -p taskchampion-ffi \
           --lib \
