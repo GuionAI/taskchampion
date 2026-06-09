@@ -99,6 +99,16 @@ impl MockFfiSqlExecutor {
         .unwrap_or_default()
     }
 
+    fn read_due_at(&self, uuid: &str) -> Option<String> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT due_at FROM tc_tasks WHERE id = ?",
+            rusqlite::params![uuid],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .expect("read due_at")
+    }
+
     /// Insert a project into the projects table and return its UUID string.
     fn inject_project(&self, name: &str) -> String {
         let conn = self.conn.lock().unwrap();
@@ -374,6 +384,32 @@ async fn test_set_due_round_trip() {
         .expect("get after clear")
         .expect("exists after clear");
     assert_eq!(cleared.due, None, "due should be None after clearing");
+}
+
+#[tokio::test]
+async fn test_set_due_stores_sqlite_timestamp_with_microseconds_z() {
+    let (session, mock) = make_session_with_executor();
+    let uuid = Uuid::new_v4().to_string();
+
+    session
+        .create_task(uuid.clone(), "Due storage format test".into())
+        .await
+        .expect("create");
+
+    session
+        .mutate_task(
+            uuid.clone(),
+            vec![TaskMutation::SetDue {
+                epoch: Some(1_700_000_000),
+            }],
+        )
+        .await
+        .expect("set due");
+
+    assert_eq!(
+        mock.read_due_at(&uuid).as_deref(),
+        Some("2023-11-14T22:13:20.000000Z")
+    );
 }
 
 #[tokio::test]
