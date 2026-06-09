@@ -98,28 +98,17 @@ jobs:
         timeout-minutes: 30
         run: ./scripts/build_xcframework.sh
 
-      - name: Validate iOS object SDK version
+      - name: Validate iOS archive has no bundled SQLite
         run: |
           set -euo pipefail
           ios_lib="target/aarch64-apple-ios/release/libtaskchampion_ffi.a"
-          work_dir="$(mktemp -d)"
-          trap 'rm -rf "$work_dir"' EXIT
 
-          member="$(ar -t "$ios_lib" | grep 'sqlite3\.o$' | head -n 1)"
-          if [ -z "$member" ]; then
-            echo "ERROR: sqlite3.o not found in $ios_lib" >&2
+          if ar -t "$ios_lib" | grep -q 'sqlite3\.o$'; then
+            echo "ERROR: bundled sqlite3.o found in $ios_lib" >&2
             exit 1
           fi
 
-          (
-            cd "$work_dir"
-            ar -x "$GITHUB_WORKSPACE/$ios_lib" "$member"
-            otool -l "$member" > sqlite3.otool
-          )
-
-          cat "$work_dir/sqlite3.otool"
-          grep -q 'minos 18\.0' "$work_dir/sqlite3.otool"
-          grep -q 'sdk 18\.0' "$work_dir/sqlite3.otool"
+          echo "No bundled sqlite3.o found in $ios_lib"
 
       - name: Validate Swift bindings were generated
         run: |
