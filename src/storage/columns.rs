@@ -8,7 +8,7 @@ use crate::storage::TaskMap;
 pub(crate) fn epoch_to_iso(epoch_str: &str) -> Option<String> {
     let secs: i64 = epoch_str.parse().ok()?;
     let dt = DateTime::from_timestamp(secs, 0)?;
-    Some(dt.to_rfc3339())
+    Some(dt.format("%Y-%m-%dT%H:%M:%S%.6fZ").to_string())
 }
 
 /// Convert ISO 8601 string back to Unix epoch string.
@@ -126,12 +126,7 @@ mod tests {
     #[test]
     fn epoch_to_iso_valid() {
         let result = epoch_to_iso("1724612771");
-        assert!(result.is_some());
-        let iso = result.unwrap();
-        assert!(
-            iso.starts_with("2024-08-25"),
-            "expected 2024-08-25 date, got {iso}"
-        );
+        assert_eq!(result.as_deref(), Some("2024-08-25T19:06:11.000000Z"));
     }
 
     #[test]
