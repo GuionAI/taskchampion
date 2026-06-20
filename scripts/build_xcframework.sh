@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # Build an XCFramework containing the taskchampion-ffi static library
-# for iOS device + simulator and macOS (arm64) targets, plus generate Swift bindings.
+# for iOS device + simulator, Mac Catalyst, and macOS (arm64) targets, plus
+# generate Swift bindings.
 #
 # Prerequisites:
 #   - Rust toolchain (stable)
@@ -33,10 +34,10 @@ XCFRAMEWORK_NAME="TaskChampionFFIFFI"
 XCFRAMEWORK_DIR="${PROJECT_ROOT}/${XCFRAMEWORK_NAME}.xcframework"
 SWIFT_OUT_DIR="${PROJECT_ROOT}/Sources/TaskChampionFFI"
 
-# iOS targets
 TARGETS=(
   aarch64-apple-ios
   aarch64-apple-ios-sim
+  aarch64-apple-ios-macabi
   aarch64-apple-darwin
 )
 
@@ -61,7 +62,7 @@ for target in "${TARGETS[@]}"; do
   # Xcode SDK default (e.g. 18.5), which may be newer than the app's
   # deployment target. Per-command env avoids leaking into other targets.
   case "$target" in
-    aarch64-apple-ios | aarch64-apple-ios-sim)
+    aarch64-apple-ios | aarch64-apple-ios-sim | aarch64-apple-ios-macabi)
       env IPHONEOS_DEPLOYMENT_TARGET=14.0 \
         cargo build \
           -p taskchampion-ffi \
@@ -132,6 +133,13 @@ mkdir -p "${BUILD_DIR}/ios-simulator"
 cp "${PROJECT_ROOT}/target/aarch64-apple-ios-sim/release/libtaskchampion_ffi.a" \
    "${BUILD_DIR}/ios-simulator/libtaskchampion_ffi.a"
 
+# --- Prepare Mac Catalyst library ---
+
+echo "==> Preparing Mac Catalyst library..."
+mkdir -p "${BUILD_DIR}/mac-catalyst"
+cp "${PROJECT_ROOT}/target/aarch64-apple-ios-macabi/release/libtaskchampion_ffi.a" \
+   "${BUILD_DIR}/mac-catalyst/libtaskchampion_ffi.a"
+
 # --- Prepare macOS library ---
 
 echo "==> Preparing macOS library..."
@@ -147,6 +155,8 @@ xcodebuild -create-xcframework \
   -library "${PROJECT_ROOT}/target/aarch64-apple-ios/release/libtaskchampion_ffi.a" \
   -headers "${HEADERS_DIR}" \
   -library "${BUILD_DIR}/ios-simulator/libtaskchampion_ffi.a" \
+  -headers "${HEADERS_DIR}" \
+  -library "${BUILD_DIR}/mac-catalyst/libtaskchampion_ffi.a" \
   -headers "${HEADERS_DIR}" \
   -library "${BUILD_DIR}/macos/libtaskchampion_ffi.a" \
   -headers "${HEADERS_DIR}" \
