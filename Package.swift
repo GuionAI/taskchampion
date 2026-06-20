@@ -6,6 +6,7 @@ let package = Package(
     name: "TaskChampionFFI",
     platforms: [
         .iOS(.v14),
+        .macCatalyst(.v14),
         .macOS(.v14),
     ],
     products: [
