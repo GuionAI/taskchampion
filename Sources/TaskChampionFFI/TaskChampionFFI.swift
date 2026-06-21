@@ -606,7 +606,7 @@ public protocol FfiSessionProtocol: AnyObject, Sendable {
     func dependencyMap() async throws  -> [FfiDependencyEdge]
     
     /**
-     * Fetch a single task by UUID.
+     * Fetch a single task by UUID or short ID.
      *
      * Returns `None` if the task does not exist.
      */
@@ -1011,7 +1011,7 @@ open func dependencyMap()async throws  -> [FfiDependencyEdge]  {
 }
     
     /**
-     * Fetch a single task by UUID.
+     * Fetch a single task by UUID or short ID.
      *
      * Returns `None` if the task does not exist.
      */
@@ -2489,6 +2489,10 @@ public func FfiConverterTypeFfiSqlStatement_lower(_ value: FfiSqlStatement) -> R
  */
 public struct FfiTask: Equatable, Hashable {
     public var uuid: String
+    /**
+     * Per-user short ID assigned by the backing database.
+     */
+    public var shortId: Int64?
     public var status: FfiStatus
     public var description: String
     /**
@@ -2594,7 +2598,10 @@ public struct FfiTask: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(uuid: String, status: FfiStatus, description: String, 
+    public init(uuid: String, 
+        /**
+         * Per-user short ID assigned by the backing database.
+         */shortId: Int64?, status: FfiStatus, description: String, 
         /**
          * Priority string (e.g. `"H"`, `"M"`, `"L"`), or `None` if unset.
          */priority: String?, 
@@ -2670,6 +2677,7 @@ public struct FfiTask: Equatable, Hashable {
          * Stored as `note_id` column in `tc_tasks`.
          */noteId: String?) {
         self.uuid = uuid
+        self.shortId = shortId
         self.status = status
         self.description = description
         self.priority = priority
@@ -2717,6 +2725,7 @@ public struct FfiConverterTypeFfiTask: FfiConverterRustBuffer {
         return
             try FfiTask(
                 uuid: FfiConverterString.read(from: &buf), 
+                shortId: FfiConverterOptionInt64.read(from: &buf), 
                 status: FfiConverterTypeFfiStatus.read(from: &buf), 
                 description: FfiConverterString.read(from: &buf), 
                 priority: FfiConverterOptionString.read(from: &buf), 
@@ -2750,6 +2759,7 @@ public struct FfiConverterTypeFfiTask: FfiConverterRustBuffer {
 
     public static func write(_ value: FfiTask, into buf: inout [UInt8]) {
         FfiConverterString.write(value.uuid, into: &buf)
+        FfiConverterOptionInt64.write(value.shortId, into: &buf)
         FfiConverterTypeFfiStatus.write(value.status, into: &buf)
         FfiConverterString.write(value.description, into: &buf)
         FfiConverterOptionString.write(value.priority, into: &buf)
@@ -3977,6 +3987,11 @@ public enum TaskMutation: Equatable, Hashable {
     )
     case setEntry(epoch: Int64?
     )
+    /**
+     * Set the parent task by UUID. Short IDs are user-facing handles; callers
+     * that accept short IDs should resolve them to UUIDs before building this
+     * mutation. `None` clears the parent.
+     */
     case setParent(uuid: String?
     )
     case setPosition(value: String?
@@ -3989,8 +4004,16 @@ public enum TaskMutation: Equatable, Hashable {
     )
     case removeAnnotation(entry: Int64
     )
+    /**
+     * Add a dependency by UUID. Resolve short IDs at the UI/input layer before
+     * constructing this mutation.
+     */
     case addDependency(uuid: String
     )
+    /**
+     * Remove a dependency by UUID. Resolve short IDs at the UI/input layer
+     * before constructing this mutation.
+     */
     case removeDependency(uuid: String
     )
     /**
@@ -5177,7 +5200,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_dependency_map() != 18621) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_method_ffisession_get_task() != 6917) {
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_get_task() != 31606) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_is_ancestor() != 58227) {
