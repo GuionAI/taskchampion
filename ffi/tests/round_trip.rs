@@ -30,6 +30,7 @@ impl MockFfiSqlExecutor {
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS tc_tasks (
                 id TEXT PRIMARY KEY,
+                -- Populated by the backing sync system; task writes treat it as read-only.
                 short_id INTEGER, data TEXT NOT NULL DEFAULT '{}', entry_at TEXT, status TEXT,
                 description TEXT, priority TEXT, modified_at TEXT,
                 due_at TEXT, scheduled_at TEXT, start_at TEXT, end_at TEXT,

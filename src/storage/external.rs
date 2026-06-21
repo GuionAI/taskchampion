@@ -305,6 +305,21 @@ impl StorageTxn for ExternalStorageTxn<'_> {
             .collect()
     }
 
+    async fn resolve_task_short_id(&mut self, short_id: i64) -> Result<Option<Uuid>> {
+        let row = self
+            .executor
+            .query_one(
+                "SELECT id FROM tc_tasks WHERE short_id = ? LIMIT 1",
+                &[SqlParam::Text(short_id.to_string())],
+            )
+            .await?;
+        row.map(|json| {
+            let id = parse_json_string_field(&json, "id")?;
+            Uuid::parse_str(&id).map_err(|e| Error::Database(format!("Invalid UUID: {e}")))
+        })
+        .transpose()
+    }
+
     async fn get_task_operations(&mut self, uuid: Uuid) -> Result<Vec<Operation>> {
         let rows = self.executor.query_all(ALL_OPERATIONS_SQL, &[]).await?;
         rows.iter()
@@ -496,6 +511,8 @@ mod test {
             conn.execute_batch(
                 "CREATE TABLE IF NOT EXISTS tc_tasks (
                     id TEXT PRIMARY KEY,
+                    -- Populated by the backing sync system; task writes treat it as read-only.
+                    short_id INTEGER,
                     data TEXT NOT NULL DEFAULT '{}', entry_at TEXT, status TEXT,
                     description TEXT, priority TEXT, modified_at TEXT,
                     due_at TEXT, scheduled_at TEXT, start_at TEXT, end_at TEXT,

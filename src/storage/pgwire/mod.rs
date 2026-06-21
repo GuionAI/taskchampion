@@ -389,6 +389,20 @@ impl<'a> StorageTxn for PgWireTxn<'a> {
         Ok(ids)
     }
 
+    async fn resolve_task_short_id(&mut self, short_id: i64) -> Result<Option<Uuid>> {
+        let Ok(short_id) = i32::try_from(short_id) else {
+            return Ok(None);
+        };
+        let t = self.get_txn()?;
+        sqlx::query_scalar!(
+            "SELECT id FROM tc_tasks WHERE short_id = $1 LIMIT 1",
+            short_id
+        )
+        .fetch_optional(&mut **t)
+        .await
+        .map_err(|e| pgwire_context("resolve_task_short_id query", e))
+    }
+
     async fn get_task_operations(&mut self, _uuid: Uuid) -> Result<Vec<Operation>> {
         Ok(vec![])
     }
