@@ -35,6 +35,11 @@ run this against a local backend schema and commit the updated `.sqlx/` files:
 Set `SQLX_POSTGRES_DATABASE_URL` if your local database is not available at the
 script default URL.
 
+The prepare database must have the matching FlickNote backend migrations
+applied before regenerating metadata. For short task IDs, that includes the
+backend `add_user_short_ids` migration; missing-column prepare failures mean
+the local schema is stale, not that `.sqlx/` should be edited by hand.
+
 ## iOS & macOS (Swift Package Manager)
 
 The `ffi/` crate provides a UniFFI-based FFI layer for iOS and macOS consumption via SPM.

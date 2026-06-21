@@ -26,6 +26,11 @@ use crate::storage::{Storage, StorageTxn, TaskMap};
 ///
 /// Implementors run SQL against their own database connection. Methods are
 /// async to support non-blocking host-side execution (e.g. Swift async/await).
+///
+/// The exposed tables must be scoped to one user, either by using a local
+/// single-user PowerSync database or by applying equivalent RLS/filtering in
+/// the host. Task short IDs are per-user values; query results must not mix
+/// rows from multiple users.
 #[async_trait]
 pub trait SqlExecutor: Send + Sync {
     /// Execute a read query returning at most one row as a JSON object string.

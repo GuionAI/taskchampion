@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                t.id,\n                t.data as \"data: serde_json::Value\",\n                t.status,\n                t.description,\n                t.priority,\n                t.entry_at,\n                t.modified_at,\n                t.due_at,\n                t.scheduled_at,\n                t.start_at,\n                t.end_at,\n                t.wait_at,\n                t.parent_id,\n                p.name as \"project_name?\",\n                t.project_id,\n                t.note_id\n            FROM tc_tasks t\n            LEFT JOIN projects p ON t.project_id = p.id\n            ",
+  "query": "\n            SELECT\n                t.id,\n                t.short_id,\n                t.data as \"data: serde_json::Value\",\n                t.status,\n                t.description,\n                t.priority,\n                t.entry_at,\n                t.modified_at,\n                t.due_at,\n                t.scheduled_at,\n                t.start_at,\n                t.end_at,\n                t.wait_at,\n                t.parent_id,\n                p.name as \"project_name?\",\n                t.project_id,\n                t.note_id\n            FROM tc_tasks t\n            LEFT JOIN projects p ON t.project_id = p.id\n            ",
   "describe": {
     "columns": [
       {
@@ -10,76 +10,81 @@
       },
       {
         "ordinal": 1,
+        "name": "short_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 2,
         "name": "data: serde_json::Value",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 2,
+        "ordinal": 3,
         "name": "status",
         "type_info": "Text"
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "description",
         "type_info": "Text"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "priority",
         "type_info": "Text"
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "entry_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "modified_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "due_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "scheduled_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "start_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "end_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "wait_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "parent_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "project_name?",
         "type_info": "Text"
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "project_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "note_id",
         "type_info": "Uuid"
       }
@@ -88,6 +93,7 @@
       "Left": []
     },
     "nullable": [
+      false,
       false,
       false,
       true,
@@ -106,5 +112,5 @@
       true
     ]
   },
-  "hash": "0db9f5fe7a74e466e9df0c4c9a0ad523ff78c5fe2ceded45599bc3f0a4ee1e79"
+  "hash": "7136097d13f6ab68ba12f15e1f5d5a0c71941ee298264a57a7c944ba63cc3269"
 }
