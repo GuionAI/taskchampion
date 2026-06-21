@@ -30,7 +30,8 @@ impl MockFfiSqlExecutor {
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS tc_tasks (
                 id TEXT PRIMARY KEY,
-                data TEXT NOT NULL DEFAULT '{}', entry_at TEXT, status TEXT,
+                -- Populated by the backing sync system; task writes treat it as read-only.
+                short_id INTEGER, data TEXT NOT NULL DEFAULT '{}', entry_at TEXT, status TEXT,
                 description TEXT, priority TEXT, modified_at TEXT,
                 due_at TEXT, scheduled_at TEXT, start_at TEXT, end_at TEXT,
                 wait_at TEXT, parent_id TEXT, position TEXT, project_id TEXT,
@@ -107,6 +108,15 @@ impl MockFfiSqlExecutor {
             |row| row.get::<_, Option<String>>(0),
         )
         .expect("read due_at")
+    }
+
+    fn assign_short_id(&self, uuid: &str, short_id: i64) {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE tc_tasks SET short_id = ? WHERE id = ?",
+            rusqlite::params![short_id, uuid],
+        )
+        .expect("assign short_id");
     }
 
     /// Insert a project into the projects table and return its UUID string.
@@ -241,6 +251,40 @@ async fn test_create_and_read() {
         .expect("task should exist");
     assert_eq!(fetched.uuid, uuid);
     assert_eq!(fetched.description, "Hello FFI");
+}
+
+#[tokio::test]
+async fn test_short_id_read_and_mutate() {
+    let (session, executor) = make_session_with_executor();
+    let uuid = Uuid::new_v4().to_string();
+
+    session
+        .create_task(uuid.clone(), "Short ID".into())
+        .await
+        .expect("create");
+    executor.assign_short_id(&uuid, 42);
+
+    let fetched = session
+        .get_task("42".into())
+        .await
+        .expect("get by short id")
+        .expect("task should exist");
+    assert_eq!(fetched.uuid, uuid);
+    assert_eq!(fetched.short_id, Some(42));
+
+    let updated = session
+        .mutate_task(
+            "42".into(),
+            vec![TaskMutation::SetDescription {
+                value: "Updated by short ID".into(),
+            }],
+        )
+        .await
+        .expect("mutate by short id")
+        .expect("task still exists");
+    assert_eq!(updated.uuid, uuid);
+    assert_eq!(updated.short_id, Some(42));
+    assert_eq!(updated.description, "Updated by short ID");
 }
 
 #[tokio::test]

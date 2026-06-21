@@ -30,6 +30,8 @@ pub struct FfiAnnotation {
 #[derive(uniffi::Record)]
 pub struct FfiTask {
     pub uuid: String,
+    /// Per-user short ID assigned by the backing database.
+    pub short_id: Option<i64>,
     pub status: FfiStatus,
     pub description: String,
     /// Priority string (e.g. `"H"`, `"M"`, `"L"`), or `None` if unset.
@@ -143,6 +145,9 @@ pub enum TaskMutation {
     SetEntry {
         epoch: Option<i64>,
     },
+    /// Set the parent task by UUID. Short IDs are user-facing handles; callers
+    /// that accept short IDs should resolve them to UUIDs before building this
+    /// mutation. `None` clears the parent.
     SetParent {
         uuid: Option<String>,
     },
@@ -162,9 +167,13 @@ pub enum TaskMutation {
     RemoveAnnotation {
         entry: i64,
     },
+    /// Add a dependency by UUID. Resolve short IDs at the UI/input layer before
+    /// constructing this mutation.
     AddDependency {
         uuid: String,
     },
+    /// Remove a dependency by UUID. Resolve short IDs at the UI/input layer
+    /// before constructing this mutation.
     RemoveDependency {
         uuid: String,
     },

@@ -16,13 +16,25 @@ cargo test <test_name>         # run a single test by name
 
 # Linting
 cargo fmt --all -- --check     # format check
-cargo clippy --features storage-powersync,bundled --no-deps -- -D warnings
+cargo clippy --features storage-powersync --no-deps -- -D warnings
 
 # Docs
 cargo doc --release --open -p taskchampion
 ```
 
 MSRV: **1.91.1** (update with `cargo xtask msrv <version>`)
+
+## SQLx Metadata
+
+The pgwire backend uses SQLx compile-time query macros. After changing any
+`sqlx::query!`, `query_as!`, or `query_scalar!` call, run
+`./scripts/sqlx-prepare.sh` and commit the `.sqlx/` changes.
+
+The prepare database must have the matching FlickNote backend migrations
+applied first. For short task IDs, this means the backend
+`add_user_short_ids` migration must exist locally before regenerating metadata.
+Treat missing-column prepare failures as stale schema, not as a reason to
+hand-edit `.sqlx/`.
 
 ## Architecture
 
