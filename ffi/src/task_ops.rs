@@ -3,7 +3,7 @@
 use chrono::DateTime;
 use taskchampion::{Annotation, Operation, Operations, Status, Tag};
 
-use crate::replica_ops::{parse_uuid, FfiSession};
+use crate::replica_ops::{parse_uuid, resolve_existing_task_ref, FfiSession};
 use crate::types::{FfiError, FfiTask, TaskMutation};
 
 #[uniffi::export]
@@ -21,7 +21,7 @@ impl FfiSession {
         mutations: Vec<TaskMutation>,
     ) -> Result<Option<FfiTask>, FfiError> {
         self.with_replica(|mut replica| async move {
-            let task_uuid = parse_uuid(&uuid)?;
+            let task_uuid = resolve_existing_task_ref(&mut replica, &uuid).await?;
             let mut task = replica
                 .get_task(task_uuid)
                 .await

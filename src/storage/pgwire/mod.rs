@@ -152,6 +152,7 @@ impl<'a> StorageTxn for PgWireTxn<'a> {
             r#"
             SELECT
                 t.id,
+                t.short_id,
                 t.data as "data: serde_json::Value",
                 t.status,
                 t.description,
@@ -195,6 +196,7 @@ impl<'a> StorageTxn for PgWireTxn<'a> {
             r#"
             SELECT
                 t.id,
+                t.short_id,
                 t.data as "data: serde_json::Value",
                 t.status,
                 t.description,
@@ -352,6 +354,7 @@ impl<'a> StorageTxn for PgWireTxn<'a> {
             r#"
             SELECT
                 t.id,
+                t.short_id,
                 t.data as "data: serde_json::Value",
                 t.status,
                 t.description,

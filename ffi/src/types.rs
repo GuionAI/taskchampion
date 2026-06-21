@@ -30,6 +30,8 @@ pub struct FfiAnnotation {
 #[derive(uniffi::Record)]
 pub struct FfiTask {
     pub uuid: String,
+    /// Per-user short ID assigned by the backing database.
+    pub short_id: Option<i64>,
     pub status: FfiStatus,
     pub description: String,
     /// Priority string (e.g. `"H"`, `"M"`, `"L"`), or `None` if unset.

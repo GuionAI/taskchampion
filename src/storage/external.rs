@@ -134,6 +134,7 @@ impl ExternalStorageTxn<'_> {
 
         Ok(RawTaskRow {
             id,
+            short_id: get_opt_i64(obj, "short_id"),
             data,
             status: get_opt_str(obj, "status"),
             description: get_opt_str(obj, "description"),
@@ -415,6 +416,14 @@ impl StorageTxn for ExternalStorageTxn<'_> {
 fn get_opt_str(obj: &serde_json::Map<String, serde_json::Value>, key: &str) -> Option<String> {
     obj.get(key).and_then(|v| match v {
         serde_json::Value::String(s) => Some(s.clone()),
+        _ => None,
+    })
+}
+
+fn get_opt_i64(obj: &serde_json::Map<String, serde_json::Value>, key: &str) -> Option<i64> {
+    obj.get(key).and_then(|v| match v {
+        serde_json::Value::Number(n) => n.as_i64(),
+        serde_json::Value::String(s) => s.parse::<i64>().ok(),
         _ => None,
     })
 }

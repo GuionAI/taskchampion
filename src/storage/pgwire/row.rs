@@ -15,6 +15,7 @@ use crate::storage::columns::RawTaskRow;
 /// Intermediate Pg-side struct for a tc_tasks row.
 pub(super) struct TaskPgRow {
     pub(super) id: Uuid,
+    pub(super) short_id: Option<i32>,
     pub(super) data: serde_json::Value,
     pub(super) status: Option<String>,
     pub(super) description: Option<String>,
@@ -41,6 +42,7 @@ impl From<TaskPgRow> for RawTaskRow {
     fn from(r: TaskPgRow) -> Self {
         Self {
             id: r.id.to_string(),
+            short_id: r.short_id.map(i64::from),
             data: serde_json::to_string(&r.data).expect("jsonb Value re-serialize cannot fail"),
             status: r.status,
             description: r.description,
@@ -76,6 +78,7 @@ mod tests {
     fn task_pg_row_to_raw_task_row_jsonb_roundtrip() {
         let row = TaskPgRow {
             id: Uuid::nil(),
+            short_id: Some(42),
             data: json!({"description": "test", "status": "pending"}),
             status: Some("pending".into()),
             description: Some("test".into()),
@@ -93,6 +96,7 @@ mod tests {
             note_id: None,
         };
         let raw: RawTaskRow = row.into();
+        assert_eq!(raw.short_id, Some(42));
         assert!(raw.data.contains("description"));
         assert!(raw.data.contains("pending"));
         let _: serde_json::Value = serde_json::from_str(&raw.data).unwrap();
@@ -102,6 +106,7 @@ mod tests {
     fn task_pg_row_to_raw_task_row_null_json() {
         let row = TaskPgRow {
             id: Uuid::nil(),
+            short_id: None,
             data: serde_json::Value::Null,
             status: None,
             description: None,

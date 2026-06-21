@@ -61,6 +61,7 @@ pub(crate) fn prepare_task(mut task_data: TaskMap) -> Result<PreparedTask> {
     let description = task_data.remove("description");
     let priority = task_data.remove("priority");
     let parent_id = task_data.remove("parent_id");
+    task_data.remove("short_id");
 
     // Extract timestamps (epoch → ISO).
     let entry_at = extract_timestamp(&mut task_data, "entry")?;
@@ -260,7 +261,7 @@ pub(crate) const ALL_OPERATIONS_SQL: &str = "SELECT data FROM tc_operations ORDE
 #[cfg(feature = "storage-external")]
 pub(crate) const ALL_OPS_WITH_ID_DESC_SQL: &str =
     "SELECT id, data FROM tc_operations ORDER BY id DESC";
-#[cfg(any(feature = "storage-external", feature = "storage-powersync"))]
+#[cfg(feature = "storage-powersync")]
 pub(crate) const LAST_OPERATION_SQL: &str =
     "SELECT id, data FROM tc_operations ORDER BY id DESC LIMIT 1";
 #[cfg(any(feature = "storage-external", feature = "storage-powersync"))]

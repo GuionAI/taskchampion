@@ -132,6 +132,29 @@ impl<S: Storage> Replica<S> {
         self.taskdb.all_task_uuids().await
     }
 
+    /// Resolve a task reference to a UUID.
+    ///
+    /// Full UUID strings are accepted directly. All-digit strings are treated as
+    /// per-user short IDs assigned by the backing database.
+    pub async fn resolve_task_ref(&mut self, task_ref: &str) -> Result<Option<Uuid>> {
+        if let Ok(uuid) = Uuid::parse_str(task_ref) {
+            return self
+                .taskdb
+                .get_task(uuid)
+                .await
+                .map(|task| task.map(|_| uuid));
+        }
+
+        if task_ref.chars().all(|c| c.is_ascii_digit()) {
+            let short_id = task_ref
+                .parse::<i64>()
+                .map_err(|_| Error::Usage(format!("Invalid task short id: {task_ref}")))?;
+            return self.taskdb.resolve_task_short_id(short_id).await;
+        }
+
+        Err(Error::Usage(format!("Invalid task reference: {task_ref}")))
+    }
+
     /// Get an array containing all pending tasks
     pub async fn pending_tasks(&mut self) -> Result<Vec<Task>> {
         let depmap = self.dependency_map(false).await?;

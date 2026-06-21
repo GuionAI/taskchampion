@@ -98,6 +98,7 @@ impl PowerSyncStorageInner {
             "
             CREATE TABLE IF NOT EXISTS tc_tasks (
                 id TEXT PRIMARY KEY,
+                short_id INTEGER,
                 data TEXT NOT NULL DEFAULT '{}',
                 entry_at TEXT,
                 status TEXT,
