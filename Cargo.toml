@@ -39,7 +39,7 @@ async-trait = "0.1.89"
 fractional_index = "2.0.2"
 chrono = { version = "^0.4.44", features = ["serde"] }
 log = "^0.4.17"
-powersync_core = { version = "=0.4.12", features = ["static"], optional = true }
+powersync_core = { version = "=0.4.14", features = ["static"], optional = true }
 serde_json = "^1.0"
 serde = { version = "^1.0.147", features = ["derive"] }
 strum = "0.28"
