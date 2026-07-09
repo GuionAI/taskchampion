@@ -76,6 +76,20 @@ jobs:
           LIB_TYPE: ${{ inputs.lib-type }}
         run: |
           set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("uniffi.toml")
+          content = path.read_text()
+          content = content.replace(
+              'module_name = "TaskChampionFFI"',
+              'ffi_module_name = "TaskChampionCore"',
+              1,
+          )
+          path.write_text(content)
+          PY
+          cat uniffi.toml
+
           cargo swift package \
             -p ios@14 macos@14 \
             -n TaskChampionFFI \
