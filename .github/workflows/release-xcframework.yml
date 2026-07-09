@@ -197,7 +197,7 @@ jobs:
           fi
           git push origin "HEAD:${GITHUB_REF_NAME}"
 
-      # gh release create owns the tag via --target HEAD, making the tag
+      # gh release create owns the tag via the current branch, making the tag
       # atomic with the release. If this step fails, no tag exists and the
       # workflow is safely re-runnable.
       - name: Create GitHub Release and upload XCFramework zip
@@ -208,6 +208,6 @@ jobs:
           gh release create "$VERSION_TAG" \
             TaskChampionFFIFFI.xcframework.zip \
             TaskChampionFFIFFI.dynamic.xcframework.zip \
-            --target HEAD \
+            --target "${GITHUB_REF_NAME}" \
             --generate-notes \
             --title "$VERSION_TAG"
