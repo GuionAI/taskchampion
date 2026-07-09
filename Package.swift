@@ -28,7 +28,7 @@ let package = Package(
         .binaryTarget(
             name: "TaskChampionCore",
             url: "https://github.com/GuionAI/taskchampion/releases/download/v3.0.2-guion.56-dynamic/TaskChampionCore.xcframework.zip",
-            checksum: "5426de7ffe1bbb61e41e3aba8e53ca3c45bd2f0688951c531a9c241870e2f6d0"
+            checksum: "00ac3dfe70a706d7df44abc249aa08e42e24b11dec630dca54f6581d4a2d3279"
         ),
     ]
 )

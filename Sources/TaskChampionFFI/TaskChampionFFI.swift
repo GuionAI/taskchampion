@@ -7,8 +7,8 @@ import Foundation
 // Depending on the consumer's build setup, the low-level FFI code
 // might be in a separate module, or it might be compiled inline into
 // this module. This is a bit of light hackery to work with both.
-#if canImport(TaskChampionFFIFFI)
-import TaskChampionFFIFFI
+#if canImport(TaskChampionCore)
+import TaskChampionCore
 #endif
 
 fileprivate extension RustBuffer {
@@ -1676,9 +1676,8 @@ fileprivate struct UniffiCallbackInterfaceFfiSqlExecutor {
     // Create the VTable using a series of closures.
     // Swift automatically converts these into C callback functions.
     //
-    // This creates 1-element array, since this seems to be the only way to construct a const
-    // pointer that we can pass to the Rust code.
-    static let vtable: [UniffiVTableCallbackInterfaceFfiSqlExecutor] = [UniffiVTableCallbackInterfaceFfiSqlExecutor(
+    // Store the vtable directly.
+    static let vtable: UniffiVTableCallbackInterfaceFfiSqlExecutor = UniffiVTableCallbackInterfaceFfiSqlExecutor(
         uniffiFree: { (uniffiHandle: UInt64) -> () in
             do {
                 try FfiConverterTypeFfiSqlExecutor.handleMap.remove(handle: uniffiHandle)
@@ -1824,11 +1823,19 @@ fileprivate struct UniffiCallbackInterfaceFfiSqlExecutor {
                 droppedCallback: uniffiOutDroppedCallback
             )
         }
-    )]
+    )
+
+    // Rust stores this pointer for future callback invocations, so it must live
+    // for the process lifetime (not just for the init function call).
+    static let vtablePtr: UnsafePointer<UniffiVTableCallbackInterfaceFfiSqlExecutor> = {
+        let ptr = UnsafeMutablePointer<UniffiVTableCallbackInterfaceFfiSqlExecutor>.allocate(capacity: 1)
+        ptr.initialize(to: vtable)
+        return UnsafePointer(ptr)
+    }()
 }
 
 private func uniffiCallbackInitFfiSqlExecutor() {
-    uniffi_taskchampion_ffi_fn_init_callback_vtable_ffisqlexecutor(UniffiCallbackInterfaceFfiSqlExecutor.vtable)
+    uniffi_taskchampion_ffi_fn_init_callback_vtable_ffisqlexecutor(UniffiCallbackInterfaceFfiSqlExecutor.vtablePtr)
 }
 
 #if swift(>=5.8)
