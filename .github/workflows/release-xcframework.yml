@@ -94,10 +94,10 @@ jobs:
           path: target
           key: ${{ runner.os }}-cargo-target-${{ hashFiles('**/Cargo.lock', 'scripts/build_xcframework.sh', '.github/workflows/release-xcframework.yml') }}
 
-      - name: Build static XCFramework and generate Swift bindings
+      - name: Build static and dynamic XCFrameworks and generate Swift bindings
         timeout-minutes: 30
         env:
-          TASKCHAMPION_FFI_LINKAGE: static
+          TASKCHAMPION_FFI_LINKAGE: both
         run: ./scripts/build_xcframework.sh
 
       - name: Validate static iOS archive has no bundled SQLite
@@ -128,12 +128,6 @@ jobs:
           fi
           echo "checksum=${CHECKSUM}" >> "$GITHUB_OUTPUT"
 
-      - name: Build dynamic XCFramework
-        timeout-minutes: 30
-        env:
-          TASKCHAMPION_FFI_LINKAGE: dynamic
-        run: ./scripts/build_xcframework.sh
-
       - name: Validate dynamic iOS library exists
         run: |
           set -euo pipefail
@@ -149,7 +143,7 @@ jobs:
 
       - name: Zip dynamic XCFramework
         run: |
-          zip -r TaskChampionFFIFFI.dynamic.xcframework.zip TaskChampionFFIFFI.xcframework
+          zip -r TaskChampionFFIFFI.dynamic.xcframework.zip TaskChampionFFIFFI.dynamic.xcframework
           [ -s TaskChampionFFIFFI.dynamic.xcframework.zip ] || { echo "ERROR: dynamic zip archive is empty or missing"; exit 1; }
 
       # Update Package.swift and commit BEFORE tagging so the tag includes

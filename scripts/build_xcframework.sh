@@ -11,14 +11,17 @@
 # Usage:
 #   ./scripts/build_xcframework.sh
 #   TASKCHAMPION_FFI_LINKAGE=dynamic ./scripts/build_xcframework.sh
+#   TASKCHAMPION_FFI_LINKAGE=both ./scripts/build_xcframework.sh
 #
 # Outputs:
 #   TaskChampionFFIFFI.xcframework/  — XCFramework with libs + headers
+#   TaskChampionFFIFFI.dynamic.xcframework/ when TASKCHAMPION_FFI_LINKAGE=both
 #   Sources/TaskChampionFFI/         — Generated Swift bindings
 #
 # Notes:
 #   - TASKCHAMPION_FFI_LINKAGE defaults to static. Set it to dynamic to package
-#     the cdylib (.dylib) output instead of the staticlib (.a).
+#     the cdylib (.dylib) output instead of the staticlib (.a), or both to
+#     package both outputs from one Cargo build.
 #   - The XCFramework and C module are named TaskChampionFFIFFI — derived from
 #     uniffi.toml module_name = "TaskChampionFFI" plus the "FFI" suffix that
 #     UniFFI appends to all C-layer artifacts.
@@ -30,18 +33,15 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BUILD_DIR="${PROJECT_ROOT}/build"
 XCFRAMEWORK_NAME="TaskChampionFFIFFI"
 XCFRAMEWORK_DIR="${PROJECT_ROOT}/${XCFRAMEWORK_NAME}.xcframework"
+DYNAMIC_XCFRAMEWORK_DIR="${PROJECT_ROOT}/${XCFRAMEWORK_NAME}.dynamic.xcframework"
 SWIFT_OUT_DIR="${PROJECT_ROOT}/Sources/TaskChampionFFI"
 LINKAGE="${TASKCHAMPION_FFI_LINKAGE:-static}"
 
 case "${LINKAGE}" in
-  static)
-    LIB_EXT="a"
-    ;;
-  dynamic)
-    LIB_EXT="dylib"
+  static | dynamic | both)
     ;;
   *)
-    echo "ERROR: TASKCHAMPION_FFI_LINKAGE must be 'static' or 'dynamic', got '${LINKAGE}'" >&2
+    echo "ERROR: TASKCHAMPION_FFI_LINKAGE must be 'static', 'dynamic', or 'both', got '${LINKAGE}'" >&2
     exit 1
     ;;
 esac
@@ -65,7 +65,7 @@ done
 
 # --- Build libraries ---
 
-echo "==> Building ${LINKAGE} libraries (parallel)..."
+echo "==> Building libraries (parallel)..."
 pids=()
 for target in "${TARGETS[@]}"; do
   echo "    Spawning build for ${target}..."
@@ -106,7 +106,11 @@ echo "==> Generating Swift bindings..."
 # uniffi-bindgen reads type metadata from the compiled library — architecture
 # doesn't matter, so we reuse the already-built iOS device lib instead of
 # compiling a redundant host-native build.
-METADATA_LIB="${PROJECT_ROOT}/target/aarch64-apple-ios/release/libtaskchampion_ffi.${LIB_EXT}"
+if [ "${LINKAGE}" = "dynamic" ]; then
+  METADATA_LIB="${PROJECT_ROOT}/target/aarch64-apple-ios/release/libtaskchampion_ffi.dylib"
+else
+  METADATA_LIB="${PROJECT_ROOT}/target/aarch64-apple-ios/release/libtaskchampion_ffi.a"
+fi
 if [ ! -f "${METADATA_LIB}" ]; then
   echo "ERROR: iOS device lib not found at ${METADATA_LIB} — did the cargo build step fail?" >&2
   exit 1
@@ -138,32 +142,43 @@ cp "${BUILD_DIR}/generated/${XCFRAMEWORK_NAME}.h" "${HEADERS_DIR}/${XCFRAMEWORK_
 # UniFFI generates a modulemap, but xcodebuild needs it named module.modulemap
 cp "${BUILD_DIR}/generated/${XCFRAMEWORK_NAME}.modulemap" "${HEADERS_DIR}/module.modulemap"
 
-# --- Prepare simulator library ---
+create_xcframework() {
+  local linkage="$1"
+  local lib_ext="$2"
+  local output_dir="$3"
+  local slice_dir="${BUILD_DIR}/${linkage}"
 
-echo "==> Preparing simulator library..."
-mkdir -p "${BUILD_DIR}/ios-simulator"
-cp "${PROJECT_ROOT}/target/aarch64-apple-ios-sim/release/libtaskchampion_ffi.${LIB_EXT}" \
-   "${BUILD_DIR}/ios-simulator/libtaskchampion_ffi.${LIB_EXT}"
+  echo "==> Creating ${linkage} XCFramework..."
+  mkdir -p "${slice_dir}/ios-simulator" "${slice_dir}/macos"
 
-# --- Prepare macOS library ---
+  cp "${PROJECT_ROOT}/target/aarch64-apple-ios-sim/release/libtaskchampion_ffi.${lib_ext}" \
+     "${slice_dir}/ios-simulator/libtaskchampion_ffi.${lib_ext}"
+  cp "${PROJECT_ROOT}/target/aarch64-apple-darwin/release/libtaskchampion_ffi.${lib_ext}" \
+     "${slice_dir}/macos/libtaskchampion_ffi.${lib_ext}"
 
-echo "==> Preparing macOS library..."
-mkdir -p "${BUILD_DIR}/macos"
-cp "${PROJECT_ROOT}/target/aarch64-apple-darwin/release/libtaskchampion_ffi.${LIB_EXT}" \
-   "${BUILD_DIR}/macos/libtaskchampion_ffi.${LIB_EXT}"
+  rm -rf "${output_dir}"
+  xcodebuild -create-xcframework \
+    -library "${PROJECT_ROOT}/target/aarch64-apple-ios/release/libtaskchampion_ffi.${lib_ext}" \
+    -headers "${HEADERS_DIR}" \
+    -library "${slice_dir}/ios-simulator/libtaskchampion_ffi.${lib_ext}" \
+    -headers "${HEADERS_DIR}" \
+    -library "${slice_dir}/macos/libtaskchampion_ffi.${lib_ext}" \
+    -headers "${HEADERS_DIR}" \
+    -output "${output_dir}"
+}
 
-# --- Create XCFramework ---
-
-echo "==> Creating XCFramework..."
-rm -rf "${XCFRAMEWORK_DIR}"
-xcodebuild -create-xcframework \
-  -library "${PROJECT_ROOT}/target/aarch64-apple-ios/release/libtaskchampion_ffi.${LIB_EXT}" \
-  -headers "${HEADERS_DIR}" \
-  -library "${BUILD_DIR}/ios-simulator/libtaskchampion_ffi.${LIB_EXT}" \
-  -headers "${HEADERS_DIR}" \
-  -library "${BUILD_DIR}/macos/libtaskchampion_ffi.${LIB_EXT}" \
-  -headers "${HEADERS_DIR}" \
-  -output "${XCFRAMEWORK_DIR}"
+case "${LINKAGE}" in
+  static)
+    create_xcframework static a "${XCFRAMEWORK_DIR}"
+    ;;
+  dynamic)
+    create_xcframework dynamic dylib "${XCFRAMEWORK_DIR}"
+    ;;
+  both)
+    create_xcframework static a "${XCFRAMEWORK_DIR}"
+    create_xcframework dynamic dylib "${DYNAMIC_XCFRAMEWORK_DIR}"
+    ;;
+esac
 
 # --- Cleanup ---
 
@@ -172,6 +187,9 @@ rm -rf "${BUILD_DIR}"
 echo ""
 echo "==> Done!"
 echo "    XCFramework: ${XCFRAMEWORK_DIR}"
+if [ "${LINKAGE}" = "both" ]; then
+  echo "    Dynamic XCFramework: ${DYNAMIC_XCFRAMEWORK_DIR}"
+fi
 echo "    Linkage: ${LINKAGE}"
 echo "    Swift sources: ${SWIFT_OUT_DIR}/TaskChampionFFI.swift"
 echo ""
