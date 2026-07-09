@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Build an XCFramework containing the taskchampion-ffi static library
-# for iOS device + simulator and macOS (arm64) targets, plus generate Swift bindings.
+# Build an XCFramework containing the taskchampion-ffi library for iOS device
+# + simulator and macOS (arm64) targets, plus generate Swift bindings.
 #
 # Prerequisites:
 #   - Rust toolchain (stable)
@@ -10,16 +10,15 @@
 #
 # Usage:
 #   ./scripts/build_xcframework.sh
+#   TASKCHAMPION_FFI_LINKAGE=dynamic ./scripts/build_xcframework.sh
 #
 # Outputs:
-#   TaskChampionFFIFFI.xcframework/  — XCFramework with static libs + headers
+#   TaskChampionFFIFFI.xcframework/  — XCFramework with libs + headers
 #   Sources/TaskChampionFFI/         — Generated Swift bindings
 #
 # Notes:
-#   - The crate declares crate-type = ["cdylib", "staticlib", "rlib"]. Cargo
-#     builds all three for each target. The cdylib (.dylib) output is unused —
-#     only the staticlib (.a) goes into the XCFramework. Linker warnings about
-#     the cdylib are expected and harmless.
+#   - TASKCHAMPION_FFI_LINKAGE defaults to static. Set it to dynamic to package
+#     the cdylib (.dylib) output instead of the staticlib (.a).
 #   - The XCFramework and C module are named TaskChampionFFIFFI — derived from
 #     uniffi.toml module_name = "TaskChampionFFI" plus the "FFI" suffix that
 #     UniFFI appends to all C-layer artifacts.
@@ -32,6 +31,20 @@ BUILD_DIR="${PROJECT_ROOT}/build"
 XCFRAMEWORK_NAME="TaskChampionFFIFFI"
 XCFRAMEWORK_DIR="${PROJECT_ROOT}/${XCFRAMEWORK_NAME}.xcframework"
 SWIFT_OUT_DIR="${PROJECT_ROOT}/Sources/TaskChampionFFI"
+LINKAGE="${TASKCHAMPION_FFI_LINKAGE:-static}"
+
+case "${LINKAGE}" in
+  static)
+    LIB_EXT="a"
+    ;;
+  dynamic)
+    LIB_EXT="dylib"
+    ;;
+  *)
+    echo "ERROR: TASKCHAMPION_FFI_LINKAGE must be 'static' or 'dynamic', got '${LINKAGE}'" >&2
+    exit 1
+    ;;
+esac
 
 # iOS targets
 TARGETS=(
@@ -50,13 +63,13 @@ for target in "${TARGETS[@]}"; do
   fi
 done
 
-# --- Build static libraries ---
+# --- Build libraries ---
 
-echo "==> Building static libraries (parallel)..."
+echo "==> Building ${LINKAGE} libraries (parallel)..."
 pids=()
 for target in "${TARGETS[@]}"; do
   echo "    Spawning build for ${target}..."
-  # Set iOS deployment target so the static library links against the
+  # Set iOS deployment target so the library links against the
   # correct SDK version. Without this, cargo and the cc crate use the
   # Xcode SDK default (e.g. 18.5), which may be newer than the app's
   # deployment target. Per-command env avoids leaking into other targets.
@@ -93,7 +106,7 @@ echo "==> Generating Swift bindings..."
 # uniffi-bindgen reads type metadata from the compiled library — architecture
 # doesn't matter, so we reuse the already-built iOS device lib instead of
 # compiling a redundant host-native build.
-METADATA_LIB="${PROJECT_ROOT}/target/aarch64-apple-ios/release/libtaskchampion_ffi.a"
+METADATA_LIB="${PROJECT_ROOT}/target/aarch64-apple-ios/release/libtaskchampion_ffi.${LIB_EXT}"
 if [ ! -f "${METADATA_LIB}" ]; then
   echo "ERROR: iOS device lib not found at ${METADATA_LIB} — did the cargo build step fail?" >&2
   exit 1
@@ -129,26 +142,26 @@ cp "${BUILD_DIR}/generated/${XCFRAMEWORK_NAME}.modulemap" "${HEADERS_DIR}/module
 
 echo "==> Preparing simulator library..."
 mkdir -p "${BUILD_DIR}/ios-simulator"
-cp "${PROJECT_ROOT}/target/aarch64-apple-ios-sim/release/libtaskchampion_ffi.a" \
-   "${BUILD_DIR}/ios-simulator/libtaskchampion_ffi.a"
+cp "${PROJECT_ROOT}/target/aarch64-apple-ios-sim/release/libtaskchampion_ffi.${LIB_EXT}" \
+   "${BUILD_DIR}/ios-simulator/libtaskchampion_ffi.${LIB_EXT}"
 
 # --- Prepare macOS library ---
 
 echo "==> Preparing macOS library..."
 mkdir -p "${BUILD_DIR}/macos"
-cp "${PROJECT_ROOT}/target/aarch64-apple-darwin/release/libtaskchampion_ffi.a" \
-   "${BUILD_DIR}/macos/libtaskchampion_ffi.a"
+cp "${PROJECT_ROOT}/target/aarch64-apple-darwin/release/libtaskchampion_ffi.${LIB_EXT}" \
+   "${BUILD_DIR}/macos/libtaskchampion_ffi.${LIB_EXT}"
 
 # --- Create XCFramework ---
 
 echo "==> Creating XCFramework..."
 rm -rf "${XCFRAMEWORK_DIR}"
 xcodebuild -create-xcframework \
-  -library "${PROJECT_ROOT}/target/aarch64-apple-ios/release/libtaskchampion_ffi.a" \
+  -library "${PROJECT_ROOT}/target/aarch64-apple-ios/release/libtaskchampion_ffi.${LIB_EXT}" \
   -headers "${HEADERS_DIR}" \
-  -library "${BUILD_DIR}/ios-simulator/libtaskchampion_ffi.a" \
+  -library "${BUILD_DIR}/ios-simulator/libtaskchampion_ffi.${LIB_EXT}" \
   -headers "${HEADERS_DIR}" \
-  -library "${BUILD_DIR}/macos/libtaskchampion_ffi.a" \
+  -library "${BUILD_DIR}/macos/libtaskchampion_ffi.${LIB_EXT}" \
   -headers "${HEADERS_DIR}" \
   -output "${XCFRAMEWORK_DIR}"
 
@@ -159,6 +172,7 @@ rm -rf "${BUILD_DIR}"
 echo ""
 echo "==> Done!"
 echo "    XCFramework: ${XCFRAMEWORK_DIR}"
+echo "    Linkage: ${LINKAGE}"
 echo "    Swift sources: ${SWIFT_OUT_DIR}/TaskChampionFFI.swift"
 echo ""
 echo "    Tag a version and push to create a GitHub Release. SPM consumers add:

@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           token: ${{ steps.app-token.outputs.token }}
-          ref: main
+          ref: ${{ github.ref }}
           fetch-depth: 0
           fetch-tags: true
 
@@ -94,11 +94,13 @@ jobs:
           path: target
           key: ${{ runner.os }}-cargo-target-${{ hashFiles('**/Cargo.lock', 'scripts/build_xcframework.sh', '.github/workflows/release-xcframework.yml') }}
 
-      - name: Build XCFramework and generate Swift bindings
+      - name: Build static XCFramework and generate Swift bindings
         timeout-minutes: 30
+        env:
+          TASKCHAMPION_FFI_LINKAGE: static
         run: ./scripts/build_xcframework.sh
 
-      - name: Validate iOS archive has no bundled SQLite
+      - name: Validate static iOS archive has no bundled SQLite
         run: |
           set -euo pipefail
           ios_lib="target/aarch64-apple-ios/release/libtaskchampion_ffi.a"
@@ -110,18 +112,12 @@ jobs:
 
           echo "No bundled sqlite3.o found in $ios_lib"
 
-      - name: Validate Swift bindings were generated
-        run: |
-          [ -s Sources/TaskChampionFFI/TaskChampionFFI.swift ] || {
-            echo "ERROR: Swift bindings file is missing or empty" >&2; exit 1
-          }
-
-      - name: Zip XCFramework
+      - name: Zip static XCFramework
         run: |
           zip -r TaskChampionFFIFFI.xcframework.zip TaskChampionFFIFFI.xcframework
           [ -s TaskChampionFFIFFI.xcframework.zip ] || { echo "ERROR: zip archive is empty or missing"; exit 1; }
 
-      - name: Compute SHA-256 checksum
+      - name: Compute static SHA-256 checksum
         id: checksum
         run: |
           shasum -a 256 TaskChampionFFIFFI.xcframework.zip > checksum.txt
@@ -132,8 +128,32 @@ jobs:
           fi
           echo "checksum=${CHECKSUM}" >> "$GITHUB_OUTPUT"
 
-      # Update Package.swift and commit BEFORE tagging — so the tag
-      # includes the correct URL + checksum. No more chicken-and-egg.
+      - name: Build dynamic XCFramework
+        timeout-minutes: 30
+        env:
+          TASKCHAMPION_FFI_LINKAGE: dynamic
+        run: ./scripts/build_xcframework.sh
+
+      - name: Validate dynamic iOS library exists
+        run: |
+          set -euo pipefail
+          ios_lib="target/aarch64-apple-ios/release/libtaskchampion_ffi.dylib"
+          [ -s "$ios_lib" ] || { echo "ERROR: dynamic iOS library is missing: $ios_lib" >&2; exit 1; }
+          file "$ios_lib"
+
+      - name: Validate Swift bindings were generated
+        run: |
+          [ -s Sources/TaskChampionFFI/TaskChampionFFI.swift ] || {
+            echo "ERROR: Swift bindings file is missing or empty" >&2; exit 1
+          }
+
+      - name: Zip dynamic XCFramework
+        run: |
+          zip -r TaskChampionFFIFFI.dynamic.xcframework.zip TaskChampionFFIFFI.xcframework
+          [ -s TaskChampionFFIFFI.dynamic.xcframework.zip ] || { echo "ERROR: dynamic zip archive is empty or missing"; exit 1; }
+
+      # Update Package.swift and commit BEFORE tagging so the tag includes
+      # the correct URL + checksum.
       - name: Update Package.swift with release URL and checksum
         env:
           RELEASE_URL: https://github.com/GuionAI/taskchampion/releases/download/${{ steps.version.outputs.tag }}/TaskChampionFFIFFI.xcframework.zip
@@ -176,12 +196,14 @@ jobs:
           git config user.name "guion-release-bot[bot]"
           git config user.email "guion-release-bot[bot]@users.noreply.github.com"
           git add Package.swift Sources/TaskChampionFFI/TaskChampionFFI.swift
-          git diff --cached --quiet && { echo "No changes — skipping commit"; } || {
+          if git diff --cached --quiet; then
+            echo "No changes — skipping commit"
+          else
             git commit -m "chore(spm): update Package.swift and Swift bindings for ${VERSION_TAG} release"
-          }
-          git push origin main
+          fi
+          git push origin "HEAD:${GITHUB_REF_NAME}"
 
-      # gh release create owns the tag via --target main, making the tag
+      # gh release create owns the tag via --target HEAD, making the tag
       # atomic with the release. If this step fails, no tag exists and the
       # workflow is safely re-runnable.
       - name: Create GitHub Release and upload XCFramework zip
@@ -191,6 +213,7 @@ jobs:
         run: |
           gh release create "$VERSION_TAG" \
             TaskChampionFFIFFI.xcframework.zip \
-            --target main \
+            TaskChampionFFIFFI.dynamic.xcframework.zip \
+            --target HEAD \
             --generate-notes \
             --title "$VERSION_TAG"
