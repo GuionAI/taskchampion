@@ -22,6 +22,8 @@
 #   - TASKCHAMPION_FFI_LINKAGE defaults to static. Set it to dynamic to package
 #     the cdylib (.dylib) output instead of the staticlib (.a), or both to
 #     package both outputs from one Cargo build.
+#   - Dynamic libraries use an @rpath install name so they can be embedded in
+#     client apps instead of pointing at the CI build path.
 #   - The XCFramework and C module are named TaskChampionFFIFFI — derived from
 #     uniffi.toml module_name = "TaskChampionFFI" plus the "FFI" suffix that
 #     UniFFI appends to all C-layer artifacts.
@@ -67,6 +69,7 @@ done
 
 echo "==> Building libraries (parallel)..."
 pids=()
+DYLIB_RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-Wl,-install_name,@rpath/libtaskchampion_ffi.dylib"
 for target in "${TARGETS[@]}"; do
   echo "    Spawning build for ${target}..."
   # Set iOS deployment target so the library links against the
@@ -76,6 +79,7 @@ for target in "${TARGETS[@]}"; do
   case "$target" in
     aarch64-apple-ios | aarch64-apple-ios-sim)
       env IPHONEOS_DEPLOYMENT_TARGET=14.0 \
+        RUSTFLAGS="${DYLIB_RUSTFLAGS}" \
         cargo build \
           -p taskchampion-ffi \
           --lib \
@@ -86,6 +90,7 @@ for target in "${TARGETS[@]}"; do
     *)
       # macOS — keep in sync with Package.swift .macOS(.v14)
       env MACOSX_DEPLOYMENT_TARGET=14.0 \
+        RUSTFLAGS="${DYLIB_RUSTFLAGS}" \
         cargo build \
           -p taskchampion-ffi \
           --lib \
