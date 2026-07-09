@@ -92,6 +92,10 @@ jobs:
           content = cargo_toml.read_text()
           content = content.replace('path = ".."', f'path = "{repo}"')
           content = content.replace('path = "../praxis"', f'path = "{repo / "praxis"}"')
+          content = content.replace(
+              'crate-type = ["cdylib", "staticlib", "rlib"]',
+              'crate-type = ["lib", "cdylib", "staticlib", "rlib"]',
+          )
           cargo_toml.write_text(content)
 
           content = uniffi_toml.read_text()
