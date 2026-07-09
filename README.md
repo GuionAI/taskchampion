@@ -42,26 +42,22 @@ The `ffi/` crate provides a UniFFI-based FFI layer for iOS and macOS consumption
 ### Building
 
 ```bash
-# Install Rust iOS targets + build XCFramework + generate Swift bindings
-./scripts/build_xcframework.sh
+# macOS only: install cargo-swift once
+cargo install cargo-swift@0.11.1 --locked
+
+# Build the dynamic Swift package and TaskChampionCore XCFramework
+./scripts/package_cargo_swift.sh
 ```
 
 This produces:
-- `TaskChampionFFIFFI.xcframework/` — static library for iOS device (arm64), iOS simulator (arm64), and macOS (arm64)
-- `Sources/TaskChampionFFI/TaskChampionFFI.swift` — generated Swift bindings
+- `target/cargo-swift/TaskChampionFFI/TaskChampionCore.xcframework/` — dynamic framework for iOS device, iOS simulator, and macOS
+- `target/cargo-swift/TaskChampionFFI/Sources/TaskChampionFFI/taskchampion_ffi.swift` — generated Swift bindings
 
 For local Xcode testing, point `Package.swift` at the built XCFramework instead
 of the release zip:
 
 ```bash
-./scripts/use_local_xcframework.sh
-```
-
-To test the dynamic XCFramework locally:
-
-```bash
-TASKCHAMPION_FFI_LINKAGE=dynamic ./scripts/build_xcframework.sh
-./scripts/use_local_xcframework.sh
+./scripts/use_local_xcframework.sh target/cargo-swift/TaskChampionFFI/TaskChampionCore.xcframework
 ```
 
 Restore the release URL before committing release changes:
@@ -80,8 +76,9 @@ git restore Package.swift
 2. Run the build script:
    ```bash
    cd vendor/taskchampion
-   ./scripts/build_xcframework.sh
-   ./scripts/use_local_xcframework.sh
+   cargo install cargo-swift@0.11.1 --locked
+   ./scripts/package_cargo_swift.sh
+   ./scripts/use_local_xcframework.sh target/cargo-swift/TaskChampionFFI/TaskChampionCore.xcframework
    ```
 
 3. In Xcode: **Add Local Package** → select `vendor/taskchampion/` → add `TaskChampionFFI` to your target.
