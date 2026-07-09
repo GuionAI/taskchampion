@@ -71,23 +71,39 @@ jobs:
           cargo swift --version
 
       - name: Package with cargo-swift
-        working-directory: ffi
         env:
           LIB_TYPE: ${{ inputs.lib-type }}
         run: |
           set -euo pipefail
-          python3 - <<'PY'
+          workdir="${RUNNER_TEMP}/taskchampion-ffi"
+
+          rm -rf "$workdir"
+          mkdir -p "$workdir"
+          rsync -a --exclude target ffi/ "$workdir"/
+
+          python3 - "$GITHUB_WORKSPACE" "$workdir/Cargo.toml" "$workdir/uniffi.toml" <<'PY'
+          import sys
           from pathlib import Path
 
-          path = Path("uniffi.toml")
-          content = path.read_text()
+          repo = Path(sys.argv[1])
+          cargo_toml = Path(sys.argv[2])
+          uniffi_toml = Path(sys.argv[3])
+
+          content = cargo_toml.read_text()
+          content = content.replace('path = ".."', f'path = "{repo}"')
+          content = content.replace('path = "../praxis"', f'path = "{repo / "praxis"}"')
+          cargo_toml.write_text(content)
+
+          content = uniffi_toml.read_text()
           content = content.replace(
               'module_name = "TaskChampionFFI"',
               'ffi_module_name = "TaskChampionCore"',
               1,
           )
-          path.write_text(content)
+          uniffi_toml.write_text(content)
           PY
+
+          cd "$workdir"
           cat uniffi.toml
 
           cargo swift package \
@@ -98,6 +114,9 @@ jobs:
             --bundle-identifier com.guion.taskchampion \
             --swift-tools-version 5.9 \
             -y --silent
+
+          rm -rf "$GITHUB_WORKSPACE/ffi/TaskChampionFFI"
+          cp -R TaskChampionFFI "$GITHUB_WORKSPACE/ffi/TaskChampionFFI"
 
       - name: Inspect cargo-swift output
         working-directory: ffi
