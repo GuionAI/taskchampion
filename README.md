@@ -50,6 +50,26 @@ This produces:
 - `TaskChampionFFIFFI.xcframework/` — static library for iOS device (arm64), iOS simulator (arm64), and macOS (arm64)
 - `Sources/TaskChampionFFI/TaskChampionFFI.swift` — generated Swift bindings
 
+For local Xcode testing, point `Package.swift` at the built XCFramework instead
+of the release zip:
+
+```bash
+./scripts/use_local_xcframework.sh
+```
+
+To test the dynamic XCFramework locally:
+
+```bash
+TASKCHAMPION_FFI_LINKAGE=dynamic ./scripts/build_xcframework.sh
+./scripts/use_local_xcframework.sh
+```
+
+Restore the release URL before committing release changes:
+
+```bash
+git restore Package.swift
+```
+
 ### Consuming from an iOS or macOS Project
 
 1. Add this repo as a git submodule:
@@ -59,7 +79,9 @@ This produces:
 
 2. Run the build script:
    ```bash
-   cd vendor/taskchampion && ./scripts/build_xcframework.sh
+   cd vendor/taskchampion
+   ./scripts/build_xcframework.sh
+   ./scripts/use_local_xcframework.sh
    ```
 
 3. In Xcode: **Add Local Package** → select `vendor/taskchampion/` → add `TaskChampionFFI` to your target.
