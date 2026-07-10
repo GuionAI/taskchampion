@@ -14,7 +14,6 @@ impl From<&Task> for FfiTask {
     fn from(task: &Task) -> Self {
         FfiTask {
             uuid: task.get_uuid().to_string(),
-            short_id: task.get_short_id(),
             status: FfiStatus::from(task.get_status()),
             description: task.get_description().to_string(),
             priority: Some(task.get_priority())

@@ -98,8 +98,6 @@ impl PowerSyncStorageInner {
             "
             CREATE TABLE IF NOT EXISTS tc_tasks (
                 id TEXT PRIMARY KEY,
-                -- Populated by the backing sync system; task writes treat it as read-only.
-                short_id INTEGER,
                 data TEXT NOT NULL DEFAULT '{}',
                 entry_at TEXT,
                 status TEXT,
@@ -341,18 +339,6 @@ impl crate::storage::StorageTxn for PowerSyncTxn<'_> {
                 Uuid::parse_str(&s).map_err(|e| Error::Database(format!("Invalid UUID: {e}")))
             })
             .collect()
-    }
-
-    async fn resolve_task_short_id(&mut self, short_id: i64) -> Result<Option<Uuid>> {
-        let t = self.get_txn()?;
-        let id: Option<String> =
-            sqlx::query_scalar("SELECT id FROM tc_tasks WHERE short_id = ? LIMIT 1")
-                .bind(short_id)
-                .fetch_optional(&mut **t)
-                .await
-                .context("resolve_task_short_id query")?;
-        id.map(|s| Uuid::parse_str(&s).map_err(|e| Error::Database(format!("Invalid UUID: {e}"))))
-            .transpose()
     }
 
     async fn get_task_operations(&mut self, uuid: Uuid) -> Result<Vec<Operation>> {

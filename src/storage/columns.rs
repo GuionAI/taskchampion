@@ -38,7 +38,6 @@ pub(crate) fn extract_timestamp(task_data: &mut TaskMap, key: &str) -> Result<Op
 )]
 pub(crate) struct RawTaskRow {
     pub(crate) id: String,
-    pub(crate) short_id: Option<i64>,
     pub(crate) data: String,
     pub(crate) status: Option<String>,
     pub(crate) description: Option<String>,
@@ -63,10 +62,6 @@ pub(crate) fn raw_to_task(raw: RawTaskRow) -> Result<(Uuid, TaskMap)> {
         .map_err(|e| Error::Database(format!("Invalid UUID in tc_tasks: {e}")))?;
     let mut task_map: TaskMap = serde_json::from_str(&raw.data)
         .map_err(|e| Error::Database(format!("Failed to parse task data for task {uuid}: {e}")))?;
-
-    if let Some(v) = raw.short_id {
-        task_map.insert("short_id".into(), v.to_string());
-    }
 
     // Inject string columns back into the task map.
     if let Some(v) = raw.status {
@@ -117,8 +112,7 @@ pub(crate) fn raw_to_task(raw: RawTaskRow) -> Result<(Uuid, TaskMap)> {
 
 /// Shared column projection for all tc_tasks queries (requires `t` and `p` aliases).
 #[cfg(any(feature = "storage-external", feature = "storage-powersync"))]
-pub(crate) const TASK_SELECT_COLS: &str =
-    "t.id, t.short_id, t.data, t.status, t.description, t.priority, \
+pub(crate) const TASK_SELECT_COLS: &str = "t.id, t.data, t.status, t.description, t.priority, \
     t.entry_at, t.modified_at, t.due_at, t.scheduled_at, \
     t.start_at, t.end_at, t.wait_at, t.parent_id, \
     p.name as project_name, t.project_id, t.note_id";
@@ -195,7 +189,6 @@ mod tests {
     fn make_empty_raw(uuid: &Uuid) -> RawTaskRow {
         RawTaskRow {
             id: uuid.to_string(),
-            short_id: None,
             data: "{}".to_string(),
             status: None,
             description: None,

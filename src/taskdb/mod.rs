@@ -49,11 +49,6 @@ impl<S: Storage> TaskDb<S> {
         txn.all_task_uuids().await
     }
 
-    pub(crate) async fn resolve_task_short_id(&mut self, short_id: i64) -> Result<Option<Uuid>> {
-        let mut txn = self.storage.txn().await?;
-        txn.resolve_task_short_id(short_id).await
-    }
-
     /// Get a single task, by uuid.
     pub(crate) async fn get_task(&mut self, uuid: Uuid) -> Result<Option<TaskMap>> {
         let mut txn = self.storage.txn().await?;

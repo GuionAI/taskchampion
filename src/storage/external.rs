@@ -26,11 +26,6 @@ use crate::storage::{Storage, StorageTxn, TaskMap};
 ///
 /// Implementors run SQL against their own database connection. Methods are
 /// async to support non-blocking host-side execution (e.g. Swift async/await).
-///
-/// The exposed tables must be scoped to one user, either by using a local
-/// single-user PowerSync database or by applying equivalent RLS/filtering in
-/// the host. Task short IDs are per-user values; query results must not mix
-/// rows from multiple users.
 #[async_trait]
 pub trait SqlExecutor: Send + Sync {
     /// Execute a read query returning at most one row as a JSON object string.
@@ -139,7 +134,6 @@ impl ExternalStorageTxn<'_> {
 
         Ok(RawTaskRow {
             id,
-            short_id: get_opt_i64(obj, "short_id"),
             data,
             status: get_opt_str(obj, "status"),
             description: get_opt_str(obj, "description"),
@@ -310,21 +304,6 @@ impl StorageTxn for ExternalStorageTxn<'_> {
             .collect()
     }
 
-    async fn resolve_task_short_id(&mut self, short_id: i64) -> Result<Option<Uuid>> {
-        let row = self
-            .executor
-            .query_one(
-                "SELECT id FROM tc_tasks WHERE short_id = ? LIMIT 1",
-                &[SqlParam::Text(short_id.to_string())],
-            )
-            .await?;
-        row.map(|json| {
-            let id = parse_json_string_field(&json, "id")?;
-            Uuid::parse_str(&id).map_err(|e| Error::Database(format!("Invalid UUID: {e}")))
-        })
-        .transpose()
-    }
-
     async fn get_task_operations(&mut self, uuid: Uuid) -> Result<Vec<Operation>> {
         let rows = self.executor.query_all(ALL_OPERATIONS_SQL, &[]).await?;
         rows.iter()
@@ -440,14 +419,6 @@ fn get_opt_str(obj: &serde_json::Map<String, serde_json::Value>, key: &str) -> O
     })
 }
 
-fn get_opt_i64(obj: &serde_json::Map<String, serde_json::Value>, key: &str) -> Option<i64> {
-    obj.get(key).and_then(|v| match v {
-        serde_json::Value::Number(n) => n.as_i64(),
-        serde_json::Value::String(s) => s.parse::<i64>().ok(),
-        _ => None,
-    })
-}
-
 /// Extract a required string field from a JSON object string.
 /// Returns `Err` if the field is missing, null, or not a string type.
 fn parse_json_string_field(json: &str, field: &str) -> Result<String> {
@@ -516,8 +487,6 @@ mod test {
             conn.execute_batch(
                 "CREATE TABLE IF NOT EXISTS tc_tasks (
                     id TEXT PRIMARY KEY,
-                    -- Populated by the backing sync system; task writes treat it as read-only.
-                    short_id INTEGER,
                     data TEXT NOT NULL DEFAULT '{}', entry_at TEXT, status TEXT,
                     description TEXT, priority TEXT, modified_at TEXT,
                     due_at TEXT, scheduled_at TEXT, start_at TEXT, end_at TEXT,

@@ -88,24 +88,6 @@ pub trait StorageTxn: Send {
     /// Get the uuids of all tasks in the storage, in undefined order.
     async fn all_task_uuids(&mut self) -> Result<Vec<Uuid>>;
 
-    /// Resolve a per-user short ID to a task UUID.
-    ///
-    /// Storage implementations are expected to expose a single-user view of
-    /// `tc_tasks` through local sync state or database RLS. The short ID is
-    /// only unique within that user scope.
-    async fn resolve_task_short_id(&mut self, short_id: i64) -> Result<Option<Uuid>> {
-        for (uuid, task) in self.all_tasks().await? {
-            if task
-                .get("short_id")
-                .and_then(|v| v.parse::<i64>().ok())
-                .is_some_and(|v| v == short_id)
-            {
-                return Ok(Some(uuid));
-            }
-        }
-        Ok(None)
-    }
-
     /// Get the set of operations for the given task.
     async fn get_task_operations(&mut self, uuid: Uuid) -> Result<Vec<Operation>>;
 

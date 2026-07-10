@@ -112,69 +112,6 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn test_short_id_column_round_trip_read_only() -> Result<()> {
-        let mut storage = storage().await?;
-        let uuid = Uuid::new_v4();
-
-        {
-            let mut txn = storage.txn().await?;
-            let mut task: TaskMap = TaskMap::new();
-            task.insert("status".into(), "pending".into());
-            task.insert("description".into(), "short id task".into());
-            task.insert("short_id".into(), "999".into());
-            txn.set_task(uuid, task).await?;
-            txn.commit().await?;
-        }
-
-        sqlx::query("UPDATE tc_tasks SET short_id = ? WHERE id = ?")
-            .bind(42_i64)
-            .bind(uuid.to_string())
-            .execute(&storage.0.pool)
-            .await?;
-
-        let data_str: String = sqlx::query_scalar("SELECT data FROM tc_tasks WHERE id = ?")
-            .bind(uuid.to_string())
-            .fetch_one(&storage.0.pool)
-            .await?;
-        let data_map: serde_json::Value = serde_json::from_str(&data_str)
-            .map_err(|e| crate::errors::Error::Database(e.to_string()))?;
-        assert!(
-            !data_map.as_object().unwrap().contains_key("short_id"),
-            "short_id must not be persisted into the editable task data blob"
-        );
-
-        let mut txn = storage.txn().await?;
-        let got = txn.get_task(uuid).await?.expect("task should exist");
-        assert_eq!(got.get("short_id").map(String::as_str), Some("42"));
-        txn.commit().await?;
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_replica_resolves_uuid_and_short_id_refs() -> Result<()> {
-        let storage = storage().await?;
-        let uuid = Uuid::new_v4();
-
-        sqlx::query(
-            "INSERT INTO tc_tasks (id, data, status, description, short_id) \
-             VALUES (?, '{}', 'pending', 'short id task', ?)",
-        )
-        .bind(uuid.to_string())
-        .bind(42_i64)
-        .execute(&storage.0.pool)
-        .await?;
-
-        let mut replica = crate::Replica::new(storage);
-        assert_eq!(
-            replica.resolve_task_ref(&uuid.to_string()).await?,
-            Some(uuid)
-        );
-        assert_eq!(replica.resolve_task_ref("42").await?, Some(uuid));
-        assert_eq!(replica.resolve_task_ref("404").await?, None);
-        Ok(())
-    }
-
     /// Verify that all seven timestamp fields survive a set_task / get_task round-trip
     /// through epoch → ISO 8601 → epoch conversion.
     #[tokio::test]

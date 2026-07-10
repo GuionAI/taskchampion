@@ -35,25 +35,49 @@ run this against a local backend schema and commit the updated `.sqlx/` files:
 Set `SQLX_POSTGRES_DATABASE_URL` if your local database is not available at the
 script default URL.
 
-The prepare database must have the matching FlickNote backend migrations
-applied before regenerating metadata. For short task IDs, that includes the
-backend `add_user_short_ids` migration; missing-column prepare failures mean
-the local schema is stale, not that `.sqlx/` should be edited by hand.
-
 ## iOS & macOS (Swift Package Manager)
 
 The `ffi/` crate provides a UniFFI-based FFI layer for iOS and macOS consumption via SPM.
 
+### Migration note
+
+The public SwiftPM product remains `TaskChampionFFI`, so app code should still
+use `import TaskChampionFFI`. The low-level binary target and release asset were
+renamed from the legacy doubled-FFI name (`TaskChampionFFIFFI`) to
+`TaskChampionCore`. Consumers that only add the `TaskChampionFFI` product do not
+need code changes; consumers that referenced the binary target or release zip
+directly should update those references to `TaskChampionCore.xcframework.zip`.
+
 ### Building
 
 ```bash
-# Install Rust iOS targets + build XCFramework + generate Swift bindings
-./scripts/build_xcframework.sh
+# macOS only: install cargo-swift once
+cargo install cargo-swift@0.11.1 --locked
+
+# Build the default static Swift package and TaskChampionCore XCFramework
+./scripts/package_cargo_swift.sh
+
+# Dynamic tags/releases are built with the same package shape:
+TASKCHAMPION_FFI_LINKAGE=dynamic ./scripts/package_cargo_swift.sh target/cargo-swift-dynamic
 ```
 
 This produces:
-- `TaskChampionFFIFFI.xcframework/` — static library for iOS device (arm64), iOS simulator (arm64), and macOS (arm64)
-- `Sources/TaskChampionFFI/TaskChampionFFI.swift` — generated Swift bindings
+- `target/cargo-swift/TaskChampionFFI/TaskChampionCore.xcframework/` — default static framework for iOS device, iOS simulator, and macOS
+- `target/cargo-swift-dynamic/TaskChampionFFI/TaskChampionCore.xcframework/` — dynamic framework when requested
+- `target/cargo-swift/TaskChampionFFI/Sources/TaskChampionFFI/taskchampion_ffi.swift` — generated Swift bindings
+
+For local Xcode testing, point `Package.swift` at the built XCFramework instead
+of the release zip:
+
+```bash
+./scripts/use_local_xcframework.sh target/cargo-swift/TaskChampionFFI/TaskChampionCore.xcframework
+```
+
+Restore the release URL before committing release changes:
+
+```bash
+git restore Package.swift
+```
 
 ### Consuming from an iOS or macOS Project
 
@@ -64,7 +88,10 @@ This produces:
 
 2. Run the build script:
    ```bash
-   cd vendor/taskchampion && ./scripts/build_xcframework.sh
+   cd vendor/taskchampion
+   cargo install cargo-swift@0.11.1 --locked
+   ./scripts/package_cargo_swift.sh
+   ./scripts/use_local_xcframework.sh target/cargo-swift/TaskChampionFFI/TaskChampionCore.xcframework
    ```
 
 3. In Xcode: **Add Local Package** → select `vendor/taskchampion/` → add `TaskChampionFFI` to your target.
