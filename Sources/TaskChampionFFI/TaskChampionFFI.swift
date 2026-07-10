@@ -620,6 +620,7 @@ public protocol FfiSessionProtocol: AnyObject, Sendable {
      * to call `is_ancestor` for safety.
      *
      * Returns `false` if either UUID does not exist or is not in the tree.
+     * Returns `InvalidInput` if either argument is not a valid UUID string.
      */
     func isAncestor(uuid: String, ancestorUuid: String) async throws  -> Bool
     
@@ -1040,6 +1041,7 @@ open func getTask(uuid: String)async throws  -> FfiTask?  {
      * to call `is_ancestor` for safety.
      *
      * Returns `false` if either UUID does not exist or is not in the tree.
+     * Returns `InvalidInput` if either argument is not a valid UUID string.
      */
 open func isAncestor(uuid: String, ancestorUuid: String)async throws  -> Bool  {
     return
@@ -2601,10 +2603,10 @@ public struct FfiTask: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(uuid: String, status: FfiStatus, description: String,
+    public init(uuid: String, status: FfiStatus, description: String, 
         /**
          * Priority string (e.g. `"H"`, `"M"`, `"L"`), or `None` if unset.
-         */priority: String?,
+         */priority: String?, 
         /**
          * Unix epoch seconds, or `None` if not set.
          */entry: Int64?, modified: Int64?, due: Int64?, 
@@ -5187,7 +5189,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_get_task() != 6917) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_taskchampion_ffi_checksum_method_ffisession_is_ancestor() != 58227) {
+    if (uniffi_taskchampion_ffi_checksum_method_ffisession_is_ancestor() != 17062) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_taskchampion_ffi_checksum_method_ffisession_rename_tag() != 64411) {
