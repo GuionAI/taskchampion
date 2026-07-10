@@ -152,18 +152,12 @@ impl FfiSession {
         .await
     }
 
-    /// Fetch a single task by UUID or short ID.
+    /// Fetch a single task by UUID.
     ///
     /// Returns `None` if the task does not exist.
     pub async fn get_task(&self, uuid: String) -> Result<Option<FfiTask>, FfiError> {
         self.with_replica(|mut replica| async move {
-            let Some(task_uuid) = replica
-                .resolve_task_ref(&uuid)
-                .await
-                .map_err(FfiError::from)?
-            else {
-                return Ok(None);
-            };
+            let task_uuid = parse_uuid(&uuid)?;
             let task = replica.get_task(task_uuid).await.map_err(FfiError::from)?;
             Ok(task.as_ref().map(FfiTask::from))
         })
@@ -414,7 +408,7 @@ impl FfiSession {
     /// Returns `UnknownXStatus` if `name` is not in tc_config.xstatus definitions.
     pub async fn set_xstatus(&self, task_uuid: String, name: String) -> Result<FfiTask, FfiError> {
         self.with_replica(|mut replica| async move {
-            let uuid = resolve_existing_task_ref(&mut replica, &task_uuid).await?;
+            let uuid = parse_uuid(&task_uuid)?;
             let config = load_tc_config(&mut replica).await?;
             if !config.has_xstatus(&name) {
                 return Err(FfiError::UnknownXStatus { name });
@@ -429,7 +423,7 @@ impl FfiSession {
     /// Returns the task unchanged (no undo point) if xstatus is already `None`.
     pub async fn clear_xstatus(&self, task_uuid: String) -> Result<FfiTask, FfiError> {
         self.with_replica(|mut replica| async move {
-            let uuid = resolve_existing_task_ref(&mut replica, &task_uuid).await?;
+            let uuid = parse_uuid(&task_uuid)?;
             write_xstatus(&mut replica, uuid, &task_uuid, None).await
         })
         .await
@@ -549,8 +543,8 @@ impl FfiSession {
         anchor_uuid: String,
     ) -> Result<FfiTask, FfiError> {
         self.with_replica(|mut replica| async move {
-            let uuid_parsed = resolve_existing_task_ref(&mut replica, &uuid).await?;
-            let anchor_parsed = resolve_existing_task_ref(&mut replica, &anchor_uuid).await?;
+            let uuid_parsed = parse_uuid(&uuid)?;
+            let anchor_parsed = parse_uuid(&anchor_uuid)?;
 
             // Load both tasks to verify existence and parent.
             let task = replica
@@ -595,8 +589,8 @@ impl FfiSession {
         anchor_uuid: String,
     ) -> Result<FfiTask, FfiError> {
         self.with_replica(|mut replica| async move {
-            let uuid_parsed = resolve_existing_task_ref(&mut replica, &uuid).await?;
-            let anchor_parsed = resolve_existing_task_ref(&mut replica, &anchor_uuid).await?;
+            let uuid_parsed = parse_uuid(&uuid)?;
+            let anchor_parsed = parse_uuid(&anchor_uuid)?;
 
             // Load both tasks to verify existence and parent.
             let task = replica
@@ -646,7 +640,7 @@ async fn reorder_to_edge<F>(
 where
     F: FnOnce(&[(uuid::Uuid, String)]) -> Result<String, FfiError>,
 {
-    let uuid_parsed = resolve_existing_task_ref(replica, uuid_str).await?;
+    let uuid_parsed = parse_uuid(uuid_str)?;
     let task = replica
         .get_task(uuid_parsed)
         .await
@@ -763,8 +757,8 @@ impl FfiSession {
         anchor_uuid: String,
     ) -> Result<FfiTask, FfiError> {
         self.with_replica(|mut replica| async move {
-            let uuid_parsed = resolve_existing_task_ref(&mut replica, &uuid).await?;
-            let anchor_parsed = resolve_existing_task_ref(&mut replica, &anchor_uuid).await?;
+            let uuid_parsed = parse_uuid(&uuid)?;
+            let anchor_parsed = parse_uuid(&anchor_uuid)?;
 
             // Verify both tasks exist.
             replica
@@ -800,8 +794,8 @@ impl FfiSession {
         anchor_uuid: String,
     ) -> Result<FfiTask, FfiError> {
         self.with_replica(|mut replica| async move {
-            let uuid_parsed = resolve_existing_task_ref(&mut replica, &uuid).await?;
-            let anchor_parsed = resolve_existing_task_ref(&mut replica, &anchor_uuid).await?;
+            let uuid_parsed = parse_uuid(&uuid)?;
+            let anchor_parsed = parse_uuid(&anchor_uuid)?;
 
             // Verify both tasks exist.
             replica
@@ -831,7 +825,12 @@ impl FfiSession {
     /// Returns `TaskNotFound` if the UUID does not exist.
     pub async fn today_reorder_to_beginning(&self, uuid: String) -> Result<FfiTask, FfiError> {
         self.with_replica(|mut replica| async move {
-            let uuid_parsed = resolve_existing_task_ref(&mut replica, &uuid).await?;
+            let uuid_parsed = parse_uuid(&uuid)?;
+            replica
+                .get_task(uuid_parsed)
+                .await
+                .map_err(FfiError::from)?
+                .ok_or_else(|| FfiError::TaskNotFound { uuid: uuid.clone() })?;
 
             let all = replica.all_tasks().await.map_err(FfiError::from)?;
             let today = sorted_today_positions(&all, uuid_parsed);
@@ -849,7 +848,12 @@ impl FfiSession {
     /// Returns `TaskNotFound` if the UUID does not exist.
     pub async fn today_reorder_to_end(&self, uuid: String) -> Result<FfiTask, FfiError> {
         self.with_replica(|mut replica| async move {
-            let uuid_parsed = resolve_existing_task_ref(&mut replica, &uuid).await?;
+            let uuid_parsed = parse_uuid(&uuid)?;
+            replica
+                .get_task(uuid_parsed)
+                .await
+                .map_err(FfiError::from)?
+                .ok_or_else(|| FfiError::TaskNotFound { uuid: uuid.clone() })?;
 
             let all = replica.all_tasks().await.map_err(FfiError::from)?;
             let today = sorted_today_positions(&all, uuid_parsed);
@@ -886,11 +890,11 @@ impl FfiSession {
         position: ReparentPosition,
     ) -> Result<FfiTask, FfiError> {
         self.with_replica(|mut replica| async move {
-            let uuid_parsed = resolve_existing_task_ref(&mut replica, &uuid).await?;
-            let new_parent_parsed: Option<Uuid> = match new_parent.as_deref() {
-                Some(parent) => Some(resolve_existing_task_ref(&mut replica, parent).await?),
-                None => None,
-            };
+            let uuid_parsed = parse_uuid_ctx(&uuid, "uuid")?;
+            let new_parent_parsed: Option<Uuid> = new_parent
+                .as_deref()
+                .map(|s| parse_uuid_ctx(s, "new_parent"))
+                .transpose()?;
 
             // Load uuid task to verify it exists.
             replica
@@ -941,12 +945,12 @@ impl FfiSession {
                     )
                 }
                 ReparentPosition::After { anchor } => {
-                    let anchor_parsed = resolve_existing_task_ref(&mut replica, anchor).await?;
+                    let anchor_parsed = parse_uuid_ctx(anchor, "anchor")?;
                     let idx = find_anchor_idx(&siblings, anchor_parsed, anchor)?;
                     Some(position_after_anchor(&siblings, idx)?)
                 }
                 ReparentPosition::Before { anchor } => {
-                    let anchor_parsed = resolve_existing_task_ref(&mut replica, anchor).await?;
+                    let anchor_parsed = parse_uuid_ctx(anchor, "anchor")?;
                     let idx = find_anchor_idx(&siblings, anchor_parsed, anchor)?;
                     Some(position_before_anchor(&siblings, idx)?)
                 }
@@ -992,22 +996,11 @@ impl FfiSession {
     /// to call `is_ancestor` for safety.
     ///
     /// Returns `false` if either UUID does not exist or is not in the tree.
+    /// Returns `InvalidInput` if either argument is not a valid UUID string.
     pub async fn is_ancestor(&self, uuid: String, ancestor_uuid: String) -> Result<bool, FfiError> {
         self.with_replica(|mut replica| async move {
-            let Some(uuid_parsed) = replica
-                .resolve_task_ref(&uuid)
-                .await
-                .map_err(FfiError::from)?
-            else {
-                return Ok(false);
-            };
-            let Some(ancestor_parsed) = replica
-                .resolve_task_ref(&ancestor_uuid)
-                .await
-                .map_err(FfiError::from)?
-            else {
-                return Ok(false);
-            };
+            let uuid_parsed = parse_uuid_ctx(&uuid, "uuid")?;
+            let ancestor_parsed = parse_uuid_ctx(&ancestor_uuid, "ancestor_uuid")?;
             let tm = replica.tree_map().await.map_err(FfiError::from)?;
             Ok(tm.is_ancestor(uuid_parsed, ancestor_parsed))
         })
@@ -1018,19 +1011,6 @@ impl FfiSession {
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
-
-pub(crate) async fn resolve_existing_task_ref(
-    replica: &mut Replica<ExternalStorage>,
-    task_ref: &str,
-) -> Result<Uuid, FfiError> {
-    replica
-        .resolve_task_ref(task_ref)
-        .await
-        .map_err(FfiError::from)?
-        .ok_or_else(|| FfiError::TaskNotFound {
-            uuid: task_ref.to_string(),
-        })
-}
 
 pub(crate) fn parse_uuid(s: &str) -> Result<Uuid, FfiError> {
     Uuid::parse_str(s).map_err(|e| FfiError::InvalidInput {

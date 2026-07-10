@@ -125,12 +125,6 @@ impl Task {
         self.data.get(Prop::Priority.as_ref()).unwrap_or("")
     }
 
-    pub fn get_short_id(&self) -> Option<i64> {
-        self.data
-            .get("short_id")
-            .and_then(|value| value.parse::<i64>().ok())
-    }
-
     /// Get the wait time.  If this value is set, it will be returned, even
     /// if it is in the past.
     pub fn get_wait(&self) -> Option<Timestamp> {
@@ -921,27 +915,6 @@ mod test {
     fn test_get_priority_default() {
         let task = Task::new(TaskData::new(Uuid::new_v4(), TaskMap::new()), dm());
         assert_eq!(task.get_priority(), "");
-    }
-
-    #[test]
-    fn test_get_short_id() {
-        let task = Task::new(
-            TaskData::new(
-                Uuid::new_v4(),
-                TaskMap::from([("short_id".into(), "42".into())]),
-            ),
-            dm(),
-        );
-        assert_eq!(task.get_short_id(), Some(42));
-
-        let task = Task::new(
-            TaskData::new(
-                Uuid::new_v4(),
-                TaskMap::from([("short_id".into(), "not-a-number".into())]),
-            ),
-            dm(),
-        );
-        assert_eq!(task.get_short_id(), None);
     }
 
     #[test]

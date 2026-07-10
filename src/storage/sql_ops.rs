@@ -61,7 +61,6 @@ pub(crate) fn prepare_task(mut task_data: TaskMap) -> Result<PreparedTask> {
     let description = task_data.remove("description");
     let priority = task_data.remove("priority");
     let parent_id = task_data.remove("parent_id");
-    task_data.remove("short_id");
 
     // Extract timestamps (epoch → ISO).
     let entry_at = extract_timestamp(&mut task_data, "entry")?;
