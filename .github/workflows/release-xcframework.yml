@@ -248,7 +248,7 @@ jobs:
               f.write(content)
           "
 
-      - name: Commit Package.swift and Swift bindings and push
+      - name: Commit Package.swift and Swift bindings
         env:
           VERSION_TAG: ${{ steps.version.outputs.tag }}
         run: |
@@ -260,7 +260,11 @@ jobs:
           else
             git commit -m "chore(spm): update Package.swift and Swift bindings for ${VERSION_TAG} release"
           fi
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+          if [[ "$VERSION_TAG" == *snapshot* ]]; then
+            echo "Snapshot release: keeping the Package.swift/checksum commit tag-only"
+          else
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
 
       # Move the tag after the release commit so SwiftPM sees the matching
       # Package.swift URL and checksum when pinning this version.
